@@ -1,0 +1,16 @@
+[package]
+name = "ndn-research"
+description = "NDN research extensions: FlowObserverStage, RadioTable, nl80211 integration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ndn-packet        = { workspace = true }
+ndn-pipeline      = { workspace = true }
+ndn-transport     = { workspace = true }
+ndn-face-wireless = { workspace = true }
+bytes             = { workspace = true }
+tokio             = { workspace = true, features = ["sync"] }
+dashmap           = { workspace = true }
+tracing           = { workspace = true }

@@ -1,0 +1,14 @@
+[package]
+name = "ndn-face-net"
+description = "NDN network faces: UdpFace, TcpFace (with NDNLPv2 fragmentation)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ndn-packet    = { workspace = true }
+ndn-transport = { workspace = true }
+bytes         = { workspace = true }
+tokio         = { workspace = true, features = ["net", "sync", "io-util"] }
+tokio-util    = { workspace = true, features = ["codec"] }
+thiserror     = { workspace = true }

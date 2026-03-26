@@ -1,0 +1,22 @@
+[package]
+name = "ndn-router"
+description = "Standalone NDN forwarder binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ndn-router"
+path = "src/main.rs"
+
+[dependencies]
+ndn-engine       = { workspace = true }
+ndn-app          = { workspace = true }
+ndn-face-net     = { workspace = true }
+ndn-face-local   = { workspace = true }
+ndn-strategy     = { workspace = true }
+ndn-store        = { workspace = true }
+tokio            = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tracing          = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow           = { workspace = true }

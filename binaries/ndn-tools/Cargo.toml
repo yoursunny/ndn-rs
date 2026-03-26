@@ -1,0 +1,26 @@
+[package]
+name = "ndn-tools"
+description = "NDN command-line tools: ndn-peek, ndn-put, ndn-ping, ndn-ls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ndn-peek"
+path = "src/peek.rs"
+
+[[bin]]
+name = "ndn-put"
+path = "src/put.rs"
+
+[[bin]]
+name = "ndn-ping"
+path = "src/ping.rs"
+
+[dependencies]
+ndn-app    = { workspace = true }
+ndn-packet = { workspace = true }
+tokio      = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing    = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow     = { workspace = true }

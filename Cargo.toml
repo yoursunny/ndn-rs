@@ -1,6 +1,87 @@
-[package]
-name = "ndn-rs"
+[workspace]
+resolver = "2"
+members = [
+    # Layer 4 — foundation (no NDN deps)
+    "crates/ndn-tlv",
+    "crates/ndn-packet",
+    "crates/ndn-transport",
+    "crates/ndn-store",
+    # Layer 3 — face implementations
+    "crates/ndn-face-net",
+    "crates/ndn-face-local",
+    "crates/ndn-face-serial",
+    "crates/ndn-face-wireless",
+    # Layer 2 — pipeline, strategy, security
+    "crates/ndn-pipeline",
+    "crates/ndn-strategy",
+    "crates/ndn-security",
+    # Layer 1 — engine and application API
+    "crates/ndn-engine",
+    "crates/ndn-app",
+    "crates/ndn-ipc",
+    # Layer 5 — research extensions
+    "crates/ndn-research",
+    "crates/ndn-compute",
+    "crates/ndn-sync",
+    # Binaries
+    "binaries/ndn-router",
+    "binaries/ndn-tools",
+    "binaries/ndn-bench",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+authors = ["ndn-rs contributors"]
+license = "MIT OR Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
+# NDN workspace crates
+ndn-tlv       = { path = "crates/ndn-tlv" }
+ndn-packet    = { path = "crates/ndn-packet" }
+ndn-transport = { path = "crates/ndn-transport" }
+ndn-store     = { path = "crates/ndn-store" }
+ndn-pipeline  = { path = "crates/ndn-pipeline" }
+ndn-strategy  = { path = "crates/ndn-strategy" }
+ndn-security  = { path = "crates/ndn-security" }
+ndn-engine    = { path = "crates/ndn-engine" }
+ndn-app       = { path = "crates/ndn-app" }
+ndn-ipc       = { path = "crates/ndn-ipc" }
+ndn-face-net      = { path = "crates/ndn-face-net" }
+ndn-face-local    = { path = "crates/ndn-face-local" }
+ndn-face-serial   = { path = "crates/ndn-face-serial" }
+ndn-face-wireless = { path = "crates/ndn-face-wireless" }
+ndn-research  = { path = "crates/ndn-research" }
+ndn-compute   = { path = "crates/ndn-compute" }
+ndn-sync      = { path = "crates/ndn-sync" }
+
+# Core async runtime — individual crates enable only the features they need
+tokio      = { version = "1", default-features = false }
+tokio-util = { version = "0.7.10", default-features = false }
+
+# Zero-copy byte buffers
+bytes = "1"
+
+# Concurrent data structures
+dashmap  = "6"
+smallvec = { version = "1", features = ["union"] }
+
+# LRU cache
+lru = "0.12"
+
+# Structured logging
+tracing = "0.1"
+
+# Error handling
+anyhow    = "1"
+thiserror = "2"
+
+# Cryptography
+ring          = "0.17"
+ed25519-dalek = "2"
+
+# Serial port support
+tokio-serial = "5"
+
+# Logging subscriber (binaries only)
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

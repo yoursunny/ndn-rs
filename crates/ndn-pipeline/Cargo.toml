@@ -1,0 +1,15 @@
+[package]
+name = "ndn-pipeline"
+description = "NDN packet pipeline: PipelineStage trait, PacketContext, and Action"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ndn-packet   = { workspace = true }
+ndn-transport = { workspace = true }
+ndn-store    = { workspace = true }
+bytes        = { workspace = true }
+smallvec     = { workspace = true }
+tokio        = { workspace = true, features = ["sync", "time"] }
+thiserror    = { workspace = true }
