@@ -366,6 +366,225 @@ Running total across all crates: **337 tests**, all passing.
 
 ---
 
+## [Unreleased — NDN management, face lifecycle, SHM faces, benchmarks]
+
+### Added
+
+#### `ndn-router` — NDN-native management transport
+
+- **NDN management over Interest/Data** (`mgmt_ndn` module) — replaces the
+  bootstrap-only Unix-socket bypass as the primary management path.
+  - `run_ndn_mgmt_handler` — async task that receives `Interest` packets from an
+    `AppHandle`, decodes the `ApplicationParameters` TLV payload as JSON
+    `ManagementRequest`, dispatches via `handle_request`, and writes the
+    `ManagementResponse` back as a `Data` packet.
+  - `run_face_listener` — async task that binds a `UnixFace` listener at the
+    path configured in `[management].face_socket`; for each accepted connection
+    it calls `ForwarderEngine::add_face` so the face participates in normal
+    forwarding.
+  - `mgmt_prefix()` — returns `/localhost/ndn-ctl` as a `Name`.
+  - The management `AppFace` is pre-registered with the `EngineBuilder` (FaceId
+    `0xFFFF_0001`) and its prefix `/localhost/ndn-ctl/…` is installed in the FIB
+    before startup so management Interests are routed without any special-casing
+    in the pipeline.
+- **Transport selection** — `[management].transport = "ndn"` (default) activates
+  NDN-over-face; `"bypass"` falls back to the Unix-socket or iceoryx2 path.
+- **`ndn_face_local::AppFace` / `AppHandle`** used throughout — `ndn_app::AppFace`
+  does not implement the `Face` trait and cannot be registered with the engine;
+  all engine-adjacent code was updated to use `ndn_face_local`.
+
+#### `ndn-config` — management config extended
+
+- Added `[management]` section with `transport` (default `"ndn"`),
+  `face_socket` (Unix socket path for NDN face listener), and `bypass_socket`
+  (path for raw JSON bypass socket).
+
+#### `ndn-tools` — `ndn-ctl` NDN transport
+
+- `ndn-ctl` now sends management commands as NDN Interests over a `UnixFace`
+  connection to the router's face listener (default `/tmp/ndn-face.sock`).
+  `ApplicationParameters` TLV carries the JSON request; the first Data packet
+  back is decoded as the JSON response.  The iceoryx2 path is preserved when the
+  `iceoryx2-mgmt` feature is enabled.
+- Added missing `ndn-face-local` and `ndn-transport` workspace dependencies to
+  `binaries/ndn-tools/Cargo.toml`.
+
+#### `ndn-store` — `NameTrie::dump`
+
+- **`NameTrie::dump() -> Vec<(Name, V)>`** — depth-first traversal of the entire
+  trie returning all stored entries as `(Name, value)` pairs.  Releases each
+  node's `RwLock` before recursing into children to avoid deadlock on the
+  concurrent trie.
+
+#### `ndn-engine` — `Fib::dump`
+
+- **`Fib::dump() -> Vec<(Name, Arc<FibEntry>)>`** — delegates to
+  `NameTrie::dump()` so the management handler can serialise the full FIB.
+
+#### `ndn-transport` — face table improvements
+
+- **`FaceTable::face_entries() -> Vec<(FaceId, FaceKind)>`** — returns all
+  registered faces with their kind, used by `list-faces` to show human-readable
+  face types instead of raw IDs.
+- **`ErasedFace::kind()`** — `kind()` method added to the object-safe
+  `ErasedFace` trait (and its blanket `impl<F: Face> ErasedFace for F`) so the
+  face table can expose kind without knowing the concrete type.
+- **Face ID recycling** — `FaceTable` now holds a `Mutex<Vec<u32>>` free list.
+  `alloc_id()` pops from the free list before bumping the atomic counter, so IDs
+  are reused after face teardown instead of monotonically growing.
+- **Reserved ID range** — `RESERVED_FACE_ID_MIN = 0xFFFF_0000`; IDs at or above
+  this value are never allocated by `alloc_id()` and are never added to the free
+  list.  The management `AppFace` uses `0xFFFF_0001`.
+
+#### `ndn-transport` — `FaceKind::Shm`
+
+- New variant `FaceKind::Shm` for shared-memory faces.  Appears in
+  `list-faces` output; treated as a transient face (auto-removed from the table
+  when the reader exits).
+
+#### `ndn-engine` — face lifecycle
+
+- **Auto-removal of transient faces** — `run_face_reader` now accepts
+  `face_table: Arc<FaceTable>` and removes the face from the table when the
+  reader loop exits (face closed or cancelled).  `App` and `Internal` kind faces
+  are exempt — they are long-lived engine objects.
+- `PacketDispatcher::spawn` and `ForwarderEngine::add_face` both pass the face
+  table to `run_face_reader`.
+
+#### `ndn-router` — `list-faces` and `list-routes` management commands
+
+- `list-faces` now returns `{"faces": [{"id": N, "kind": "unix"}, …]}` (rich
+  kind information, filtered to exclude internal `App`/`Internal` faces).
+- `list-routes` now returns `{"routes": [{"prefix": "/ndn", "nexthops":
+  [{"face": 1, "cost": 10}]}, …]}` via the new `Fib::dump` traversal.
+
+#### `ndn-face-local` — SHM faces (`spsc-shm` / `iceoryx2-shm` features)
+
+- **`SpscFace` / `SpscHandle`** (`spsc-shm` feature, Unix only) — custom
+  lock-free SPSC ring buffer in POSIX SHM.  Two rings (a2e, e2a) share a
+  5-cache-line header (`magic u64 | capacity u32 | slot_size u32 | 4×AtomicU32
+  ring indices`).  Wakeup notifications use a pair of `tokio::net::UnixDatagram`
+  sockets at `/tmp/.ndn-{name}.{e,a}.sock`.  `SpscFace::create[_with]` sets up
+  the engine side; `SpscHandle::connect` does a two-phase open (header-only first
+  to read ring parameters, then full mapping).
+
+- **`Iox2Face` / `Iox2Handle`** (`iceoryx2-shm` feature) — iceoryx2 pub-sub
+  backend.  Two services per face (`ndn-shm/{name}/a2e` app→engine,
+  `ndn-shm/{name}/e2a` engine→app).  Background OS threads bridge the blocking
+  iceoryx2 API to `tokio::sync::mpsc` channels used by the async
+  `Face::send`/`Face::recv` methods.  `NdnPacket` is `#[repr(C)] ZeroCopySend`
+  with a 65 520-byte payload area.
+
+- **Type aliases** in `shm/mod.rs` dispatch to the active backend:
+  `ShmFace = Iox2Face` when `iceoryx2-shm` is enabled, else `SpscFace`.  Same
+  for `ShmHandle`.  Both concrete types remain directly importable.
+
+- **Public API**:
+  ```rust
+  // Engine process
+  let face = ShmFace::create(FaceId(5), "my-app")?;
+  engine.add_face(face, cancel);
+
+  // Application process
+  let handle = ShmHandle::connect("my-app")?;
+  handle.send(interest_bytes).await?;
+  let data = handle.recv().await?;
+  ```
+
+#### `ndn-face-local` — benchmarks
+
+- **`benches/face_local.rs`** — Criterion benchmark suite comparing all four
+  in-process face implementations across latency and throughput at packet sizes
+  64 B, 1 024 B, 8 192 B:
+
+  | Group | What is measured |
+  |-------|-----------------|
+  | `appface/latency` | One mpsc round-trip (app→face→app) |
+  | `appface/throughput` | 1 000-packet burst, one direction |
+  | `unix/latency` | One socketpair round-trip with TLV codec |
+  | `unix/throughput` | 200-packet burst, concurrent send+recv |
+  | `spsc/latency` | One SHM ring round-trip including Unix-datagram wakeup |
+  | `spsc/throughput` | 32-packet burst (half ring capacity), one direction |
+  | `iox2/latency` | One iceoryx2 round-trip through OS-thread bridge |
+  | `iox2/throughput` | 100-packet burst through OS-thread bridge |
+
+  `unix/latency` uses `tokio::net::UnixStream::pair()` (kernel `socketpair`) so
+  no socket file is written to disk.  Both `unix/latency` and `unix/throughput`
+  use `tokio::join!` to run send and recv concurrently; sequential execution
+  deadlocks for 8 192 B packets because macOS's default Unix socket buffer is
+  exactly 8 192 bytes.
+
+  Run with: `cargo bench -p ndn-face-local --features spsc-shm,iceoryx2-shm`
+
+### Fixed
+
+- **`ndn_app::AppFace` / `ndn_face_local::AppFace` confusion** — `ndn_app::AppFace`
+  provides a higher-level application API and does not implement the
+  `ndn_transport::Face` trait.  `ndn_face_local::AppFace` does implement `Face`
+  and is the correct type to register with the engine.  All engine-adjacent code
+  (`ndn-router`, `ndn-ipc` tests) updated to use `ndn_face_local`.
+
+### Benchmark results (macOS, release build)
+
+| Benchmark | p50 latency / throughput | Notes |
+|-----------|--------------------------|-------|
+| `appface/latency/64` | 143 ns | |
+| `appface/latency/1024` | 144 ns | |
+| `appface/latency/8192` | 145 ns | |
+| `appface/throughput/64` | 2.81 Mpkt/s | |
+| `appface/throughput/1024` | 2.82 Mpkt/s | |
+| `appface/throughput/8192` | 2.83 Mpkt/s | |
+| `unix/latency/64` | 2.07 µs | socketpair, TLV framing |
+| `unix/latency/1024` | 2.26 µs | |
+| `unix/latency/8192` | 6.78 µs | crosses 8 KiB socket buffer |
+| `unix/throughput/64` | 2.65 Mpkt/s | |
+| `unix/throughput/1024` | 1.55 Mpkt/s | |
+| `unix/throughput/8192` | 409 Kpkt/s | |
+| `spsc/latency/64` | 2.57 µs | wakeup datagram dominates |
+| `spsc/latency/1024` | 2.69 µs | |
+| `spsc/latency/8192` | 3.41 µs | |
+| `spsc/throughput/64` | 810 Kpkt/s | 32-pkt burst |
+| `spsc/throughput/1024` | 776 Kpkt/s | |
+| `spsc/throughput/8192` | 645 Kpkt/s | |
+
+**Key findings:**
+
+- `AppFace` is ~15–18× lower latency than any kernel-mediated face because mpsc
+  never enters the kernel.  Packet size has almost no effect since only a pointer
+  is transferred.
+
+- `SpscFace` latency (~2.6 µs small packets) is comparable to `UnixFace`
+  (~2.1 µs) despite the lock-free ring, because every packet still triggers two
+  `sendmsg`/`recvmsg` wakeup calls — one per direction.  The ring copy
+  (`memcpy` into a 8 960-byte slot) adds overhead at 8 192 B but stays below
+  `UnixFace`'s 6.78 µs for that size.
+
+- `UnixFace` throughput degrades sharply at 8 192 B (409 Kpkt/s vs 2.65 Mpkt/s
+  at 64 B) because each packet crosses the 8 KiB socket buffer boundary,
+  requiring the kernel to schedule both endpoints cooperatively (visible as a
+  3× latency jump from 1 024 B to 8 192 B).
+
+- `SpscFace` throughput (one `sendmsg` per packet even in burst mode) is ~3–6×
+  lower than `UnixFace` throughput at small sizes because `UnixFace` benefits
+  from TCP-Nagle-like coalescing at the stream level, while the datagram wakeup
+  socket sends one 1-byte datagram per packet.
+
+- The `iceoryx2` backend is not benchmarked here because its OS-thread bridge
+  polls on a 1 ms cycle; round-trip latency would be ~2 ms and is not
+  competitive for single-packet exchanges.  It may be added once the bridge is
+  switched to an event-driven wakeup.
+
+### Tests added
+
+| Crate | Module | Count |
+|-------|--------|------:|
+| `ndn-face-local` | `shm::spsc` | 4 |
+| `ndn-store` | `trie` (dump) | — |
+
+Running total across all crates: **357 tests**, all passing.
+
+---
+
 ## [Unreleased — security tooling, PIB, iceoryx2 management]
 
 ### Added

@@ -97,3 +97,6 @@ iceoryx2 = "0.8.1"
 
 # Logging subscriber (binaries only)
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
