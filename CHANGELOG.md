@@ -414,6 +414,34 @@ Running total across all crates: **337 tests**, all passing.
 - Added `pib_path: Option<String>` — PIB directory path; defaults to
   `~/.ndn/pib` when absent.
 
+#### `ndn-tools` — `ndn-ctl` management client
+
+- New binary `ndn-ctl` for sending management commands to a running `ndn-router`.
+  Transport is selected at compile time via the `iceoryx2-mgmt` feature (mirrors
+  the same flag on `ndn-router`):
+
+  | Build                              | Transport                   |
+  |------------------------------------|-----------------------------|
+  | default (Unix targets)             | Unix domain socket          |
+  | `--features iceoryx2-mgmt`         | iceoryx2 shared-memory RPC  |
+
+  Global flags:
+  - `--socket <path>` (env `$NDN_MGMT_SOCK`, default `/tmp/ndn-router.sock`) — Unix socket transport.
+  - `--service <name>` (env `$NDN_MGMT_SERVICE`, default `ndn/router/mgmt`) — iceoryx2 transport.
+
+  Subcommands:
+  | Command | Description |
+  |---------|-------------|
+  | `add-route <prefix> --face <n> [--cost <n>]` | Add or update a FIB route. |
+  | `remove-route <prefix> --face <n>` | Remove a FIB nexthop. |
+  | `list-routes` | List FIB routes. |
+  | `list-faces` | List registered face IDs. |
+  | `get-stats` | Print engine statistics (PIT size). |
+  | `shutdown` | Request a graceful router shutdown. |
+
+  The iceoryx2 client defines local `MgmtReq`/`MgmtResp` wire types (identical
+  layout to the server's) and polls for a response with a 5-second timeout.
+
 #### `ndn-tools` — `ndn-sec` CLI binary
 
 - New binary `ndn-sec` for offline key and certificate management.

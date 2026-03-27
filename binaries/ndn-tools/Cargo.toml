@@ -21,14 +21,29 @@ path = "src/ping.rs"
 name = "ndn-sec"
 path = "src/sec.rs"
 
+[[bin]]
+name = "ndn-ctl"
+path = "src/ctl.rs"
+
+[features]
+## Use iceoryx2 shared-memory RPC instead of Unix socket for the management
+## transport.  Must match the feature used when building ndn-router.
+##
+##   cargo build -p ndn-tools --features iceoryx2-mgmt
+iceoryx2-mgmt = ["dep:iceoryx2"]
+
 [dependencies]
 ndn-app      = { workspace = true }
 ndn-ipc      = { workspace = true }
 ndn-packet   = { workspace = true }
 ndn-security = { workspace = true }
+ndn-config   = { workspace = true }
 bytes        = { workspace = true }
-tokio        = { workspace = true, features = ["rt-multi-thread", "macros", "fs"] }
+serde_json   = { workspace = true }
+tokio        = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "net", "io-util"] }
+tokio-util   = { workspace = true, features = ["codec"] }
 tracing      = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow       = { workspace = true }
 clap         = { version = "4", features = ["derive", "env"] }
+iceoryx2     = { workspace = true, optional = true }
