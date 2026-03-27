@@ -658,8 +658,10 @@ dependencies = [
  "dashmap",
  "lru",
  "ndn-packet",
+ "ndn-tlv",
  "smallvec",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -710,8 +712,10 @@ dependencies = [
  "bytes",
  "dashmap",
  "ndn-packet",
+ "ndn-tlv",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
