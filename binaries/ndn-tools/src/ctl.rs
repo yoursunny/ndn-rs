@@ -5,8 +5,7 @@
 /// packet whose Content carries the JSON `ManagementResponse`.
 ///
 /// An optional `--bypass` flag falls back to the legacy transport: raw JSON
-/// over a Unix socket, or iceoryx2 shared-memory RPC when built with
-/// `--features iceoryx2-mgmt`.
+/// over a Unix socket.
 ///
 /// # NDN protocol
 ///
@@ -27,43 +26,14 @@
 /// # Custom face socket (NDN transport):
 /// ndn-ctl --face-socket /var/run/ndn/faces.sock get-stats
 ///
-/// # Bypass: Unix socket JSON (non-iceoryx2 builds):
+/// # Bypass: Unix socket JSON:
 /// ndn-ctl --bypass --socket /tmp/ndn-router.sock get-stats
-///
-/// # Bypass: iceoryx2 (iceoryx2-mgmt builds):
-/// ndn-ctl --bypass --service ndn/router/mgmt get-stats
 /// ```
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use ndn_config::{ManagementRequest, ManagementResponse};
 use ndn_packet::{Name, NameComponent};
 use ndn_packet::encode::encode_interest;
-
-// iceoryx2 wire types — only needed for the bypass iceoryx2 transport.
-#[cfg(feature = "iceoryx2-mgmt")]
-mod ipc_wire {
-    use iceoryx2::prelude::ZeroCopySend;
-
-    #[derive(Debug, Clone, Copy, ZeroCopySend)]
-    #[repr(C)]
-    pub struct MgmtReq {
-        pub data: [u8; 4096],
-    }
-
-    impl Default for MgmtReq {
-        fn default() -> Self { Self { data: [0u8; 4096] } }
-    }
-
-    #[derive(Debug, Clone, Copy, ZeroCopySend)]
-    #[repr(C)]
-    pub struct MgmtResp {
-        pub data: [u8; 4096],
-    }
-
-    impl Default for MgmtResp {
-        fn default() -> Self { Self { data: [0u8; 4096] } }
-    }
-}
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
@@ -74,10 +44,7 @@ mod ipc_wire {
     version
 )]
 struct Cli {
-    /// Use the legacy bypass transport instead of NDN Interest/Data.
-    ///
-    /// With `--bypass`, raw JSON is sent over a Unix socket (or iceoryx2 when
-    /// built with --features iceoryx2-mgmt).
+    /// Use the legacy bypass transport (raw JSON over Unix socket).
     #[arg(long)]
     bypass: bool,
 
@@ -92,12 +59,6 @@ struct Cli {
     /// May also be set via $NDN_MGMT_SOCK.
     #[arg(long, env = "NDN_MGMT_SOCK", default_value = "/tmp/ndn-router.sock")]
     socket: String,
-
-    /// iceoryx2 service name (bypass + iceoryx2-mgmt feature only).
-    ///
-    /// May also be set via $NDN_MGMT_SERVICE.
-    #[arg(long, env = "NDN_MGMT_SERVICE", default_value = "ndn/router/mgmt")]
-    service: String,
 
     #[command(subcommand)]
     command: Command,
@@ -201,44 +162,26 @@ async fn run_ndn(face_socket: &str, req: ManagementRequest) -> anyhow::Result<()
 
 #[cfg(not(unix))]
 async fn run_ndn(_face_socket: &str, _req: ManagementRequest) -> anyhow::Result<()> {
-    anyhow::bail!(
-        "NDN management transport requires Unix domain sockets (unix target).\n\
-         Use `--bypass` with the `iceoryx2-mgmt` feature for cross-platform support."
-    )
+    anyhow::bail!("NDN management transport requires Unix domain sockets")
 }
 
 // ─── Bypass transport (legacy) ────────────────────────────────────────────────
 
+#[cfg(unix)]
 async fn run_bypass(cli: &Cli, req: ManagementRequest) -> anyhow::Result<()> {
-    #[cfg(feature = "iceoryx2-mgmt")]
-    {
-        let service = cli.service.clone();
-        let resp = tokio::task::spawn_blocking(move || send_ipc(&service, req))
-            .await??;
-        print_response(resp);
-        return Ok(());
-    }
+    let resp = send_unix(&cli.socket, &req).await?;
+    print_response(resp);
+    Ok(())
+}
 
-    #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
-    {
-        let resp = send_unix(&cli.socket, &req).await?;
-        print_response(resp);
-        return Ok(());
-    }
-
-    #[cfg(all(not(unix), not(feature = "iceoryx2-mgmt")))]
-    {
-        let _ = (cli, req);
-        anyhow::bail!(
-            "No bypass transport available on this platform.\n\
-             Rebuild with `--features iceoryx2-mgmt` for cross-platform bypass support."
-        );
-    }
+#[cfg(not(unix))]
+async fn run_bypass(_cli: &Cli, _req: ManagementRequest) -> anyhow::Result<()> {
+    anyhow::bail!("Bypass transport requires Unix domain sockets")
 }
 
 // ─── Unix socket bypass ───────────────────────────────────────────────────────
 
-#[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+#[cfg(unix)]
 async fn send_unix(
     socket_path: &str,
     req: &ManagementRequest,
@@ -263,84 +206,6 @@ async fn send_unix(
 
     serde_json::from_str::<ManagementResponse>(&line)
         .with_context(|| format!("Unparseable response: {line}"))
-}
-
-// ─── iceoryx2 bypass ─────────────────────────────────────────────────────────
-
-#[cfg(feature = "iceoryx2-mgmt")]
-const MAX_TICKS: u32 = 1000;
-
-#[cfg(feature = "iceoryx2-mgmt")]
-fn send_ipc(
-    service_name: &str,
-    req: ManagementRequest,
-) -> anyhow::Result<ManagementResponse> {
-    use ipc_wire::{MgmtReq, MgmtResp};
-    use iceoryx2::node::NodeWaitFailure;
-    use iceoryx2::prelude::*;
-    use std::time::Duration;
-
-    let node = NodeBuilder::new()
-        .create::<ipc::Service>()
-        .map_err(|e| anyhow::anyhow!("Failed to create iceoryx2 node: {e}"))?;
-
-    let svc_name: ServiceName = service_name
-        .try_into()
-        .map_err(|e| anyhow::anyhow!("Invalid service name: {e}"))?;
-
-    let service = node
-        .service_builder(&svc_name)
-        .request_response::<MgmtReq, MgmtResp>()
-        .open_or_create()
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to open service '{service_name}': {e}\n\
-                 Is ndn-router running with --features iceoryx2-mgmt and bypass transport?"
-            )
-        })?;
-
-    let client = service
-        .client_builder()
-        .create()
-        .map_err(|e| anyhow::anyhow!("Failed to create client: {e}"))?;
-
-    let json  = serde_json::to_string(&req)?;
-    let bytes = json.as_bytes();
-    let mut wire_req = MgmtReq::default();
-    let len = bytes.len().min(wire_req.data.len() - 1);
-    wire_req.data[..len].copy_from_slice(&bytes[..len]);
-
-    let loan = client
-        .loan_uninit()
-        .map_err(|e| anyhow::anyhow!("Failed to loan request buffer: {e}"))?;
-
-    let pending = loan
-        .write_payload(wire_req)
-        .send()
-        .map_err(|e| anyhow::anyhow!("Failed to send request: {e}"))?;
-
-    for _ in 0..MAX_TICKS {
-        match node.wait(Duration::from_millis(5)) {
-            Ok(()) | Err(NodeWaitFailure::Interrupt) => {}
-            Err(NodeWaitFailure::TerminationRequest) => {
-                anyhow::bail!("iceoryx2 termination during wait");
-            }
-            #[allow(unreachable_patterns)]
-            Err(e) => anyhow::bail!("iceoryx2 wait error: {e}"),
-        }
-        match pending.receive() {
-            Ok(Some(response)) => {
-                let end = response.data.iter().position(|&b| b == 0).unwrap_or(4096);
-                let text = std::str::from_utf8(&response.data[..end])
-                    .map_err(|_| anyhow::anyhow!("Response payload is not valid UTF-8"))?;
-                return serde_json::from_str::<ManagementResponse>(text)
-                    .map_err(|e| anyhow::anyhow!("Unparseable response JSON: {e}"));
-            }
-            Ok(None)   => continue,
-            Err(e)     => anyhow::bail!("Failed to receive response: {e}"),
-        }
-    }
-    anyhow::bail!("Timed out waiting for response from '{service_name}'")
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

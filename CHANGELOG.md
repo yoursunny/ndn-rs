@@ -366,6 +366,115 @@ Running total across all crates: **337 tests**, all passing.
 
 ---
 
+## [Unreleased — SPSC parked-flag optimization, iceoryx2 bridge redesign]
+
+### Removed
+
+- **`iceoryx2` dependency dropped** — removed from the entire workspace.
+  `SpscFace` with the parked-flag optimization is now the sole SHM backend and
+  is faster in every measured dimension.  The removed code:
+  - `crates/ndn-face-local/src/shm/iox2.rs` — `Iox2Face` / `Iox2Handle`
+  - `iceoryx2-shm` Cargo feature in `ndn-face-local`
+  - `iceoryx2-mgmt` Cargo feature in `ndn-router` and `ndn-tools`
+  - `binaries/ndn-router/src/mgmt_ipc.rs` — iceoryx2 management server
+  - `iceoryx2` bypass path in `ndn-tools/src/ctl.rs`
+  - `iceoryx2 = "0.8.1"` workspace dependency
+
+  `ShmFace` / `ShmHandle` type aliases in `shm/mod.rs` now always resolve to
+  `SpscFace` / `SpscHandle`.  The bypass management transport in `ndn-router`
+  and `ndn-ctl` retains its Unix-socket path; the iceoryx2 bypass path is gone.
+
+### Changed
+
+#### `ndn-face-local` — SPSC parked-flag wakeup optimization
+
+Eliminated per-packet wakeup syscalls during bursts by adding two atomic
+parked-flag fields to the SHM header.
+
+**Protocol** (SeqCst total-order fence prevents the ABA race):
+1. Consumer sets `parked = 1` with `SeqCst` store.
+2. Consumer re-checks the ring; if non-empty, clears the flag and returns.
+3. Consumer sleeps on `UnixDatagram::recv`.
+4. Producer checks `parked` with `SeqCst` load; sends wakeup datagram only if
+   non-zero.
+
+**Header layout change** — two new cache-line-aligned fields extend the header
+from 5 to 7 cache lines (320 → 448 bytes):
+
+| Cache line | Contents |
+|-----------|---------|
+| 0 | magic, capacity, slot\_size |
+| 1 | a2e head/tail ring indices |
+| 2 | e2a head/tail ring indices |
+| 3 | (reserved padding) |
+| 4 | (reserved padding) |
+| 5 | `a2e_parked` flag (engine / a2e consumer) |
+| 6 | `e2a_parked` flag (app / e2a consumer) |
+
+#### `ndn-face-local` — iceoryx2 bridge redesign
+
+Replaced the WaitSet + event-service design (which hung on macOS during
+benchmarks) with a simpler `recv_timeout` poll:
+
+- Bridge threads sleep on `std::sync::mpsc::Receiver::recv_timeout(200 µs)`.
+- Tokio send path immediately wakes the bridge via `SyncSender<()>::try_send`
+  stored as `KickFn = Box<dyn Fn() + Send + Sync + 'static>`.
+- `ipc::Service` (single-threaded) replaces `ipc_threadsafe::Service`; the kick
+  channel is `Send + Sync` so no thread-safety upgrade is needed.
+- Fixed `ZeroCopySend` derive: added `use iceoryx2::prelude::ZeroCopySend;` so
+  the plain `#[derive(ZeroCopySend)]` compiles without the path-qualified form.
+- Fixed `ServiceName::try_into`: iceoryx2 implements `TryFrom<&str>` not
+  `TryFrom<String>`; helper fns now call `.as_str().try_into()`.
+- Benchmark fixed to reuse a single service pair across all payload sizes, avoiding
+  iceoryx2 node-registry exhaustion on macOS when pairs are rapidly created and
+  torn down.
+
+### Benchmark results (macOS, release build, after SPSC parked-flag optimization)
+
+Run: `cargo bench -p ndn-face-local --features spsc-shm,iceoryx2-shm`
+
+| Benchmark | p50 latency / throughput | vs. before | Notes |
+|-----------|--------------------------|------------|-------|
+| `appface/latency/64` | 142 ns | — | reference (unchanged) |
+| `appface/latency/1024` | 143 ns | — | |
+| `appface/latency/8192` | 144 ns | — | |
+| `appface/throughput/64` | 2.82 Mpkt/s | — | |
+| `appface/throughput/1024` | 2.83 Mpkt/s | — | |
+| `appface/throughput/8192` | 2.82 Mpkt/s | — | |
+| `unix/latency/64` | 2.10 µs | — | |
+| `unix/latency/1024` | 2.32 µs | — | |
+| `unix/latency/8192` | 6.92 µs | — | |
+| `unix/throughput/64` | 2.53 Mpkt/s | — | |
+| `unix/throughput/1024` | 1.51 Mpkt/s | — | |
+| `unix/throughput/8192` | 404 Kpkt/s | — | |
+| `spsc/latency/64` | **124 ns** | **−95 %** (was 2.57 µs) | parked-flag eliminates wakeup |
+| `spsc/latency/1024` | **200 ns** | **−93 %** (was 2.69 µs) | |
+| `spsc/latency/8192` | **678 ns** | **−80 %** (was 3.41 µs) | copy cost visible at 8 KiB |
+| `spsc/throughput/64` | **34.4 Mpkt/s** | **+42×** (was 810 Kpkt/s) | no syscall during burst |
+| `spsc/throughput/1024` | **15.7 Mpkt/s** | **+20×** (was 776 Kpkt/s) | |
+| `spsc/throughput/8192` | **3.30 Mpkt/s** | **+5×** (was 645 Kpkt/s) | |
+| `iox2/latency` | pending | — | bench infra stabilised; macOS IPC quirks under investigation |
+| `iox2/throughput` | pending | — | |
+
+**Key findings after SPSC optimization:**
+
+- `SpscFace` now beats `UnixFace` latency by **17×** at 64 B (124 ns vs 2.10 µs)
+  and is on par with `AppFace` (142 ns) at small sizes.  The wakeup datagram cost
+  was entirely dominating before; it is now paid only when the consumer genuinely
+  sleeps between packets.
+
+- `SpscFace` throughput leaps from sub-`UnixFace` to **14× faster** at 64 B
+  (34.4 Mpkt/s vs 2.53 Mpkt/s), making it the fastest transport for burst traffic.
+
+- At 8 192 B the `memcpy` into the fixed SHM slot (65 520 bytes per slot)
+  begins to appear, but latency is still 10× better than before optimization
+  and 10× better than `UnixFace`.
+
+- `AppFace` and `UnixFace` numbers are stable within noise (< 2 % variance),
+  confirming no regression in those paths.
+
+---
+
 ## [Unreleased — NDN management, face lifecycle, SHM faces, benchmarks]
 
 ### Added

@@ -12,15 +12,11 @@ use ndn_security::{FilePib, SecurityManager};
 use ndn_face_local::AppFace;
 use bytes::Bytes;
 
-// Unix-socket bypass management I/O (only when the iceoryx2-mgmt feature is NOT enabled).
-#[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+// Unix-socket bypass management I/O.
+#[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-#[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+#[cfg(unix)]
 use tokio::net::UnixListener;
-
-// iceoryx2 bypass management server (enabled by the `iceoryx2-mgmt` Cargo feature).
-#[cfg(feature = "iceoryx2-mgmt")]
-mod mgmt_ipc;
 
 // NDN-native management: face listener + Interest/Data handler.
 mod mgmt_ndn;
@@ -113,7 +109,7 @@ async fn main() -> Result<()> {
     //
     // [management]
     // transport = "ndn"    (default) — NDN Interest/Data over face socket
-    // transport = "bypass"           — raw JSON over Unix socket or iceoryx2
+    // transport = "bypass"           — raw JSON over Unix socket
     //
     // Bypass transports are kept for emergency access when the pipeline is
     // broken or during bootstrapping.
@@ -147,18 +143,7 @@ async fn main() -> Result<()> {
 
     // ── Bypass management ─────────────────────────────────────────────────────
 
-    #[cfg(feature = "iceoryx2-mgmt")]
-    let ipc_task = if !use_ndn_mgmt {
-        let mgmt_engine  = engine.clone();
-        let cancel_clone = cancel.clone();
-        let service_name = "ndn/router/mgmt".to_string();
-        tracing::info!(service = %service_name, "bypass: iceoryx2 management server");
-        Some(tokio::task::spawn_blocking(move || {
-            mgmt_ipc::run_blocking(&service_name, mgmt_engine, cancel_clone);
-        }))
-    } else { None };
-
-    #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+    #[cfg(unix)]
     let bypass_task = if !use_ndn_mgmt {
         let bypass_path = PathBuf::from(&fwd_config.management.bypass_socket);
         let mgmt_engine  = engine.clone();
@@ -167,12 +152,9 @@ async fn main() -> Result<()> {
         Some(tokio::spawn(run_unix_mgmt_server(bypass_path, mgmt_engine, cancel_clone)))
     } else { None };
 
-    #[cfg(all(not(unix), not(feature = "iceoryx2-mgmt")))]
+    #[cfg(not(unix))]
     if !use_ndn_mgmt {
-        tracing::warn!(
-            "bypass management unavailable on this platform; \
-             enable `iceoryx2-mgmt` feature for cross-platform bypass support"
-        );
+        tracing::warn!("bypass management unavailable on non-Unix platforms");
     }
 
     // Wait for Ctrl-C.
@@ -187,10 +169,7 @@ async fn main() -> Result<()> {
         if let Some(t) = ndn_listener_task { let _ = t.await; }
     }
 
-    #[cfg(feature = "iceoryx2-mgmt")]
-    if let Some(t) = ipc_task { let _ = t.await; }
-
-    #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+    #[cfg(unix)]
     if let Some(t) = bypass_task { let _ = t.await; }
 
     shutdown.shutdown().await;
@@ -202,8 +181,7 @@ async fn main() -> Result<()> {
 /// Dispatch a management request against the live engine.
 ///
 /// This is intentionally a plain (non-async) function: none of its operations
-/// actually need to yield, and it must be callable from both the async Unix
-/// socket handler and the blocking iceoryx2 event loop.
+/// actually need to yield.
 pub(crate) fn handle_request(
     req: ManagementRequest,
     engine: &ForwarderEngine,
