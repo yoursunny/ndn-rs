@@ -1133,7 +1133,7 @@ name = "ndn-ipc"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "ndn-app",
+ "ndn-face-local",
  "ndn-packet",
  "ndn-transport",
  "thiserror",
@@ -1269,9 +1269,11 @@ dependencies = [
  "iceoryx2",
  "ndn-app",
  "ndn-config",
+ "ndn-face-local",
  "ndn-ipc",
  "ndn-packet",
  "ndn-security",
+ "ndn-transport",
  "serde_json",
  "tokio",
  "tokio-util",

@@ -33,11 +33,13 @@ path = "src/ctl.rs"
 iceoryx2-mgmt = ["dep:iceoryx2"]
 
 [dependencies]
-ndn-app      = { workspace = true }
-ndn-ipc      = { workspace = true }
-ndn-packet   = { workspace = true }
-ndn-security = { workspace = true }
-ndn-config   = { workspace = true }
+ndn-app        = { workspace = true }
+ndn-ipc        = { workspace = true }
+ndn-packet     = { workspace = true }
+ndn-security   = { workspace = true }
+ndn-config     = { workspace = true }
+ndn-face-local = { workspace = true }
+ndn-transport  = { workspace = true }
 bytes        = { workspace = true }
 serde_json   = { workspace = true }
 tokio        = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "net", "io-util"] }

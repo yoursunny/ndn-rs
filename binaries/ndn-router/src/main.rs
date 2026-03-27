@@ -9,28 +9,28 @@ use ndn_config::{ForwarderConfig, ManagementRequest, ManagementResponse, Managem
 use ndn_engine::{EngineBuilder, EngineConfig, ForwarderEngine};
 use ndn_packet::{Name, NameComponent};
 use ndn_security::{FilePib, SecurityManager};
+use ndn_face_local::AppFace;
 use bytes::Bytes;
 
-// Unix-socket management I/O (only when the iceoryx2-mgmt feature is NOT enabled).
+// Unix-socket bypass management I/O (only when the iceoryx2-mgmt feature is NOT enabled).
 #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
 use tokio::net::UnixListener;
 
-// iceoryx2 management server (enabled by the `iceoryx2-mgmt` Cargo feature).
+// iceoryx2 bypass management server (enabled by the `iceoryx2-mgmt` Cargo feature).
 #[cfg(feature = "iceoryx2-mgmt")]
 mod mgmt_ipc;
 
+// NDN-native management: face listener + Interest/Data handler.
+mod mgmt_ndn;
+
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-/// Parse `argv` into (config_path, mgmt_socket_path).
-///
-/// `mgmt_socket_path` is only used when the Unix-socket management transport
-/// is active (i.e. the `iceoryx2-mgmt` feature is not enabled).
-fn parse_args() -> (Option<PathBuf>, PathBuf) {
+/// Parse `argv` into a config file path.
+fn parse_args() -> Option<PathBuf> {
     let args: Vec<String> = std::env::args().collect();
     let mut config_path = None;
-    let mut mgmt_path   = PathBuf::from("/tmp/ndn-router.sock");
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -40,17 +40,11 @@ fn parse_args() -> (Option<PathBuf>, PathBuf) {
                     config_path = Some(PathBuf::from(p));
                 }
             }
-            "-m" | "--mgmt" => {
-                i += 1;
-                if let Some(p) = args.get(i) {
-                    mgmt_path = PathBuf::from(p);
-                }
-            }
             _ => {}
         }
         i += 1;
     }
-    (config_path, mgmt_path)
+    config_path
 }
 
 #[tokio::main]
@@ -61,7 +55,7 @@ async fn main() -> Result<()> {
         .with_thread_ids(true)
         .init();
 
-    let (config_path, mgmt_path) = parse_args();
+    let config_path = parse_args();
 
     // Load config or use defaults.
     let fwd_config = if let Some(path) = config_path {
@@ -77,7 +71,17 @@ async fn main() -> Result<()> {
         pipeline_channel_cap: fwd_config.engine.pipeline_channel_cap,
     };
 
+    // ── NDN management: pre-register management AppFace ───────────────────────
+    //
+    // An AppFace is registered with the engine before build so it gets a
+    // run_face_reader task.  After build, /localhost/ndn-ctl is added to the
+    // FIB pointing at this face.  The NDN management handler reads Interests
+    // from the AppHandle side and writes Data responses back.
+    const MGMT_FACE_ID: u32 = 0xFFFF_0001;
+    let (mgmt_app_face, mgmt_handle) = AppFace::new(ndn_transport::FaceId(MGMT_FACE_ID), 64);
+
     let (engine, shutdown) = EngineBuilder::new(engine_config)
+        .face(mgmt_app_face)
         .build()
         .await?;
 
@@ -90,6 +94,14 @@ async fn main() -> Result<()> {
         tracing::info!(prefix = %route.prefix, face = route.face, cost = route.cost, "route added");
     }
 
+    // Register the management prefix in the FIB so the pipeline routes
+    // /localhost/ndn-ctl/... Interests to the management AppFace.
+    engine.fib().add_nexthop(
+        &mgmt_ndn::mgmt_prefix(),
+        ndn_transport::FaceId(MGMT_FACE_ID),
+        0,
+    );
+
     // Load security identity from PIB if configured.
     load_security(&fwd_config);
 
@@ -97,41 +109,71 @@ async fn main() -> Result<()> {
 
     let cancel = CancellationToken::new();
 
-    // ── Management server ─────────────────────────────────────────────────────
+    // ── Management transport selection ────────────────────────────────────────
     //
-    // Priority:
-    //   1. iceoryx2 (feature = "iceoryx2-mgmt")   — cross-platform, zero-copy
-    //   2. Unix socket (!iceoryx2-mgmt, unix)      — default on Unix targets
-    //   3. No management + warning                  — non-Unix without iceoryx2
+    // [management]
+    // transport = "ndn"    (default) — NDN Interest/Data over face socket
+    // transport = "bypass"           — raw JSON over Unix socket or iceoryx2
+    //
+    // Bypass transports are kept for emergency access when the pipeline is
+    // broken or during bootstrapping.
+
+    let use_ndn_mgmt = fwd_config.management.transport == "ndn";
+
+    // ── NDN management ────────────────────────────────────────────────────────
+    #[cfg(unix)]
+    let (ndn_handler_task, ndn_listener_task) = if use_ndn_mgmt {
+        let face_socket = PathBuf::from(&fwd_config.management.face_socket);
+        tracing::info!(
+            socket = %face_socket.display(),
+            prefix = "/localhost/ndn-ctl",
+            "NDN management active"
+        );
+
+        let handler = tokio::spawn(mgmt_ndn::run_ndn_mgmt_handler(
+            mgmt_handle,
+            engine.clone(),
+            cancel.clone(),
+        ));
+        let listener_engine = engine.clone();
+        let listener_cancel = cancel.clone();
+        let listener = tokio::spawn(async move {
+            mgmt_ndn::run_face_listener(&face_socket, listener_engine, listener_cancel).await;
+        });
+        (Some(handler), Some(listener))
+    } else {
+        (None, None)
+    };
+
+    // ── Bypass management ─────────────────────────────────────────────────────
 
     #[cfg(feature = "iceoryx2-mgmt")]
-    let ipc_task = {
-        // The iceoryx2 server runs a blocking event loop; move it off the
-        // Tokio thread pool with spawn_blocking.
+    let ipc_task = if !use_ndn_mgmt {
         let mgmt_engine  = engine.clone();
         let cancel_clone = cancel.clone();
         let service_name = "ndn/router/mgmt".to_string();
-        tracing::info!(service = %service_name, "starting iceoryx2 management server");
-        tokio::task::spawn_blocking(move || {
+        tracing::info!(service = %service_name, "bypass: iceoryx2 management server");
+        Some(tokio::task::spawn_blocking(move || {
             mgmt_ipc::run_blocking(&service_name, mgmt_engine, cancel_clone);
-        })
-    };
+        }))
+    } else { None };
 
     #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
-    let mgmt_task = {
+    let bypass_task = if !use_ndn_mgmt {
+        let bypass_path = PathBuf::from(&fwd_config.management.bypass_socket);
         let mgmt_engine  = engine.clone();
         let cancel_clone = cancel.clone();
-        let path         = mgmt_path.clone();
-        let task = tokio::spawn(run_unix_mgmt_server(path, mgmt_engine, cancel_clone));
-        tracing::info!(path = %mgmt_path.display(), "management socket listening");
-        task
-    };
+        tracing::info!(path = %bypass_path.display(), "bypass: Unix socket management");
+        Some(tokio::spawn(run_unix_mgmt_server(bypass_path, mgmt_engine, cancel_clone)))
+    } else { None };
 
     #[cfg(all(not(unix), not(feature = "iceoryx2-mgmt")))]
-    tracing::warn!(
-        "management interface unavailable: enable the `iceoryx2-mgmt` Cargo feature \
-         for cross-platform management support"
-    );
+    if !use_ndn_mgmt {
+        tracing::warn!(
+            "bypass management unavailable on this platform; \
+             enable `iceoryx2-mgmt` feature for cross-platform bypass support"
+        );
+    }
 
     // Wait for Ctrl-C.
     tokio::signal::ctrl_c().await?;
@@ -139,11 +181,17 @@ async fn main() -> Result<()> {
     tracing::info!("shutting down");
     cancel.cancel();
 
+    #[cfg(unix)]
+    {
+        if let Some(t) = ndn_handler_task { let _ = t.await; }
+        if let Some(t) = ndn_listener_task { let _ = t.await; }
+    }
+
     #[cfg(feature = "iceoryx2-mgmt")]
-    let _ = ipc_task.await;
+    if let Some(t) = ipc_task { let _ = t.await; }
 
     #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
-    let _ = mgmt_task.await;
+    if let Some(t) = bypass_task { let _ = t.await; }
 
     shutdown.shutdown().await;
     Ok(())
@@ -210,9 +258,10 @@ pub(crate) fn handle_request(
 
 // ─── Unix socket management server ────────────────────────────────────────────
 
-/// Accept management connections on a Unix socket until `cancel` fires.
+/// Accept bypass management connections on a Unix socket until `cancel` fires.
 ///
-/// Only compiled when the `iceoryx2-mgmt` feature is NOT enabled.
+/// Uses the raw JSON protocol (newline-delimited).  Only active when
+/// `[management] transport = "bypass"` and the `iceoryx2-mgmt` feature is off.
 #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
 async fn run_unix_mgmt_server(
     path: PathBuf,
