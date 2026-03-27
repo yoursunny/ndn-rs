@@ -1081,12 +1081,15 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures",
+ "iceoryx2",
+ "libc",
  "ndn-packet",
  "ndn-tlv",
  "ndn-transport",
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
