@@ -531,10 +531,13 @@ name = "ndn-face-local"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures",
  "ndn-packet",
+ "ndn-tlv",
  "ndn-transport",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -542,7 +545,9 @@ name = "ndn-face-net"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures",
  "ndn-packet",
+ "ndn-tlv",
  "ndn-transport",
  "thiserror",
  "tokio",

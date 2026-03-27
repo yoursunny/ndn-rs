@@ -72,6 +72,9 @@ lru = "0.12"
 # Structured logging
 tracing = "0.1"
 
+# Async combinators and stream/sink extension traits
+futures = "0.3"
+
 # Error handling
 anyhow    = "1"
 thiserror = "2"
