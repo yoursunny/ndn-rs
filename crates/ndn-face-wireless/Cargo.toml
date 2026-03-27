@@ -1,9 +1,15 @@
 [package]
 name = "ndn-face-wireless"
-description = "NDN wireless faces: NamedEtherFace (AF_PACKET), WfbFace, BluetoothFace"
+description = "NDN wireless faces: NamedEtherFace and WfbFace (Linux only), BluetoothFace (Linux only), NeighborDiscovery, RadioTable"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+# Platform note: NamedEtherFace, WfbFace, and BluetoothFace are compiled only
+# on Linux (#[cfg(target_os = "linux")]). NeighborDiscovery and RadioTable are
+# cross-platform data structures and compile everywhere.
+[features]
+default = []
 
 [dependencies]
 ndn-packet    = { workspace = true }

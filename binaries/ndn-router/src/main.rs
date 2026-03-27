@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -11,6 +9,12 @@ use ndn_config::{ForwarderConfig, ManagementRequest, ManagementResponse, Managem
 use ndn_engine::{EngineBuilder, EngineConfig, ForwarderEngine};
 use ndn_packet::{Name, NameComponent};
 use bytes::Bytes;
+
+// Unix-socket management I/O is only available on Unix targets.
+#[cfg(unix)]
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(unix)]
+use tokio::net::UnixListener;
 
 /// Parse `argv` into (config_path, mgmt_socket_path).
 fn parse_args() -> (Option<PathBuf>, PathBuf) {
@@ -78,23 +82,31 @@ async fn main() -> Result<()> {
 
     tracing::info!("engine running");
 
-    // Spawn the management server.
     let cancel = CancellationToken::new();
-    let mgmt_engine = engine.clone();
-    let cancel_clone = cancel.clone();
-    let mgmt_task = tokio::spawn(run_mgmt_server(
-        mgmt_path.clone(),
-        mgmt_engine,
-        cancel_clone,
-    ));
-    tracing::info!(path = %mgmt_path.display(), "management socket listening");
+
+    // Spawn the Unix-socket management server (Unix only).
+    #[cfg(unix)]
+    let mgmt_task = {
+        let mgmt_engine  = engine.clone();
+        let cancel_clone = cancel.clone();
+        let path         = mgmt_path.clone();
+        let task = tokio::spawn(run_mgmt_server(path, mgmt_engine, cancel_clone));
+        tracing::info!(path = %mgmt_path.display(), "management socket listening");
+        task
+    };
+
+    #[cfg(not(unix))]
+    tracing::warn!("management socket is not available on this platform (Unix only)");
 
     // Wait for Ctrl-C.
     tokio::signal::ctrl_c().await?;
 
     tracing::info!("shutting down");
     cancel.cancel();
+
+    #[cfg(unix)]
     let _ = mgmt_task.await;
+
     shutdown.shutdown().await;
     Ok(())
 }
@@ -110,6 +122,7 @@ fn name_from_uri(uri: &str) -> Name {
 }
 
 /// Dispatch a `ManagementRequest` against the live engine.
+#[cfg(unix)]
 async fn handle_request(
     req: ManagementRequest,
     engine: &ForwarderEngine,
@@ -163,6 +176,7 @@ async fn handle_request(
 }
 
 /// Accept management connections on a Unix socket until `cancel` fires.
+#[cfg(unix)]
 async fn run_mgmt_server(
     path: PathBuf,
     engine: ForwarderEngine,

@@ -636,7 +636,6 @@ dependencies = [
  "bytes",
  "ndn-tlv",
  "smallvec",
- "thiserror",
 ]
 
 [[package]]
