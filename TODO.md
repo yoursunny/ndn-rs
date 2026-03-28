@@ -6,9 +6,9 @@ Tracked stubs, placeholders, and deferred work across the codebase.
 
 ## Face implementations (all stub — recv/send return `FaceError::Closed`)
 
-- [ ] **NamedEtherFace** — `ndn-face-wireless/src/ether.rs`
-      AF_PACKET raw socket with NDN Ethertype 0x8624.
-      Design calls for PACKET_RX_RING / TX_RING mmap ring buffers.
+- [x] **NamedEtherFace** — `ndn-face-wireless/src/ether.rs`
+      AF_PACKET + SOCK_DGRAM with TPACKET_V2 mmap ring buffers (RX + TX).
+      Zero-copy packet I/O via `PacketRing`; `AsyncFd` for epoll integration.
 - [ ] **WfbFace** — `ndn-face-wireless/src/wfb.rs`
       Unidirectional 802.11 monitor-mode injection via wfb-ng.
       Tx recv parks with `pending()`; Rx recv/send stub.

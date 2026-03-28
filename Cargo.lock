@@ -936,6 +936,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "dashmap",
+ "libc",
  "ndn-face-net",
  "ndn-packet",
  "ndn-transport",

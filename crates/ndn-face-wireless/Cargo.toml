@@ -16,6 +16,10 @@ ndn-packet    = { workspace = true }
 ndn-transport = { workspace = true }
 ndn-face-net  = { workspace = true }
 bytes         = { workspace = true }
-tokio         = { workspace = true, features = ["sync", "io-util"] }
+tokio         = { workspace = true, features = ["sync", "io-util", "net"] }
 dashmap       = { workspace = true }
 thiserror     = { workspace = true }
+libc          = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

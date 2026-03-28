@@ -12,6 +12,36 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### `ndn-face-wireless` — NamedEtherFace with TPACKET_V2 mmap ring buffers
+
+- **`NamedEtherFace`** — NDN face over raw Ethernet (`AF_PACKET` + `SOCK_DGRAM`,
+  Ethertype `0x8624`).  Uses TPACKET_V2 mmap'd ring buffers for zero-copy packet
+  I/O instead of per-packet `recvfrom`/`sendto` syscalls.
+
+  **Ring buffer design:**
+  - `PacketRing` struct manages the mmap'd region (RX ring at offset 0, TX ring
+    immediately after).  Ring geometry: 2048 B frames, 4 KiB blocks, 32 blocks
+    per ring → 64 frames × 2 rings = 256 KiB total.
+  - `try_pop_rx()` — checks `tp_status & TP_STATUS_USER` with Acquire ordering,
+    reads payload at `frame + tp_mac`, releases frame with `TP_STATUS_KERNEL`.
+  - `try_push_tx()` — Mutex-protected; writes payload at `frame + TX_DATA_OFFSET`
+    (52 bytes: `TPACKET_ALIGN(sizeof(tpacket2_hdr))` + `sizeof(sockaddr_ll)`),
+    sets `TP_STATUS_SEND_REQUEST` with Release ordering.
+  - `Face::recv` polls `try_pop_rx()`, falling back to `AsyncFd::readable()` +
+    `clear_ready()` when the ring is empty.
+  - `Face::send` polls `try_push_tx()`, then calls `sendto(fd, NULL, 0, ...)`
+    to flush all pending TX frames to the kernel.
+
+  **Helpers:** `MacAddr` (6-byte address with `Display`), `get_ifindex` (via
+  `SIOCGIFINDEX`), `make_sockaddr_ll`, `open_packet_socket` (non-blocking,
+  `SOCK_CLOEXEC`), `setup_packet_ring` (TPACKET_V2 + RX/TX ring config + mmap).
+
+  Requires `CAP_NET_RAW` or root.  Linux only (`#[cfg(target_os = "linux")]`).
+
+  Tests: `mac_addr_display`, `mac_addr_broadcast`, `sockaddr_ll_layout`,
+  `ring_geometry`, `tx_data_offset_is_correct`, `new_fails_without_cap_net_raw`,
+  `loopback_roundtrip` (ignored — needs root).
+
 #### `ndn-sync` — Dataset synchronisation protocols
 
 - **`SvsNode`** — State Vector Sync node. Maintains a `HashMap<String, u64>` state vector
