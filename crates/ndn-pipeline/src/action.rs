@@ -37,7 +37,7 @@ pub enum Action {
     /// Drop the packet silently.
     Drop(DropReason),
     /// Send a Nack back to the incoming face.
-    Nack(NackReason),
+    Nack(super::context::PacketContext, NackReason),
 }
 
 #[cfg(test)]
@@ -98,8 +98,8 @@ mod tests {
 
     #[test]
     fn action_nack_holds_reason() {
-        let a = Action::Nack(NackReason::NoRoute);
-        assert!(matches!(a, Action::Nack(NackReason::NoRoute)));
+        let a = Action::Nack(ctx(), NackReason::NoRoute);
+        assert!(matches!(a, Action::Nack(_, NackReason::NoRoute)));
     }
 
     #[test]

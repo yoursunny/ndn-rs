@@ -19,10 +19,13 @@ Tracked stubs, placeholders, and deferred work across the codebase.
 
 ## Engine pipeline
 
-- [ ] **NACK handling** — `ndn-engine/src/dispatcher.rs:109,162`
-      Inbound and outbound NACKs log "not yet implemented" and drop.
-- [ ] **ForwardAfter delay scheduling** — `ndn-engine/src/stages/strategy.rs:79`
-      Ignores `delay` parameter, forwards immediately.
+- [x] **NACK handling** — `ndn-engine/src/dispatcher.rs`
+      Inbound nack pipeline (PIT out-record lookup → strategy `on_nack` → retry
+      or propagate). Outbound nack encoding via `encode_nack` and dispatch to
+      incoming face. `Action::Nack` now carries `PacketContext`.
+- [x] **ForwardAfter delay scheduling** — `ndn-engine/src/stages/strategy.rs`
+      Spawns a Tokio timer; re-checks PIT before delayed send to avoid
+      forwarding satisfied/expired Interests.
 
 ## Compute face
 

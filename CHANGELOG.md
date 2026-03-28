@@ -12,6 +12,37 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### `ndn-packet` — Nack encoding
+
+- **`encode_nack(reason, interest_wire)`** — encodes a Nack TLV (`0x0320`)
+  wrapping the original Interest with the given `NackReason`. The Interest TLV
+  is stripped of its outer wrapper and embedded as a child — matching the format
+  expected by `Nack::decode`. Tests: `nack_roundtrip`, `nack_congestion_roundtrip`.
+
+#### `ndn-engine` — NACK handling and ForwardAfter delay scheduling
+
+- **Inbound NACK pipeline** — `nack_pipeline` in `PacketDispatcher` handles
+  incoming Nack packets end-to-end:
+  1. Looks up the PIT entry by the nacked Interest's name/selectors.
+  2. Builds a `StrategyContext` and calls `on_nack_erased` on the strategy.
+  3. If the strategy returns `Forward(faces)` — retries on alternate nexthops.
+  4. If the strategy returns `Nack` — propagates the Nack to all in-record
+     consumers and removes the PIT entry.
+  5. `Suppress` / `ForwardAfter` — drops silently.
+
+- **Outbound NACK dispatch** — `Action::Nack` now carries `PacketContext`
+  (breaking change to the enum variant). `dispatch_action` encodes a Nack TLV
+  via `encode_nack` and sends it back to `ctx.face_id`.
+
+- **`ErasedStrategy::on_nack_erased`** — object-safe boxed-future wrapper for
+  `Strategy::on_nack`, added alongside the existing `after_receive_interest_erased`.
+
+- **ForwardAfter delay scheduling** — `StrategyStage` now spawns a Tokio timer
+  for `ForwardAfter { faces, delay }` instead of forwarding immediately.  The
+  delayed task re-checks the PIT before sending: if the entry was already
+  satisfied or expired, the Interest is not forwarded.  The `StrategyStage`
+  struct now holds `Arc<Pit>` and `Arc<FaceTable>` for this purpose.
+
 #### `ndn-face-wireless` — NamedEtherFace with TPACKET_V2 mmap ring buffers
 
 - **`NamedEtherFace`** — NDN face over raw Ethernet (`AF_PACKET` + `SOCK_DGRAM`,
