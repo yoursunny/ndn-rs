@@ -36,10 +36,13 @@ Tracked stubs, placeholders, and deferred work across the codebase.
 
 ## Security
 
-- [ ] **TLV cert encoding** — `ndn-security/src/manager.rs:112`
-      `certify()` defers full TLV certificate encoding.
-- [ ] **SecurityPolicy engine wiring** — `ndn-router/src/main.rs:340`
-      SecurityManager loaded but discarded (`_mgr` not passed to engine).
+- [x] **TLV cert encoding** — `ndn-security/src/manager.rs`
+      `certify()` encodes a full NDN certificate Data packet (Name + MetaInfo
+      + Content with public key & validity period + SignatureInfo with
+      KeyLocator + SignatureValue) and signs it with the issuer's key.
+- [x] **SecurityPolicy engine wiring** — `ndn-router/src/main.rs`
+      `SecurityManager` passed into `EngineBuilder::security()` and stored in
+      `EngineInner`. Accessible via `ForwarderEngine::security()`.
 
 ## CLI tools (none connected to a live forwarder)
 

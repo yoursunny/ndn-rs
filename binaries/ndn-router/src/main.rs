@@ -76,10 +76,15 @@ async fn main() -> Result<()> {
     const MGMT_FACE_ID: u32 = 0xFFFF_0001;
     let (mgmt_app_face, mgmt_handle) = AppFace::new(ndn_transport::FaceId(MGMT_FACE_ID), 64);
 
-    let (engine, shutdown) = EngineBuilder::new(engine_config)
-        .face(mgmt_app_face)
-        .build()
-        .await?;
+    let security_mgr = load_security(&fwd_config);
+
+    let mut builder = EngineBuilder::new(engine_config)
+        .face(mgmt_app_face);
+    if let Some(mgr) = security_mgr {
+        builder = builder.security(mgr);
+    }
+
+    let (engine, shutdown) = builder.build().await?;
 
     // Apply static FIB routes from config.
     for route in &fwd_config.routes {
@@ -97,9 +102,6 @@ async fn main() -> Result<()> {
         ndn_transport::FaceId(MGMT_FACE_ID),
         0,
     );
-
-    // Load security identity from PIB if configured.
-    load_security(&fwd_config);
 
     tracing::info!("engine running");
 
@@ -312,10 +314,11 @@ async fn run_unix_mgmt_server(
 
 /// Load the router's security identity from the PIB specified in `[security]`.
 ///
-/// Failures are non-fatal: the router starts without a security identity and
-/// logs a warning instead.
-fn load_security(cfg: &ForwarderConfig) {
-    let Some(identity_uri) = &cfg.security.identity else { return; };
+/// Returns `Some(SecurityManager)` on success; `None` on failure or when no
+/// identity is configured.  Failures are non-fatal: the router starts without a
+/// security identity and logs a warning instead.
+fn load_security(cfg: &ForwarderConfig) -> Option<SecurityManager> {
+    let identity_uri = cfg.security.identity.as_ref()?;
 
     let pib_path = cfg.security.pib_path
         .as_deref()
@@ -332,19 +335,18 @@ fn load_security(cfg: &ForwarderConfig) {
                 pib = %pib_path.display(),
                 "PIB not found; starting without security identity"
             );
-            return;
+            return None;
         }
     };
 
     match SecurityManager::from_pib(&pib, &identity) {
-        Ok(_mgr) => {
+        Ok(mgr) => {
             tracing::info!(
                 identity = %identity_uri,
                 pib = %pib_path.display(),
                 "loaded security identity from PIB"
             );
-            // TODO: pass `_mgr` into the engine once SecurityPolicy is wired
-            // into EngineBuilder.
+            Some(mgr)
         }
         Err(e) => {
             tracing::warn!(
@@ -352,6 +354,7 @@ fn load_security(cfg: &ForwarderConfig) {
                 identity = %identity_uri,
                 "failed to load security identity; starting without it"
             );
+            None
         }
     }
 }

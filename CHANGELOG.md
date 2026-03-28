@@ -12,6 +12,39 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### `ndn-security` — TLV certificate encoding and engine wiring
+
+- **`certify()` full TLV encoding** — `SecurityManager::certify` now encodes a
+  complete NDN certificate Data packet and signs it with the issuer's key:
+  - Name: the subject key name
+  - MetaInfo: `ContentType = KEY (2)`, `FreshnessPeriod = 3600000 ms`
+  - Content: raw public key bytes + `ValidityPeriod` sub-TLV with
+    `NotBefore`/`NotAfter` timestamps
+  - SignatureInfo: `SignatureEd25519` with `KeyLocator` pointing to the issuer
+  - SignatureValue: Ed25519 signature over the signed region
+
+  The `MemKeyStoreExt` stub that always returned `CertNotFound` is replaced with
+  `MemKeyStore::get_signer_sync`, a `pub(crate)` synchronous accessor that reads
+  the DashMap directly.
+
+  Helper: `encode_cert_data` builds the signed region, signs it, and wraps the
+  result in an outer Data TLV.
+
+- **`TlvWriter::write_raw`** — new method for embedding pre-encoded bytes
+  (e.g., a signed region) into an outer TLV without re-framing.
+
+- **`ndn-tlv` promoted to regular dependency** of `ndn-security` (was dev-only).
+
+- **Engine wiring** — `EngineBuilder::security(mgr)` stores an
+  `Arc<SecurityManager>` in `EngineInner`.  `ForwarderEngine::security()` exposes
+  it.  `ndn-engine` now depends on `ndn-security`.
+
+- **Router wiring** — `load_security` now returns `Option<SecurityManager>`
+  instead of discarding it.  When a PIB identity is configured, the manager is
+  passed to `EngineBuilder::security()`.
+
+  Tests: `certify_produces_signed_cert`, `certify_fails_with_unknown_issuer`.
+
 #### `ndn-packet` — Nack encoding
 
 - **`encode_nack(reason, interest_wire)`** — encodes a Nack TLV (`0x0320`)

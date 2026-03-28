@@ -876,6 +876,7 @@ dependencies = [
  "dashmap",
  "ndn-packet",
  "ndn-pipeline",
+ "ndn-security",
  "ndn-store",
  "ndn-strategy",
  "ndn-transport",
