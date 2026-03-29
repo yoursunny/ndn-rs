@@ -10,6 +10,7 @@ pub enum DropReason {
     LoopDetected,
     Suppressed,
     RateLimited,
+    HopLimitExceeded,
     Other,
 }
 
@@ -56,6 +57,7 @@ mod tests {
             DropReason::LoopDetected,
             DropReason::Suppressed,
             DropReason::RateLimited,
+            DropReason::HopLimitExceeded,
             DropReason::Other,
         ];
         for (i, a) in reasons.iter().enumerate() {
