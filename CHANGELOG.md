@@ -520,6 +520,42 @@ NDNLPv2. Created `SPEC-GAPS.md` checklist. All 25 gaps resolved:
 
 Running total across all crates: **337 tests**, all passing.
 
+### Investigated and rejected
+
+#### Multi-threaded pipeline dispatcher
+
+Prototyped three `EngineConfig` knobs for parallelising the pipeline:
+
+- **`pipeline_runners`** — N tasks sharing the inbound `mpsc::Receiver` via
+  `Arc<Mutex<Receiver>>`, each competing to drain packets.
+- **`max_concurrent_packets`** — `tokio::sync::Semaphore` gating in-flight
+  `process_packet` spawns (0 = unlimited).
+- **`pit_shards`** — `Pit::with_shard_amount(n)` passed through to
+  `DashMap::with_shard_amount`.
+
+Benchmarked 1000-packet batches through the full dispatcher (AppFace →
+decode → CS miss → PIT → strategy Nack → fan-back) on a 4-thread Tokio
+runtime:
+
+| Config | Throughput | Time / 1000 pkts |
+|--------|-----------|-----------------|
+| 1 runner, unlimited | **668 Kpps** | 1.50 ms |
+| 1 runner, 512 limit | **708 Kpps** | 1.41 ms |
+| 2 runners, unlimited | 380 Kpps | 2.63 ms |
+| 4 runners, unlimited | 340 Kpps | 2.94 ms |
+| 4 runners, 512 limit | 335 Kpps | 2.97 ms |
+
+**Conclusion:** The pipeline bottleneck is not the single runner's
+`recv → spawn` loop — it's the per-packet decode/PIT/strategy work, which
+already runs in parallel via `tokio::spawn`. Adding multiple runners only
+adds `Arc<Mutex<Receiver>>` contention (≈2× slower). The semaphore had
+negligible overhead and marginally improved throughput by bounding scheduler
+pressure, but the benefit is too small to justify the complexity.
+
+All three knobs reverted. The single-runner, unlimited-spawn design remains
+the default. If a future workload (e.g., per-packet crypto verification)
+makes the runner loop itself the bottleneck, this can be revisited.
+
 ---
 
 ## [Unreleased — SPSC futex / pipe wakeup]
