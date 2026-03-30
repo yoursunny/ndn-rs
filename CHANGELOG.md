@@ -15,7 +15,7 @@ bootstrapping phase and all APIs should be considered unstable.
 #### NDN spec compliance — SPEC-GAPS.md tracker and fixes
 
 25-item spec compliance audit against RFC 8569, NDN Packet Format v0.3, and
-NDNLPv2. Created `SPEC-GAPS.md` checklist. 23 of 25 gaps resolved:
+NDNLPv2. Created `SPEC-GAPS.md` checklist. 24 of 25 gaps resolved:
 
 **ndn-tlv:**
 - **VarNumber shortest-encoding validation** — `read_varu64` rejects non-minimal
@@ -47,6 +47,13 @@ NDNLPv2. Created `SPEC-GAPS.md` checklist. 23 of 25 gaps resolved:
   `SIGNATURE_NONCE`, `SIGNATURE_TIME`, `SIGNATURE_SEQ_NUM` added to `tlv_type`.
 - **Anti-replay fields** — `SignatureInfo` decodes `sig_nonce` (0x26), `sig_time`
   (0x28), and `sig_seq_num` (0x2A) for signed Interest anti-replay protection.
+- **Implicit SHA-256 digest** — `Data::implicit_digest()` computes SHA-256 of
+  full wire encoding for exact Data retrieval via ImplicitSha256DigestComponent.
+
+**ndn-store:**
+- **CS implicit digest lookup** — `LruCs::get` handles Interests with
+  ImplicitSha256DigestComponent (type 0x01) by stripping the digest, looking up
+  the Data name, and verifying the hash matches.
 
 **ndn-pipeline:**
 - **`DropReason::HopLimitExceeded`** variant for HopLimit=0 enforcement.
