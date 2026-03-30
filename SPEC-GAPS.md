@@ -25,7 +25,7 @@ Tracking deviations from official NDN specifications (RFC 8569, NDN Packet Forma
 - [x] **14. ParametersSha256DigestComponent not verified** — decoder validates SHA-256 digest against ApplicationParameters TLV. (NDN Packet Format v0.3 §2.3)
 - [x] **15. CanBePrefix / MustBeFresh semantics incomplete** — MustBeFresh is parsed but CS lookup may not filter on FreshnessPeriod expiry. CanBePrefix longest-match may be incomplete. (RFC 8569 §4.2)
 - [x] **16. PIT aggregation rules incomplete** — spec requires same (Name, Selectors, ForwardingHint) tuple; current PIT key may not include ForwardingHint. (RFC 8569 §4.2)
-- [ ] **17. CS admission policy** — no policy hooks for cache admission (e.g., respecting MustBeFresh, cache directives). (RFC 8569 §4.3)
+- [x] **17. CS admission policy** — `CsAdmissionPolicy` trait with `DefaultAdmissionPolicy` (rejects FreshnessPeriod=0) and `AdmitAllPolicy`. `CsInsertStage` consults policy before caching. (RFC 8569 §4.3)
 - [x] **18. InterestLifetime default** — already defaults to 4000ms in PIT check stage. (NDN Packet Format v0.3 §5.2)
 - [x] **19. Data packet freshness tracking** — CS must track insertion time and compute staleness from FreshnessPeriod. (RFC 8569 §4.3)
 - [x] **20. Implicit SHA-256 digest component** — `Data::implicit_digest()` computes SHA-256 of wire bytes; CS lookup matches Interests with ImplicitSha256DigestComponent by verifying the digest against cached Data. (NDN Packet Format v0.3 §2.2)
