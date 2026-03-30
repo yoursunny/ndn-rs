@@ -34,6 +34,6 @@ Tracking deviations from official NDN specifications (RFC 8569, NDN Packet Forma
 
 - [x] **21. SignatureNonce / SignatureTime / SignatureSeqNum** — `SignatureInfo` now decodes `sig_nonce`, `sig_time`, and `sig_seq_num` from InterestSignatureInfo. (NDN Packet Format v0.3 §5.4)
 - [x] **22. ApplicationParameters encoding constraints** — encoder adds ParametersSha256DigestComponent; decoder validates its presence. (NDN Packet Format v0.3 §5.2)
-- [ ] **23. Link object support** — ContentType=LINK Data contains delegation list; not parsed. (NDN Packet Format v0.3 §6.3.1)
+- [x] **23. Link object support** — `Data::link_delegations()` parses Name TLVs from Content field when ContentType=LINK. (NDN Packet Format v0.3 §6.3.1)
 - [x] **24. Congestion marking** — LpPacket decodes CongestionMark; propagated via pipeline tags. (NDNLPv2 spec)
 - [ ] **25. Fragmentation / reassembly** — NDNLPv2 FragIndex/FragCount not supported. (NDNLPv2 spec)
