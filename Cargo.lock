@@ -1087,6 +1087,7 @@ dependencies = [
  "clap",
  "ndn-app",
  "ndn-config",
+ "ndn-engine",
  "ndn-face-local",
  "ndn-ipc",
  "ndn-packet",

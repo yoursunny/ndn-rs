@@ -25,8 +25,16 @@ path = "src/sec.rs"
 name = "ndn-ctl"
 path = "src/ctl.rs"
 
+[[bin]]
+name = "ndn-traffic"
+path = "src/traffic.rs"
+
+[[bin]]
+name = "ndn-iperf"
+path = "src/iperf.rs"
 
 [dependencies]
+ndn-engine    = { workspace = true }
 ndn-app        = { workspace = true }
 ndn-ipc        = { workspace = true }
 ndn-packet     = { workspace = true }
