@@ -12,6 +12,47 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### NDN spec compliance — SPEC-GAPS.md tracker and fixes
+
+25-item spec compliance audit against RFC 8569, NDN Packet Format v0.3, and
+NDNLPv2. Created `SPEC-GAPS.md` checklist. 20 of 25 gaps resolved:
+
+**ndn-tlv:**
+- **VarNumber shortest-encoding validation** — `read_varu64` rejects non-minimal
+  VarNumber forms (e.g. 3-byte encoding for values < 253).
+- **TlvWriter minimal nested encoding** — `write_nested` now uses a temporary
+  buffer and writes minimal-length encoding instead of a fixed 5-byte placeholder.
+- **Types 0–31 grandfathered as critical** — `skip_unknown` treats types 0–31 as
+  critical regardless of LSB parity, per NDN Packet Format v0.3 §1.3.
+
+**ndn-packet:**
+- **Ed25519 signature type code** — fixed from 7 to 5 per spec §10.3.
+- **HopLimit decode** — `Interest::hop_limit()` lazily decodes TLV 0x22.
+- **Nonce insertion** — `ensure_nonce()` adds a generated Nonce to Interests
+  that lack one; called in TlvDecodeStage.
+- **Zero-component Name rejection** — Interest and Data decoders reject empty Names.
+- **ForwardingHint decode** — `Interest::forwarding_hint()` parses delegation Names
+  from TLV 0x1E.
+- **NDNLPv2 LpPacket module** (`lp.rs`) — decode/encode for LpPacket (0x64) with
+  Nack header, CongestionMark, and Fragment fields.
+- **Nack LpPacket framing** — `encode_nack` produces NDNLPv2-compliant LpPacket
+  instead of bare 0x0320 TLV. `Nack::decode` accepts both formats.
+- **ParametersSha256DigestComponent** — encoder computes SHA-256 digest; decoder
+  validates both presence and correctness against ApplicationParameters.
+- **`PacketError::MalformedPacket`** variant added for semantic validation errors.
+
+**ndn-pipeline:**
+- **`DropReason::HopLimitExceeded`** variant for HopLimit=0 enforcement.
+
+**ndn-engine:**
+- **TlvDecodeStage** — unwraps NDNLPv2 LpPackets, enforces HopLimit=0 drop,
+  inserts Nonce, propagates CongestionMark via pipeline tags.
+- **PIT aggregation** — `PitToken::from_interest_full` includes ForwardingHint
+  in the hash key per RFC 8569 §4.2.
+
+**ndn-store:**
+- **`PitToken::from_interest_full`** — hashes (Name, Selector, ForwardingHint).
+
 #### `ndn-security` — TLV certificate encoding and engine wiring
 
 - **`certify()` full TLV encoding** — `SecurityManager::certify` now encodes a
