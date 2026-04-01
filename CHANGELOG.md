@@ -48,6 +48,32 @@ bootstrapping phase and all APIs should be considered unstable.
   contexts.
 - **`MemKeyStore::get_signer_sync()`** — made public.
 
+#### Pipeline stage tracing
+
+Per-packet `trace!`-level instrumentation across all forwarding pipeline stages,
+enabling end-to-end packet journey debugging with `RUST_LOG=ndn_engine=trace,ndn_face_net=trace`.
+
+**ndn-engine:**
+- **TlvDecodeStage** — traces Interest/Data/Nack decode results, LpPacket unwrap,
+  HopLimit exceeded, malformed packets, and unknown TLV types.
+- **CsLookupStage** — traces cache HIT / MISS per Interest.
+- **CsInsertStage** — traces Data insertion with freshness period and admission
+  policy rejections.
+- **PitCheckStage** — traces loop detection (duplicate nonce), Interest aggregation
+  (suppression), and new PIT entry creation with nonce and lifetime.
+- **PitMatchStage** — traces PIT satisfaction (with out-faces list) and unsolicited
+  Data drops.
+- **StrategyStage** — traces FIB LPM result (hit with nexthops / miss), strategy
+  selection (name), and forwarding decision (Forward, ForwardAfter, Nack, Suppress).
+- **PacketDispatcher** — traces packet arrival (face, length), pipeline routing
+  (Interest/Data/Nack), dispatch actions (Send with target faces, Satisfy with
+  out-faces and CS hit flag, Nack with reason), per-face send success, and face-
+  not-found warnings.
+
+**ndn-face-net:**
+- **UdpFace** — traces send/recv with face ID, peer address, and packet length.
+- **TcpFace** — traces send/recv with face ID, remote address, and packet length.
+
 ### Changed
 
 - **`ndn-iperf` rewritten** to use the new application library API:
@@ -93,6 +119,17 @@ bootstrapping phase and all APIs should be considered unstable.
   using `ring` require Android NDK (ring tier-1 target, no code changes needed).
 
 ### Fixed
+
+- **UDP face broken pipe on macOS** — `UdpFace` switched from a connected socket
+  (`connect()` + `send`/`recv`) to an unconnected socket (`send_to`/`recv_from`).
+  On macOS/BSD, a connected UDP socket that receives ICMP port-unreachable enters a
+  permanent error state where all subsequent `send()` calls fail with `EPIPE`
+  (broken pipe). The unconnected approach makes each datagram independent at the
+  kernel level. `recv_from` filters by peer address to maintain single-peer semantics.
+- **NDNLPv2 framing on outbound network packets** — `UdpFace::send()` and
+  `TcpFace::send()` now wrap bare Interest/Data in an NDNLPv2 `LpPacket(Fragment(...))`
+  envelope via `encode_lp_packet()`. NFD and ndn-cxx require LpPacket framing on
+  unicast links; bare TLV type 0x05/0x06 was silently dropped by remote forwarders.
 
 **Wire-format interoperability (ndnd/ndn-cxx compatibility):**
 - **NonNegativeInteger encoding now uses minimal lengths** (1, 2, 4, or 8 bytes

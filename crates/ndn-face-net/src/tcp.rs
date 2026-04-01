@@ -7,6 +7,8 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::Mutex;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+use tracing::trace;
+
 use ndn_transport::{Face, FaceError, FaceId, FaceKind, TlvCodec};
 
 /// NDN face over TCP with TLV length-prefix framing.
@@ -68,16 +70,20 @@ impl Face for TcpFace {
 
     async fn recv(&self) -> Result<Bytes, FaceError> {
         let mut reader = self.reader.lock().await;
-        reader
+        let data = reader
             .next()
             .await
             .ok_or(FaceError::Closed)?
-            .map_err(FaceError::Io)
+            .map_err(FaceError::Io)?;
+        trace!(face=%self.id, remote=%self.remote_addr, len=data.len(), "tcp: recv");
+        Ok(data)
     }
 
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {
+        let wire = ndn_packet::lp::encode_lp_packet(&pkt);
+        trace!(face=%self.id, remote=%self.remote_addr, len=wire.len(), "tcp: send");
         let mut writer = self.writer.lock().await;
-        writer.send(pkt).await.map_err(FaceError::Io)
+        writer.send(wire).await.map_err(FaceError::Io)
     }
 }
 
@@ -91,6 +97,11 @@ mod tests {
         let mut w = TlvWriter::new();
         w.write_tlv(tag as u64, value);
         w.finish()
+    }
+
+    /// The face wraps outgoing packets in NDNLPv2 LpPacket framing.
+    fn expected_on_wire(pkt: &Bytes) -> Bytes {
+        ndn_packet::lp::encode_lp_packet(pkt)
     }
 
     async fn loopback_pair() -> (TcpFace, TcpFace) {
@@ -108,7 +119,7 @@ mod tests {
         let (client, server) = loopback_pair().await;
         let pkt = make_tlv(0x05, b"hello");
         client.send(pkt.clone()).await.unwrap();
-        assert_eq!(server.recv().await.unwrap(), pkt);
+        assert_eq!(server.recv().await.unwrap(), expected_on_wire(&pkt));
     }
 
     #[tokio::test]
@@ -117,7 +128,7 @@ mod tests {
         let payload = vec![0xABu8; 1000];
         let pkt = make_tlv(0x06, &payload);
         client.send(pkt.clone()).await.unwrap();
-        assert_eq!(server.recv().await.unwrap(), pkt);
+        assert_eq!(server.recv().await.unwrap(), expected_on_wire(&pkt));
     }
 
     #[tokio::test]
@@ -128,7 +139,7 @@ mod tests {
             client.send(pkt.clone()).await.unwrap();
         }
         for expected in &pkts {
-            assert_eq!(&server.recv().await.unwrap(), expected);
+            assert_eq!(server.recv().await.unwrap(), expected_on_wire(expected));
         }
     }
 
@@ -150,8 +161,8 @@ mod tests {
         let (client, server) = loopback_pair().await;
         client.send(make_tlv(0x05, b"interest")).await.unwrap();
         server.send(make_tlv(0x06, b"data")).await.unwrap();
-        assert_eq!(server.recv().await.unwrap(), make_tlv(0x05, b"interest"));
-        assert_eq!(client.recv().await.unwrap(), make_tlv(0x06, b"data"));
+        assert_eq!(server.recv().await.unwrap(), expected_on_wire(&make_tlv(0x05, b"interest")));
+        assert_eq!(client.recv().await.unwrap(), expected_on_wire(&make_tlv(0x06, b"data")));
     }
 
     #[tokio::test]

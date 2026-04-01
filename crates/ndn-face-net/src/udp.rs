@@ -4,16 +4,21 @@ use std::sync::Arc;
 use bytes::Bytes;
 use tokio::net::UdpSocket;
 
+use tracing::trace;
+
 use ndn_transport::{Face, FaceError, FaceId, FaceKind};
 
 /// NDN face over unicast UDP.
 ///
-/// The socket is `connect()`-ed to the peer at construction time, so the kernel
-/// filters incoming datagrams to that peer only. `send_to` / `recv_from` are
-/// replaced by the simpler `send` / `recv` forms.
+/// Uses an **unconnected** socket with `send_to` / `recv_from` rather than a
+/// connected socket with `send` / `recv`.  On macOS (and some BSDs), a
+/// connected UDP socket that receives an ICMP port-unreachable enters a
+/// permanent error state where every subsequent `send()` fails with
+/// `EPIPE` (broken pipe).  The unconnected approach avoids this entirely —
+/// each datagram is independent at the kernel level.
 ///
-/// `send` is `&self`-safe: `UdpSocket::send` takes `&self` and UDP sends are
-/// atomic at the kernel level, so no mutex is needed.
+/// `send_to` is `&self`-safe: `UdpSocket::send_to` takes `&self` and UDP
+/// sends are atomic at the kernel level, so no mutex is needed.
 pub struct UdpFace {
     id:     FaceId,
     socket: Arc<UdpSocket>,
@@ -21,20 +26,20 @@ pub struct UdpFace {
 }
 
 impl UdpFace {
-    /// Bind to `local` and connect to `peer`.
+    /// Bind to `local`, targeting `peer` for all sends.
     ///
-    /// After `connect()`, the socket only receives datagrams from `peer`.
+    /// The socket is **not** connected — `recv_from` is used and datagrams
+    /// from other sources are silently discarded.
     pub async fn bind(
         local: SocketAddr,
         peer:  SocketAddr,
         id:    FaceId,
     ) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(local).await?;
-        socket.connect(peer).await?;
         Ok(Self { id, socket: Arc::new(socket), peer })
     }
 
-    /// Wrap an already-bound (and optionally connected) socket.
+    /// Wrap an already-bound socket, targeting `peer` for all sends.
     pub fn from_socket(id: FaceId, socket: UdpSocket, peer: SocketAddr) -> Self {
         Self { id, socket: Arc::new(socket), peer }
     }
@@ -59,17 +64,26 @@ impl Face for UdpFace {
     /// Receive the next NDN packet from the peer.
     ///
     /// NDN Data can reach 8800 bytes. The 9000-byte buffer covers a single
-    /// unfragmented packet. NDNLPv2 multi-fragment reassembly is a planned
-    /// future addition inside this face, invisible to the pipeline above.
+    /// unfragmented packet. Datagrams from addresses other than `self.peer`
+    /// are silently discarded.
     async fn recv(&self) -> Result<Bytes, FaceError> {
         let mut buf = vec![0u8; 9000];
-        let n = self.socket.recv(&mut buf).await?;
-        buf.truncate(n);
-        Ok(Bytes::from(buf))
+        loop {
+            let (n, src) = self.socket.recv_from(&mut buf).await?;
+            if src == self.peer {
+                trace!(face=%self.id, peer=%self.peer, len=n, "udp: recv");
+                buf.truncate(n);
+                return Ok(Bytes::from(buf));
+            }
+            // Ignore datagrams from other sources.
+            trace!(face=%self.id, expected=%self.peer, actual=%src, len=n, "udp: recv ignored (wrong source)");
+        }
     }
 
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {
-        self.socket.send(&pkt).await?;
+        let wire = ndn_packet::lp::encode_lp_packet(&pkt);
+        trace!(face=%self.id, peer=%self.peer, len=wire.len(), "udp: send");
+        self.socket.send_to(&wire, self.peer).await?;
         Ok(())
     }
 }
@@ -85,61 +99,50 @@ mod tests {
         w.finish()
     }
 
-    #[tokio::test]
-    async fn udp_roundtrip() {
+    /// The face wraps outgoing packets in NDNLPv2 LpPacket framing.
+    fn expected_on_wire(pkt: &Bytes) -> Bytes {
+        ndn_packet::lp::encode_lp_packet(pkt)
+    }
+
+    async fn face_pair() -> (UdpFace, UdpFace) {
         let sock_a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let sock_b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let addr_a = sock_a.local_addr().unwrap();
         let addr_b = sock_b.local_addr().unwrap();
 
-        sock_a.connect(addr_b).await.unwrap();
-        sock_b.connect(addr_a).await.unwrap();
-
         let face_a = UdpFace::from_socket(FaceId(0), sock_a, addr_b);
         let face_b = UdpFace::from_socket(FaceId(1), sock_b, addr_a);
+        (face_a, face_b)
+    }
+
+    #[tokio::test]
+    async fn udp_roundtrip() {
+        let (face_a, face_b) = face_pair().await;
 
         let pkt = test_packet(0xAB);
         face_a.send(pkt.clone()).await.unwrap();
         let received = face_b.recv().await.unwrap();
-        assert_eq!(received, pkt);
+        assert_eq!(received, expected_on_wire(&pkt));
     }
 
     #[tokio::test]
     async fn udp_bidirectional() {
-        let sock_a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let sock_b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let addr_a = sock_a.local_addr().unwrap();
-        let addr_b = sock_b.local_addr().unwrap();
-
-        sock_a.connect(addr_b).await.unwrap();
-        sock_b.connect(addr_a).await.unwrap();
-
-        let face_a = UdpFace::from_socket(FaceId(0), sock_a, addr_b);
-        let face_b = UdpFace::from_socket(FaceId(1), sock_b, addr_a);
+        let (face_a, face_b) = face_pair().await;
 
         face_a.send(test_packet(1)).await.unwrap();
         face_b.send(test_packet(2)).await.unwrap();
 
-        assert_eq!(face_b.recv().await.unwrap(), test_packet(1));
-        assert_eq!(face_a.recv().await.unwrap(), test_packet(2));
+        assert_eq!(face_b.recv().await.unwrap(), expected_on_wire(&test_packet(1)));
+        assert_eq!(face_a.recv().await.unwrap(), expected_on_wire(&test_packet(2)));
     }
 
     #[tokio::test]
     async fn udp_multiple_sequential() {
-        let sock_a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let sock_b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let addr_a = sock_a.local_addr().unwrap();
-        let addr_b = sock_b.local_addr().unwrap();
-
-        sock_a.connect(addr_b).await.unwrap();
-        sock_b.connect(addr_a).await.unwrap();
-
-        let face_a = UdpFace::from_socket(FaceId(0), sock_a, addr_b);
-        let face_b = UdpFace::from_socket(FaceId(1), sock_b, addr_a);
+        let (face_a, face_b) = face_pair().await;
 
         for i in 0u8..5 {
             face_a.send(test_packet(i)).await.unwrap();
-            assert_eq!(face_b.recv().await.unwrap(), test_packet(i));
+            assert_eq!(face_b.recv().await.unwrap(), expected_on_wire(&test_packet(i)));
         }
     }
 
