@@ -123,7 +123,7 @@ async fn run_server(
 
     let signer: Option<Arc<dyn Signer>> = if sign {
         let keychain = KeyChain::new();
-        let signer = keychain.create_identity(prefix.clone())?;
+        let signer = keychain.create_identity(prefix.clone(), None)?;
         eprintln!(
             "Signing with {} ({:?})",
             signer.key_name(),
@@ -219,7 +219,7 @@ async fn run_client(
         let wire = InterestBuilder::new(name.clone()).lifetime(lifetime_dur).build();
 
         let t0 = Instant::now();
-        match consumer.fetch_wire(wire).await {
+        match consumer.fetch_wire(wire, lifetime_dur).await {
             Ok(data) => {
                 let rtt_us = t0.elapsed().as_micros() as u64;
                 results.push(PingResult { rtt_us });

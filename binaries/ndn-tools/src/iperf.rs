@@ -230,7 +230,7 @@ async fn run_server(
     // Set up optional signing.
     let signer: Option<Arc<dyn Signer>> = if sign {
         let keychain = KeyChain::new();
-        Some(keychain.create_identity(prefix.clone())?)
+        Some(keychain.create_identity(prefix.clone(), None)?)
     } else {
         None
     };
