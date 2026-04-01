@@ -56,9 +56,9 @@ enum Command {
         #[arg(long, default_value = "/tmp/ndn-faces.sock")]
         face_socket: String,
 
-        /// SHM face name (omit to use Unix socket for data).
+        /// Disable SHM and use Unix socket for data plane.
         #[arg(long)]
-        shm: Option<String>,
+        no_shm: bool,
     },
     /// Run as client: send Interests and measure throughput.
     Client {
@@ -82,9 +82,9 @@ enum Command {
         #[arg(long, default_value = "/tmp/ndn-faces.sock")]
         face_socket: String,
 
-        /// SHM face name (omit to use Unix socket for data).
+        /// Disable SHM and use Unix socket for data plane.
         #[arg(long)]
-        shm: Option<String>,
+        no_shm: bool,
     },
 }
 
@@ -122,11 +122,15 @@ fn extract_seq(raw: &Bytes) -> Option<u64> {
 
 async fn run_server(
     face_socket: &str,
-    shm_name: Option<&str>,
+    no_shm: bool,
     prefix: &Name,
     payload_size: usize,
 ) -> Result<()> {
-    let client = RouterClient::connect_with_name(face_socket, shm_name).await?;
+    let client = if no_shm {
+        RouterClient::connect_unix_only(face_socket).await?
+    } else {
+        RouterClient::connect(face_socket).await?
+    };
     client.register_prefix(prefix).await?;
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
@@ -161,13 +165,17 @@ async fn run_server(
 
 async fn run_client(
     face_socket: &str,
-    shm_name: Option<&str>,
+    no_shm: bool,
     prefix: &Name,
     duration_secs: u64,
     window: usize,
     _payload_size: usize,
 ) -> Result<()> {
-    let client = RouterClient::connect_with_name(face_socket, shm_name).await?;
+    let client = if no_shm {
+        RouterClient::connect_unix_only(face_socket).await?
+    } else {
+        RouterClient::connect(face_socket).await?
+    };
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
     println!(
@@ -257,13 +265,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Server { prefix, size, face_socket, shm } => {
+        Command::Server { prefix, size, face_socket, no_shm } => {
             let prefix = parse_name(&prefix);
-            run_server(&face_socket, shm.as_deref(), &prefix, size).await
+            run_server(&face_socket, no_shm, &prefix, size).await
         }
-        Command::Client { prefix, duration, window, size, face_socket, shm } => {
+        Command::Client { prefix, duration, window, size, face_socket, no_shm } => {
             let prefix = parse_name(&prefix);
-            run_client(&face_socket, shm.as_deref(), &prefix, duration, window, size).await
+            run_client(&face_socket, no_shm, &prefix, duration, window, size).await
         }
     }
 }
