@@ -12,6 +12,58 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### Ergonomic application library API
+
+**ndn-packet (Name ergonomics):**
+- **`impl FromStr for Name`** — parse NDN URI strings (`"/edu/ucla/data".parse()`)
+  with percent-decoding; roundtrips with `Display`.
+- **`Name::append()`, `append_component()`, `append_segment()`** — by-value builder
+  methods for chaining: `prefix.clone().append("data").append_segment(42)`.
+- **`name!()` macro** — compile-time name construction: `name!("/iperf/data")`.
+- **`impl From<&str>` / `From<String>` for `Name`** — enables `InterestBuilder::new("/test")`.
+- **`SEGMENT` TLV type constant** (`0x32`).
+
+**ndn-packet (Packet builders):**
+- **`InterestBuilder`** — configurable Interest encoder with `lifetime()`,
+  `can_be_prefix()`, `must_be_fresh()`, `hop_limit()`, `app_parameters()`.
+- **`DataBuilder`** — configurable Data encoder with `freshness()` and async
+  `.sign(sig_type, key_locator, sign_fn)` for cryptographic signing.
+
+**ndn-app (Consumer/Producer):**
+- **`Consumer`** — high-level fetch API: `connect()`, `fetch()`, `get()`,
+  `fetch_verified()` (with `Validator` integration).
+- **`Producer`** — high-level serve API: `connect()`, `serve()` with async handler.
+- **`NdnConnection`** — unified enum over `AppHandle` (embedded) and `RouterClient`
+  (external).
+- **`KeyChain`** — simplified security facade: `create_identity()`, `signer()`,
+  `validator()`. Wraps `SecurityManager` + `FilePib`.
+- **`blocking` module** — `BlockingConsumer` / `BlockingProducer` behind `blocking`
+  feature flag; internal tokio runtime hidden from users (reqwest-style pattern).
+- **`prelude` module** — ergonomic imports: `Name`, `Interest`, `Data`,
+  `InterestBuilder`, `DataBuilder`, `Consumer`, `Producer`, `KeyChain`, `AppError`.
+
+**ndn-security:**
+- **`Signer::public_key()`** — optional trait method returning raw public key bytes.
+- **`SecurityManager::get_signer_sync()`** — synchronous signer lookup for non-async
+  contexts.
+- **`MemKeyStore::get_signer_sync()`** — made public.
+
+### Changed
+
+- All tools (`ndn-iperf`, `ndn-traffic`, `ndn-ping`, `ndn-peek`, `ndn-put`,
+  `ndn-ctl`, `ndn-sec`, `ndn-bench`, `ndn-router`) now use `Name::from_str()`
+  instead of duplicated `parse_name()` functions, and `Name::Display` instead of
+  duplicated `format_name()` functions.
+- Tool name-building code simplified with `Name::append()` (e.g.,
+  `prefix.clone().append(format!("{seq}"))` replaces iterator chains).
+
+### Removed
+
+- 8 duplicated `parse_name()` functions across tool binaries.
+- 3 duplicated `format_name()` functions (replaced by `Name`'s `Display` impl).
+
+### Added
+
 #### NFD-compatible management protocol
 
 Full NFD management protocol implementation using binary TLV encoding

@@ -816,6 +816,8 @@ dependencies = [
  "anyhow",
  "bytes",
  "ndn-engine",
+ "ndn-face-local",
+ "ndn-ipc",
  "ndn-packet",
  "ndn-pipeline",
  "ndn-security",
