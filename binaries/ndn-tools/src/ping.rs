@@ -25,10 +25,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 
-use ndn_app::KeyChain;
+use ndn_app::{AppError, Consumer, KeyChain};
 use ndn_ipc::RouterClient;
 use ndn_packet::encode::{DataBuilder, InterestBuilder};
-use ndn_packet::{Data, Interest, Name};
+use ndn_packet::{Interest, Name};
 use ndn_security::Signer;
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ async fn run_client(
     lifetime: u64,
 ) -> Result<()> {
     let prefix: Name = prefix.parse()?;
-    let client = connect(&conn).await?;
+    let mut consumer = Consumer::connect(&conn.face_socket).await?;
     let lifetime_dur = Duration::from_millis(lifetime);
     let interval_dur = Duration::from_millis(interval);
 
@@ -206,6 +206,7 @@ async fn run_client(
 
     let mut results: Vec<PingResult> = Vec::new();
     let mut timeouts: u64 = 0;
+    let mut nacks: u64 = 0;
     let mut seq: u64 = 0;
     let start = Instant::now();
 
@@ -218,27 +219,24 @@ async fn run_client(
         let wire = InterestBuilder::new(name.clone()).lifetime(lifetime_dur).build();
 
         let t0 = Instant::now();
-        client.send(wire).await?;
-
-        // Wait for Data or timeout.
-        let reply = tokio::time::timeout(lifetime_dur, client.recv()).await;
-
-        match reply {
-            Ok(Some(raw)) => {
+        match consumer.fetch_wire(wire).await {
+            Ok(data) => {
                 let rtt_us = t0.elapsed().as_micros() as u64;
-                let data_name = Data::decode(raw)
-                    .map(|d| d.name.to_string())
-                    .unwrap_or_else(|_| "?".into());
                 results.push(PingResult { rtt_us });
-                eprintln!("  {data_name}: seq={seq} rtt={}", format_rtt(rtt_us));
+                eprintln!("  {}: seq={seq} rtt={}", data.name, format_rtt(rtt_us));
             }
-            Ok(None) => {
-                eprintln!("  connection closed");
-                break;
+            Err(AppError::Nacked { reason }) => {
+                let rtt_us = t0.elapsed().as_micros() as u64;
+                nacks += 1;
+                eprintln!("  seq={seq}: nack ({reason:?}), rtt={}", format_rtt(rtt_us));
             }
-            Err(_) => {
+            Err(AppError::Timeout) => {
                 timeouts += 1;
                 eprintln!("  seq={seq}: timeout");
+            }
+            Err(e) => {
+                eprintln!("  seq={seq}: error ({e})");
+                break;
             }
         }
 
@@ -262,7 +260,7 @@ async fn run_client(
     println!();
     println!("--- {prefix} ping statistics ---");
     println!(
-        "{sent} packets transmitted, {received} received, {loss_pct:.1}% loss, time {:.1}s",
+        "{sent} transmitted, {received} received, {nacks} nacked, {loss_pct:.1}% loss, time {:.1}s",
         elapsed.as_secs_f64(),
     );
 
