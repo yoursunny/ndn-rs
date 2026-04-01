@@ -4,34 +4,50 @@
 //!
 //! ## Server mode
 //!
-//! Registers a prefix and responds to Interests with Data packets containing
-//! a fixed-size payload.
+//! Registers a prefix and responds to Interests with Data packets.
+//! Optionally signs each Data packet with Ed25519 (`--sign`).
 //!
 //! ```text
-//! ndn-iperf server [--prefix /iperf] [--size 8192] [--face-socket /tmp/ndn-faces.sock]
+//! ndn-iperf server [--prefix /iperf] [--size 8192] [--sign] [--freshness 0]
 //! ```
 //!
 //! ## Client mode
 //!
 //! Sends Interests in a sliding window and measures throughput + RTT.
+//! Prints per-interval statistics and a final summary.
 //!
 //! ```text
-//! ndn-iperf client [--prefix /iperf] [--duration 10] [--window 64] [--size 8192]
-//!                   [--face-socket /tmp/ndn-faces.sock]
+//! ndn-iperf client [--prefix /iperf] [--duration 10] [--window 64]
+//!                   [--lifetime 4000] [--interval 1]
 //! ```
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bytes::Bytes;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
+use ndn_app::KeyChain;
 use ndn_ipc::RouterClient;
-use ndn_packet::encode::{encode_data_unsigned, encode_interest};
+use ndn_packet::encode::{DataBuilder, InterestBuilder};
 use ndn_packet::{Data, Interest, Name};
+use ndn_security::Signer;
 
-// ─── CLI ─────────────────────────────────────────────────────────────────────
+// ─── CLI ────────────────────────────────────────────────────────────────────
+
+#[derive(Args, Clone)]
+struct ConnectOpts {
+    /// Router face socket path.
+    #[arg(long, default_value = "/tmp/ndn-faces.sock")]
+    face_socket: String,
+
+    /// Disable SHM and use Unix socket for data plane.
+    #[arg(long)]
+    no_shm: bool,
+}
 
 #[derive(Parser)]
 #[command(name = "ndn-iperf", about = "NDN bandwidth measurement tool")]
@@ -44,6 +60,9 @@ struct Cli {
 enum Command {
     /// Run as server: register prefix and respond to Interests.
     Server {
+        #[command(flatten)]
+        conn: ConnectOpts,
+
         /// Name prefix to register.
         #[arg(long, default_value = "/iperf")]
         prefix: String,
@@ -52,16 +71,27 @@ enum Command {
         #[arg(long, default_value_t = 8192)]
         size: usize,
 
-        /// Router face socket path.
-        #[arg(long, default_value = "/tmp/ndn-faces.sock")]
-        face_socket: String,
-
-        /// Disable SHM and use Unix socket for data plane.
+        /// Sign Data packets with Ed25519.
         #[arg(long)]
-        no_shm: bool,
+        sign: bool,
+
+        /// Data freshness period in milliseconds (0 = omit).
+        #[arg(long, default_value_t = 0)]
+        freshness: u64,
+
+        /// Suppress periodic status reports.
+        #[arg(long, short)]
+        quiet: bool,
+
+        /// Status report interval in seconds.
+        #[arg(long, default_value_t = 1)]
+        interval: u64,
     },
     /// Run as client: send Interests and measure throughput.
     Client {
+        #[command(flatten)]
+        conn: ConnectOpts,
+
         /// Name prefix to query.
         #[arg(long, default_value = "/iperf")]
         prefix: String,
@@ -74,24 +104,28 @@ enum Command {
         #[arg(long, default_value_t = 64)]
         window: usize,
 
-        /// Expected Data payload size (for display only).
-        #[arg(long, default_value_t = 8192)]
-        size: usize,
+        /// Interest lifetime in milliseconds.
+        #[arg(long, default_value_t = 4000)]
+        lifetime: u64,
 
-        /// Router face socket path.
-        #[arg(long, default_value = "/tmp/ndn-faces.sock")]
-        face_socket: String,
+        /// Suppress periodic status reports.
+        #[arg(long, short)]
+        quiet: bool,
 
-        /// Disable SHM and use Unix socket for data plane.
-        #[arg(long)]
-        no_shm: bool,
+        /// Status report interval in seconds.
+        #[arg(long, default_value_t = 1)]
+        interval: u64,
     },
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-fn build_name(prefix: &Name, seq: u64) -> Name {
-    prefix.clone().append(format!("{seq}"))
+async fn connect(opts: &ConnectOpts) -> Result<RouterClient> {
+    if opts.no_shm {
+        Ok(RouterClient::connect_unix_only(&opts.face_socket).await?)
+    } else {
+        Ok(RouterClient::connect(&opts.face_socket).await?)
+    }
 }
 
 fn extract_seq(raw: &Bytes) -> Option<u64> {
@@ -100,132 +134,289 @@ fn extract_seq(raw: &Bytes) -> Option<u64> {
     std::str::from_utf8(&last.value).ok()?.parse().ok()
 }
 
-// ─── Server ──────────────────────────────────────────────────────────────────
+fn format_throughput(bytes: u64, duration: Duration) -> String {
+    let secs = duration.as_secs_f64();
+    if secs == 0.0 {
+        return "0 bps".into();
+    }
+    let bps = bytes as f64 * 8.0 / secs;
+    if bps >= 1_000_000_000.0 {
+        format!("{:.2} Gbps", bps / 1_000_000_000.0)
+    } else if bps >= 1_000_000.0 {
+        format!("{:.2} Mbps", bps / 1_000_000.0)
+    } else if bps >= 1_000.0 {
+        format!("{:.2} Kbps", bps / 1_000.0)
+    } else {
+        format!("{:.0} bps", bps)
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.2} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+// ─── Interval stats (lock-free) ─────────────────────────────────────────────
+
+struct IntervalCounters {
+    bytes:     AtomicU64,
+    pkts:      AtomicU64,
+    rtt_sum:   AtomicU64,
+    rtt_count: AtomicU64,
+}
+
+impl IntervalCounters {
+    fn new() -> Self {
+        Self {
+            bytes:     AtomicU64::new(0),
+            pkts:      AtomicU64::new(0),
+            rtt_sum:   AtomicU64::new(0),
+            rtt_count: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, bytes: u64) {
+        self.bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.pkts.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_rtt(&self, rtt_us: u64) {
+        self.rtt_sum.fetch_add(rtt_us, Ordering::Relaxed);
+        self.rtt_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Atomically drain all interval counters, returning (bytes, pkts, rtt_sum, rtt_count).
+    fn drain(&self) -> (u64, u64, u64, u64) {
+        (
+            self.bytes.swap(0, Ordering::Relaxed),
+            self.pkts.swap(0, Ordering::Relaxed),
+            self.rtt_sum.swap(0, Ordering::Relaxed),
+            self.rtt_count.swap(0, Ordering::Relaxed),
+        )
+    }
+}
+
+// ─── Server ─────────────────────────────────────────────────────────────────
 
 async fn run_server(
-    face_socket: &str,
-    no_shm: bool,
+    conn: &ConnectOpts,
     prefix: &Name,
     payload_size: usize,
+    sign: bool,
+    freshness_ms: u64,
+    quiet: bool,
+    interval_secs: u64,
 ) -> Result<()> {
-    let client = if no_shm {
-        RouterClient::connect_unix_only(face_socket).await?
-    } else {
-        RouterClient::connect(face_socket).await?
-    };
+    let client = connect(conn).await?;
     client.register_prefix(prefix).await?;
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
-    println!(
-        "ndn-iperf server: prefix={prefix} transport={transport} payload={payload_size}B",
-    );
-    println!("  waiting for Interests... (Ctrl-C to stop)");
+    eprintln!("ndn-iperf server: prefix={prefix} transport={transport} payload={payload_size}B");
+    if sign {
+        eprintln!("  signing:  Ed25519");
+    }
+    if freshness_ms > 0 {
+        eprintln!("  freshness: {freshness_ms}ms");
+    }
+    eprintln!("  waiting for Interests... (Ctrl-C to stop)");
+
+    // Set up optional signing.
+    let signer: Option<Arc<dyn Signer>> = if sign {
+        let keychain = KeyChain::new();
+        Some(keychain.create_identity(prefix.clone())?)
+    } else {
+        None
+    };
+
+    let freshness = if freshness_ms > 0 {
+        Some(Duration::from_millis(freshness_ms))
+    } else {
+        None
+    };
 
     let payload = vec![0xAAu8; payload_size];
-    let mut recv_count: u64 = 0;
-    let mut interest_count: u64 = 0;
-    let mut send_count: u64 = 0;
-    let mut non_interest_count: u64 = 0;
+    let counters = Arc::new(IntervalCounters::new());
+    let start = Instant::now();
+
+    // Periodic stats printer.
+    if !quiet {
+        let counters = counters.clone();
+        let interval_dur = Duration::from_secs(interval_secs);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval_dur);
+            ticker.tick().await; // skip first immediate tick
+            loop {
+                ticker.tick().await;
+                let (bytes, pkts, _, _) = counters.drain();
+                let elapsed = start.elapsed();
+                let tp = format_throughput(bytes, interval_dur);
+                eprintln!(
+                    "[{:>6.1}s]  {tp:>14}  {pkts:>8} pkt/s",
+                    elapsed.as_secs_f64(),
+                );
+            }
+        });
+    }
+
+    let mut total_interests: u64 = 0;
+    let mut total_sent: u64 = 0;
+    let mut non_interest: u64 = 0;
 
     loop {
         let raw = match client.recv().await {
             Some(b) => b,
             None => {
-                eprintln!(
-                    "  server: recv returned None (channel closed) after {recv_count} packets"
-                );
+                eprintln!("  connection closed after {total_interests} Interests");
                 break;
             }
         };
-        recv_count += 1;
 
-        let interest = match Interest::decode(raw.clone()) {
+        let interest = match Interest::decode(raw) {
             Ok(i) => i,
             Err(_) => {
-                non_interest_count += 1;
-                if non_interest_count <= 5 {
-                    eprintln!(
-                        "  server: non-Interest packet #{non_interest_count} (first byte: 0x{:02X}, len={})",
-                        raw.first().copied().unwrap_or(0),
-                        raw.len()
-                    );
-                }
+                non_interest += 1;
                 continue;
             }
         };
-        interest_count += 1;
+        total_interests += 1;
 
-        let data = encode_data_unsigned(&interest.name, &payload);
+        // Build the Data packet using DataBuilder.
+        let mut builder = DataBuilder::new((*interest.name).clone(), &payload);
+        if let Some(f) = freshness {
+            builder = builder.freshness(f);
+        }
+
+        let data = if let Some(ref signer) = signer {
+            let sig_type = signer.sig_type();
+            let key_name = signer.key_name().clone();
+            let s = signer.clone();
+            builder
+                .sign(sig_type, Some(&key_name), |region| {
+                    let owned = region.to_vec();
+                    async move { s.sign(&owned).await.expect("signing failed") }
+                })
+                .await
+        } else {
+            builder.build()
+        };
+
+        let data_len = data.len() as u64;
         if let Err(e) = client.send(data).await {
-            eprintln!("send error: {e}");
+            eprintln!("  send error: {e}");
             break;
         }
-        send_count += 1;
+        total_sent += 1;
+        counters.record(data_len);
     }
 
-    eprintln!(
-        "  server stats: recv={recv_count} interests={interest_count} non_interest={non_interest_count} sent={send_count}"
-    );
+    let elapsed = start.elapsed();
+    eprintln!();
+    eprintln!("--- server summary ---");
+    eprintln!("  uptime:        {:.1}s", elapsed.as_secs_f64());
+    eprintln!("  interests:     {total_interests}");
+    eprintln!("  data sent:     {total_sent}");
+    if non_interest > 0 {
+        eprintln!("  non-interest:  {non_interest}");
+    }
 
     Ok(())
 }
 
-// ─── Client ──────────────────────────────────────────────────────────────────
+// ─── Client ─────────────────────────────────────────────────────────────────
 
 async fn run_client(
-    face_socket: &str,
-    no_shm: bool,
+    conn: &ConnectOpts,
     prefix: &Name,
     duration_secs: u64,
     window: usize,
-    _payload_size: usize,
+    lifetime_ms: u64,
+    quiet: bool,
+    interval_secs: u64,
 ) -> Result<()> {
-    let client = if no_shm {
-        RouterClient::connect_unix_only(face_socket).await?
-    } else {
-        RouterClient::connect(face_socket).await?
-    };
+    let client = connect(conn).await?;
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
-    println!(
-        "ndn-iperf client: prefix={prefix} transport={transport} duration={duration_secs}s window={window}",
-    );
+    let lifetime = Duration::from_millis(lifetime_ms);
 
-    let deadline = Instant::now() + Duration::from_secs(duration_secs);
+    eprintln!("ndn-iperf client: prefix={prefix} transport={transport}");
+    eprintln!("  duration={duration_secs}s  window={window}  lifetime={lifetime_ms}ms");
+    eprintln!("  testing...");
+
+    let counters = Arc::new(IntervalCounters::new());
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(duration_secs);
+
+    // Periodic stats printer.
+    if !quiet {
+        let counters = counters.clone();
+        let interval_dur = Duration::from_secs(interval_secs);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval_dur);
+            ticker.tick().await; // skip first immediate tick
+            loop {
+                ticker.tick().await;
+                let (bytes, pkts, rtt_sum, rtt_count) = counters.drain();
+                let elapsed = start.elapsed();
+                let tp = format_throughput(bytes, interval_dur);
+                let rtt_str = if rtt_count > 0 {
+                    format!("rtt={:.0}us", rtt_sum as f64 / rtt_count as f64)
+                } else {
+                    "rtt=n/a".into()
+                };
+                eprintln!(
+                    "[{:>6.1}s]  {tp:>14}  {pkts:>8} pkt/s  {rtt_str}",
+                    elapsed.as_secs_f64(),
+                );
+            }
+        });
+    }
+
     let mut timestamps: HashMap<u64, Instant> = HashMap::new();
     let mut next_seq: u64 = 0;
     let mut total_bytes: u64 = 0;
     let mut received: u64 = 0;
+    let mut timeouts: u64 = 0;
     let mut rtts: Vec<u64> = Vec::new();
 
-    // Fill the window.
+    // Fill the initial window.
     for _ in 0..window {
-        let name = build_name(prefix, next_seq);
-        let wire = encode_interest(&name, None);
+        let name = prefix.clone().append(format!("{next_seq}"));
+        let wire = InterestBuilder::new(name).lifetime(lifetime).build();
         timestamps.insert(next_seq, Instant::now());
         client.send(wire).await?;
         next_seq += 1;
     }
 
-    eprintln!("  client: sent initial window of {window} Interests, waiting for Data...");
+    let recv_timeout = Duration::from_millis(lifetime_ms + 1000);
 
-    let mut timeouts: u64 = 0;
-    let mut recv_none: u64 = 0;
     let sent = loop {
-        match tokio::time::timeout(Duration::from_secs(4), client.recv()).await {
+        match tokio::time::timeout(recv_timeout, client.recv()).await {
             Ok(Some(data_bytes)) => {
-                total_bytes += data_bytes.len() as u64;
+                let data_len = data_bytes.len() as u64;
+                total_bytes += data_len;
                 received += 1;
 
-                if let Some(seq) = extract_seq(&data_bytes) {
-                    if let Some(t0) = timestamps.remove(&seq) {
-                        rtts.push(t0.elapsed().as_micros() as u64);
-                    }
-                }
+                let rtt_us = extract_seq(&data_bytes).and_then(|seq| {
+                    timestamps.remove(&seq).map(|t0| t0.elapsed().as_micros() as u64)
+                });
 
+                if let Some(rtt) = rtt_us {
+                    rtts.push(rtt);
+                    counters.record_rtt(rtt);
+                }
+                counters.record(data_len);
+
+                // Send next Interest if still within test duration.
                 if Instant::now() < deadline {
-                    let name = build_name(prefix, next_seq);
-                    let wire = encode_interest(&name, None);
+                    let name = prefix.clone().append(format!("{next_seq}"));
+                    let wire = InterestBuilder::new(name).lifetime(lifetime).build();
                     timestamps.insert(next_seq, Instant::now());
                     client.send(wire).await?;
                     next_seq += 1;
@@ -234,59 +425,67 @@ async fn run_client(
                 }
             }
             Ok(None) => {
-                recv_none += 1;
-                eprintln!("  client: recv returned None (channel closed)");
+                eprintln!("  connection closed");
                 break next_seq;
             }
             Err(_) => {
                 timeouts += 1;
-                eprintln!(
-                    "  client: recv timeout #{timeouts} (4s), outstanding={}",
-                    timestamps.len()
-                );
-                if Instant::now() >= deadline {
+                // Expire stale timestamps.
+                let now = Instant::now();
+                timestamps.retain(|_, t0| {
+                    now.duration_since(*t0) < recv_timeout
+                });
+                if now >= deadline {
                     break next_seq;
                 }
             }
         }
     };
 
-    if received == 0 {
-        eprintln!("  client: WARNING — received 0 packets! timeouts={timeouts} none={recv_none}");
-        eprintln!(
-            "  client: sent {next_seq} Interests total; check that server is running and prefix is registered"
-        );
-    }
-
-    // ── Report ───────────────────────────────────────────────────────────────
-
-    let elapsed = Duration::from_secs(duration_secs);
-    let total_mb = total_bytes as f64 / (1024.0 * 1024.0);
-    let mbps = total_bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1_000_000.0;
-    let avg_rtt = if !rtts.is_empty() {
-        rtts.iter().sum::<u64>() / rtts.len() as u64
+    let actual_elapsed = start.elapsed();
+    let loss_pct = if sent > 0 {
+        (1.0 - received as f64 / sent as f64) * 100.0
     } else {
-        0
+        0.0
     };
 
-    println!("  transferred: {total_mb:.2} MB ({total_bytes} bytes)");
-    println!("  throughput:  {mbps:.2} Mbps");
-    println!("  packets:     {sent} sent, {received} received");
-    println!("  avg RTT:     {avg_rtt} us");
+    // ── Final Report ──────────────────────────────────────────────────────
+
+    eprintln!();
+    println!("--- ndn-iperf results ---");
+    println!("  duration:    {:.2}s", actual_elapsed.as_secs_f64());
+    println!(
+        "  transferred: {} ({total_bytes} bytes)",
+        format_bytes(total_bytes),
+    );
+    println!(
+        "  throughput:  {}",
+        format_throughput(total_bytes, actual_elapsed),
+    );
+    println!("  packets:     {sent} sent, {received} received ({loss_pct:.1}% loss)");
+    if timeouts > 0 {
+        println!("  timeouts:    {timeouts}");
+    }
 
     if !rtts.is_empty() {
         rtts.sort_unstable();
         let n = rtts.len();
+        let avg = rtts.iter().sum::<u64>() / n as u64;
+        let min = rtts[0];
+        let max = rtts[n - 1];
         let p50 = rtts[n / 2];
-        let p95 = rtts[(n * 95) / 100];
-        let p99 = rtts[(n * 99) / 100];
-        println!("  RTT detail:  p50={p50}us p95={p95}us p99={p99}us");
+        let p95 = rtts[n * 95 / 100];
+        let p99 = rtts[n * 99 / 100];
+        println!("  RTT:         avg={avg}us min={min}us max={max}us");
+        println!("               p50={p50}us p95={p95}us p99={p99}us");
+    } else {
+        println!("  RTT:         no samples");
     }
 
     Ok(())
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ─── Main ───────────────────────────────────────────────────────────────────
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -294,25 +493,16 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Server {
-            prefix,
-            size,
-            face_socket,
-            no_shm,
+            conn, prefix, size, sign, freshness, quiet, interval,
         } => {
-            let prefix: Name = prefix.parse().unwrap_or_else(|_| Name::root());
-            run_server(&face_socket, no_shm, &prefix, size).await
+            let prefix: Name = prefix.parse()?;
+            run_server(&conn, &prefix, size, sign, freshness, quiet, interval).await
         }
         Command::Client {
-            prefix,
-            duration,
-            window,
-            size,
-            face_socket,
-            no_shm,
+            conn, prefix, duration, window, lifetime, quiet, interval,
         } => {
-            let prefix: Name = prefix.parse().unwrap_or_else(|_| Name::root());
-            run_client(&face_socket, no_shm, &prefix, duration, window, size).await
+            let prefix: Name = prefix.parse()?;
+            run_client(&conn, &prefix, duration, window, lifetime, quiet, interval).await
         }
     }
 }
-
