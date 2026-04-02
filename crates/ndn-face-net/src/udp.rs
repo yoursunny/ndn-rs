@@ -111,17 +111,28 @@ impl Face for UdpFace {
     }
 
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {
-        let wire = ndn_packet::lp::encode_lp_packet(&pkt);
-        if wire.len() <= self.mtu {
+        // LpPacket envelope adds ~4 bytes overhead.  Check whether the packet
+        // needs fragmentation *before* wrapping to avoid an 8 KB allocation
+        // that would immediately be discarded.
+        if pkt.len() + 4 <= self.mtu {
+            let wire = ndn_packet::lp::encode_lp_packet(&pkt);
             trace!(face=%self.id, peer=%self.peer, len=wire.len(), "udp: send");
             self.socket.send_to(&wire, self.peer).await?;
         } else {
-            // Fragment the original packet (not the LpPacket wrapper).
             let seq = self.seq.fetch_add(1, Ordering::Relaxed);
             let fragments = fragment_packet(&pkt, self.mtu, seq);
             trace!(face=%self.id, peer=%self.peer, frags=fragments.len(), seq, "udp: send fragmented");
+            // Use try_send_to to avoid tokio async poll overhead per fragment.
+            // UDP sends almost never block (kernel just copies to send buffer).
             for frag in &fragments {
-                self.socket.send_to(frag, self.peer).await?;
+                match self.socket.try_send_to(frag, self.peer) {
+                    Ok(_) => {}
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        // Socket buffer full — fall back to async send.
+                        self.socket.send_to(frag, self.peer).await?;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
         Ok(())

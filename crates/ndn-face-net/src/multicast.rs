@@ -87,14 +87,20 @@ impl Face for MulticastUdpFace {
 
     /// Broadcast an NDN packet to the multicast group.
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {
-        let wire = ndn_packet::lp::encode_lp_packet(&pkt);
-        if wire.len() <= self.mtu {
+        if pkt.len() + 4 <= self.mtu {
+            let wire = ndn_packet::lp::encode_lp_packet(&pkt);
             self.socket.send_to(&wire, self.dest).await?;
         } else {
             let seq = self.seq.fetch_add(1, Ordering::Relaxed);
             let fragments = fragment_packet(&pkt, self.mtu, seq);
             for frag in &fragments {
-                self.socket.send_to(frag, self.dest).await?;
+                match self.socket.try_send_to(frag, self.dest) {
+                    Ok(_) => {}
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        self.socket.send_to(frag, self.dest).await?;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
         Ok(())
