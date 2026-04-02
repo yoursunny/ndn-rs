@@ -399,6 +399,14 @@ conventions (`/localhost/nfd/<module>/<verb>/<ControlParameters>`).
   per Data packet.
 - **Send queue capacity** increased from 128 to 512 to absorb bursts from
   parallel pipeline tasks dispatching to the same face near-simultaneously.
+- **CS empty-check bypass** — `LruCs` maintains an atomic entry count.
+  `get()` returns `None` immediately when the count is zero, skipping
+  the global Mutex entirely.  Eliminates the main serialization point for
+  parallel pipeline tasks on workloads that don't cache (e.g. iperf).
+- **Strategy sync fast-path** — `ErasedStrategy::decide_sync()` lets
+  strategies return a forwarding decision without `Box::pin` heap
+  allocation.  `BestRouteStrategy` and `MulticastStrategy` implement
+  this, avoiding one allocation per Interest on the hot path.
 
 ### Fixed
 
