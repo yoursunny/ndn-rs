@@ -1,42 +1,24 @@
-/// ndn-ctl — send a management command to a running ndn-router.
+/// ndn-ctl — send management commands to a running ndn-router.
 ///
-/// Commands are expressed as NFD management Interests sent over the router's
-/// face socket (`/tmp/ndn-faces.sock`).  The response is a Data packet whose
-/// Content carries a ControlResponse TLV (type 0x65).
+/// Commands follow the `<noun> <verb>` pattern (like NFD's `nfdc`):
+///
+/// ```sh
+/// ndn-ctl route add /ndn --face 1 --cost 10
+/// ndn-ctl route list
+/// ndn-ctl face create udp4://192.168.1.1:6363
+/// ndn-ctl face list
+/// ndn-ctl strategy set /ndn --strategy /localhost/nfd/strategy/best-route
+/// ndn-ctl cs info
+/// ndn-ctl status
+/// ndn-ctl shutdown
+/// ```
 ///
 /// An optional `--bypass` flag falls back to the legacy transport: raw JSON
 /// over a Unix socket.
-///
-/// # NFD protocol
-///
-/// - **Interest name**: `/localhost/nfd/<module>/<verb>/<ControlParameters>`
-/// - **Data Content**: ControlResponse TLV (StatusCode, StatusText, optional body)
-///
-/// # Examples
-///
-/// ```sh
-/// ndn-ctl add-route /ndn --face 1 --cost 10
-/// ndn-ctl remove-route /ndn --face 1
-/// ndn-ctl list-routes
-/// ndn-ctl list-faces
-/// ndn-ctl get-stats
-/// ndn-ctl shutdown
-///
-/// # Custom face socket:
-/// ndn-ctl --face-socket /var/run/ndn/faces.sock get-stats
-///
-/// # Bypass: Unix socket JSON:
-/// ndn-ctl --bypass --socket /tmp/ndn-router.sock get-stats
-/// ```
-use bytes::Bytes;
 use clap::{Parser, Subcommand};
-use ndn_packet::Name;
-use ndn_packet::encode::encode_interest;
 
-use ndn_config::{
-    ControlParameters, ControlResponse,
-    nfd_command::{module, verb, command_name},
-};
+use ndn_config::ControlResponse;
+use ndn_ipc::MgmtClient;
 
 // Legacy JSON types (bypass path only).
 #[cfg(unix)]
@@ -47,7 +29,7 @@ use ndn_config::{ManagementRequest, ManagementResponse};
 #[derive(Parser)]
 #[command(
     name    = "ndn-ctl",
-    about   = "Send a management command to a running ndn-router",
+    about   = "Send management commands to a running ndn-router",
     version
 )]
 struct Cli {
@@ -73,42 +55,77 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Add (or update) a FIB route.
-    AddRoute {
+    /// Manage routes.
+    Route {
+        #[command(subcommand)]
+        action: RouteAction,
+    },
+    /// Manage faces.
+    Face {
+        #[command(subcommand)]
+        action: FaceAction,
+    },
+    /// Manage forwarding strategies.
+    Strategy {
+        #[command(subcommand)]
+        action: StrategyAction,
+    },
+    /// Content store operations.
+    Cs {
+        #[command(subcommand)]
+        action: CsAction,
+    },
+    /// Display forwarder status.
+    Status,
+    /// Request graceful shutdown of the router.
+    Shutdown,
+}
+
+#[derive(Subcommand)]
+enum RouteAction {
+    /// Add (or update) a route.
+    Add {
         /// NDN name prefix (e.g. /ndn/test).
         prefix: String,
-        /// Face ID.
-        #[arg(long)]
+        /// Face ID (nexthop).
+        #[arg(long, alias = "nexthop")]
         face: u32,
         /// Routing cost; lower is preferred (default: 10).
         #[arg(long, default_value = "10")]
         cost: u32,
     },
-    /// Remove a FIB route.
-    RemoveRoute {
+    /// Remove a route.
+    Remove {
         /// NDN name prefix.
         prefix: String,
         /// Face ID.
-        #[arg(long)]
+        #[arg(long, alias = "nexthop")]
         face: u32,
     },
-    /// List all FIB routes.
-    ListRoutes,
-    /// List all registered faces.
-    ListFaces,
+    /// List all routes.
+    List,
+}
+
+#[derive(Subcommand)]
+enum FaceAction {
     /// Create a face.
-    FaceCreate {
+    Create {
         /// Face URI (e.g. udp4://192.168.1.1:6363, tcp4://router.example.com:6363).
         uri: String,
     },
     /// Destroy a face.
-    FaceDestroy {
+    Destroy {
         /// Face ID to destroy.
-        #[arg(long)]
-        face: u32,
+        face_id: u32,
     },
+    /// List all faces.
+    List,
+}
+
+#[derive(Subcommand)]
+enum StrategyAction {
     /// Set the forwarding strategy for a name prefix.
-    StrategySet {
+    Set {
         /// NDN name prefix (e.g. /ndn/test).
         prefix: String,
         /// Strategy name (e.g. /localhost/nfd/strategy/best-route).
@@ -116,18 +133,18 @@ enum Command {
         strategy: String,
     },
     /// Unset (remove) the forwarding strategy for a name prefix.
-    StrategyUnset {
+    Unset {
         /// NDN name prefix.
         prefix: String,
     },
     /// List all strategy choices.
-    StrategyList,
+    List,
+}
+
+#[derive(Subcommand)]
+enum CsAction {
     /// Display content store info (capacity, entries, memory).
-    CsInfo,
-    /// Display engine statistics (PIT size, etc.).
-    GetStats,
-    /// Request a graceful shutdown of the router.
-    Shutdown,
+    Info,
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
@@ -143,49 +160,87 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-// ─── NFD TLV transport (primary) ─────────────────────────────────────────────
+// ─── NFD transport (primary) ────────────────────────────────────────────────
 
-/// Build the NFD command name and send it as an Interest.
 #[cfg(unix)]
 async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
     use anyhow::Context as _;
-    use ndn_face_local::UnixFace;
-    use ndn_packet::Data;
-    use ndn_transport::{Face, FaceId};
 
-    let face = UnixFace::connect(FaceId(0), &cli.face_socket)
+    let mgmt = MgmtClient::connect(&cli.face_socket)
         .await
         .with_context(|| {
             format!("Cannot connect to '{}'. Is ndn-router running?", cli.face_socket)
         })?;
 
-    let name = build_nfd_name(&cli.command);
-    let interest_bytes = encode_interest(&name, None);
-
-    face.send(interest_bytes).await
-        .map_err(|e| anyhow::anyhow!("Failed to send Interest: {e}"))?;
-
-    let data_bytes = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        face.recv(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Timed out waiting for response"))?
-    .map_err(|e| anyhow::anyhow!("Failed to receive response: {e}"))?;
-
-    let data = Data::decode(data_bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to decode Data response: {e}"))?;
-
-    let content = data.content()
-        .ok_or_else(|| anyhow::anyhow!("Data response has no Content field"))?;
-
-    let resp = ControlResponse::decode(Bytes::copy_from_slice(content))
-        .map_err(|e| anyhow::anyhow!("Cannot parse ControlResponse: {e}"))?;
-
-    print_control_response(&resp);
-
-    if !resp.is_ok() {
-        std::process::exit(1);
+    match &cli.command {
+        Command::Route { action } => match action {
+            RouteAction::Add { prefix, face, cost } => {
+                let resp = mgmt.route_add(
+                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                    *face as u64,
+                    *cost as u64,
+                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            RouteAction::Remove { prefix, face } => {
+                let resp = mgmt.route_remove(
+                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                    *face as u64,
+                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            RouteAction::List => {
+                let resp = mgmt.route_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+        },
+        Command::Face { action } => match action {
+            FaceAction::Create { uri } => {
+                let resp = mgmt.face_create(uri).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            FaceAction::Destroy { face_id } => {
+                let resp = mgmt.face_destroy(*face_id as u64).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            FaceAction::List => {
+                let resp = mgmt.face_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+        },
+        Command::Strategy { action } => match action {
+            StrategyAction::Set { prefix, strategy } => {
+                let resp = mgmt.strategy_set(
+                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                    &strategy.parse().map_err(|e| anyhow::anyhow!("bad strategy: {e}"))?,
+                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            StrategyAction::Unset { prefix } => {
+                let resp = mgmt.strategy_unset(
+                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            StrategyAction::List => {
+                let resp = mgmt.strategy_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+        },
+        Command::Cs { action } => match action {
+            CsAction::Info => {
+                let resp = mgmt.cs_info().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+        },
+        Command::Status => {
+            let resp = mgmt.status().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+            print_control_response(&resp);
+        }
+        Command::Shutdown => {
+            let resp = mgmt.shutdown().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+            print_control_response(&resp);
+        }
     }
 
     Ok(())
@@ -194,77 +249,6 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 async fn run_nfd(_cli: &Cli) -> anyhow::Result<()> {
     anyhow::bail!("NDN management transport requires Unix domain sockets")
-}
-
-// ─── NFD command name builder ────────────────────────────────────────────────
-
-fn build_nfd_name(cmd: &Command) -> Name {
-    match cmd {
-        Command::AddRoute { prefix, face, cost } => {
-            let params = ControlParameters {
-                name: Some(prefix.parse().unwrap()),
-                face_id: Some(*face as u64),
-                cost: Some(*cost as u64),
-                ..Default::default()
-            };
-            command_name(module::RIB, verb::REGISTER, &params)
-        }
-        Command::RemoveRoute { prefix, face } => {
-            let params = ControlParameters {
-                name: Some(prefix.parse().unwrap()),
-                face_id: Some(*face as u64),
-                ..Default::default()
-            };
-            command_name(module::RIB, verb::UNREGISTER, &params)
-        }
-        Command::ListRoutes => {
-            ndn_config::nfd_command::dataset_name(module::FIB, verb::LIST)
-        }
-        Command::ListFaces => {
-            ndn_config::nfd_command::dataset_name(module::FACES, verb::LIST)
-        }
-        Command::FaceCreate { uri } => {
-            let params = ControlParameters {
-                uri: Some(uri.clone()),
-                ..Default::default()
-            };
-            command_name(module::FACES, verb::CREATE, &params)
-        }
-        Command::FaceDestroy { face } => {
-            let params = ControlParameters {
-                face_id: Some(*face as u64),
-                ..Default::default()
-            };
-            command_name(module::FACES, verb::DESTROY, &params)
-        }
-        Command::StrategySet { prefix, strategy } => {
-            let params = ControlParameters {
-                name: Some(prefix.parse().unwrap()),
-                strategy: Some(strategy.parse().unwrap()),
-                ..Default::default()
-            };
-            command_name(module::STRATEGY, verb::SET, &params)
-        }
-        Command::StrategyUnset { prefix } => {
-            let params = ControlParameters {
-                name: Some(prefix.parse().unwrap()),
-                ..Default::default()
-            };
-            command_name(module::STRATEGY, verb::UNSET, &params)
-        }
-        Command::StrategyList => {
-            ndn_config::nfd_command::dataset_name(module::STRATEGY, verb::LIST)
-        }
-        Command::CsInfo => {
-            ndn_config::nfd_command::dataset_name(module::CS, verb::INFO)
-        }
-        Command::GetStats => {
-            ndn_config::nfd_command::dataset_name(module::STATUS, b"general")
-        }
-        Command::Shutdown => {
-            ndn_config::nfd_command::dataset_name(module::STATUS, b"shutdown")
-        }
-    }
 }
 
 // ─── Bypass transport (legacy) ────────────────────────────────────────────────
@@ -312,58 +296,64 @@ async fn send_unix(
 #[cfg(unix)]
 fn build_legacy_request(cmd: &Command) -> ManagementRequest {
     match cmd {
-        Command::AddRoute { prefix, face, cost } => ManagementRequest::AddRoute {
-            prefix: prefix.clone(),
-            face:   *face,
-            cost:   *cost,
+        Command::Route { action } => match action {
+            RouteAction::Add { prefix, face, cost } => ManagementRequest::AddRoute {
+                prefix: prefix.clone(),
+                face: *face,
+                cost: *cost,
+            },
+            RouteAction::Remove { prefix, face } => ManagementRequest::RemoveRoute {
+                prefix: prefix.clone(),
+                face: *face,
+            },
+            RouteAction::List => ManagementRequest::ListRoutes,
         },
-        Command::RemoveRoute { prefix, face } => ManagementRequest::RemoveRoute {
-            prefix: prefix.clone(),
-            face:   *face,
+        Command::Face { action } => match action {
+            FaceAction::List => ManagementRequest::ListFaces,
+            // These commands have no legacy equivalent — fall back to stats.
+            _ => ManagementRequest::GetStats,
         },
-        Command::ListRoutes  => ManagementRequest::ListRoutes,
-        Command::ListFaces   => ManagementRequest::ListFaces,
-        Command::GetStats    => ManagementRequest::GetStats,
-        Command::Shutdown    => ManagementRequest::Shutdown,
-        // These commands have no legacy equivalent — use NFD transport.
-        Command::StrategySet { .. }
-        | Command::StrategyUnset { .. }
-        | Command::StrategyList
-        | Command::CsInfo
-        | Command::FaceCreate { .. }
-        | Command::FaceDestroy { .. } => ManagementRequest::GetStats, // placeholder; bypass won't be used
+        Command::Status => ManagementRequest::GetStats,
+        Command::Shutdown => ManagementRequest::Shutdown,
+        // Commands with no legacy equivalent.
+        _ => ManagementRequest::GetStats,
     }
 }
 
 // ─── Output ──────────────────────────────────────────────────────────────────
 
+fn print_params(params: &ndn_config::ControlParameters) {
+    println!("200 OK");
+    if let Some(ref name) = params.name {
+        println!("  Name:    {}", name);
+    }
+    if let Some(id) = params.face_id {
+        println!("  FaceId:  {id}");
+    }
+    if let Some(ref uri) = params.uri {
+        println!("  Uri:     {uri}");
+    }
+    if let Some(ref local_uri) = params.local_uri {
+        println!("  LocalUri: {local_uri}");
+    }
+    if let Some(cost) = params.cost {
+        println!("  Cost:    {cost}");
+    }
+    if let Some(origin) = params.origin {
+        println!("  Origin:  {origin}");
+    }
+    if let Some(flags) = params.flags {
+        println!("  Flags:   {flags:#x}");
+    }
+    if let Some(ref strategy) = params.strategy {
+        println!("  Strategy: {}", strategy);
+    }
+}
+
 fn print_control_response(resp: &ControlResponse) {
     println!("{} {}", resp.status_code, resp.status_text);
     if let Some(ref body) = resp.body {
-        if let Some(ref name) = body.name {
-            println!("  Name:    {}", name);
-        }
-        if let Some(id) = body.face_id {
-            println!("  FaceId:  {id}");
-        }
-        if let Some(ref uri) = body.uri {
-            println!("  Uri:     {uri}");
-        }
-        if let Some(ref local_uri) = body.local_uri {
-            println!("  LocalUri: {local_uri}");
-        }
-        if let Some(cost) = body.cost {
-            println!("  Cost:    {cost}");
-        }
-        if let Some(origin) = body.origin {
-            println!("  Origin:  {origin}");
-        }
-        if let Some(flags) = body.flags {
-            println!("  Flags:   {flags:#x}");
-        }
-        if let Some(ref strategy) = body.strategy {
-            println!("  Strategy: {}", strategy);
-        }
+        print_params(body);
     }
 }
 
@@ -384,4 +374,3 @@ fn print_legacy_response(resp: ManagementResponse) {
         }
     }
 }
-
