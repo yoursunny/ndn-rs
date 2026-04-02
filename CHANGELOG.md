@@ -122,6 +122,30 @@ enabling reliable transport of large NDN Data packets (~8800 bytes) over UDP.
 - **`MulticastUdpFace::send()`** now wraps outgoing packets in NDNLPv2 LpPacket
   framing, consistent with `UdpFace` and `TcpFace`.
 
+### Fixed
+
+#### Cross-process SHM futex on Linux
+
+The `atomic-wait` crate uses `FUTEX_PRIVATE_FLAG`, which keys on virtual
+addresses and only works within a single process.  SHM faces share memory
+across processes via POSIX `shm_open`, so the futex must key on the physical
+page offset — requiring plain `FUTEX_WAIT` / `FUTEX_WAKE` without the private
+flag.
+
+- **Replaced `atomic-wait` with direct futex syscalls** — `futex_wait()` and
+  `futex_wake_one()` call `libc::SYS_futex` without `FUTEX_PRIVATE_FLAG`.
+- **Timed futex wait (100ms)** — prevents `spawn_blocking` threads from hanging
+  indefinitely during shutdown (Ctrl+C), since tokio waits for all blocking
+  tasks before the runtime drops.
+- **Removed `atomic-wait` dependency** from workspace and `ndn-face-local`.
+
+#### SHM face cleanup on app disconnect
+
+- **SHM faces now use `OnDemand` persistency** instead of `Persistent`.  When
+  the control face disconnects (app exits), the child cancel token fires and
+  the SHM face is fully cleaned up: SHM region unlinked, FIB routes removed,
+  face removed from table.
+
 #### Pipeline stage tracing
 
 Per-packet `trace!`-level instrumentation across all forwarding pipeline stages,
