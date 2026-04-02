@@ -113,9 +113,10 @@ enabling reliable transport of large NDN Data packets (~8800 bytes) over UDP.
 - **Outbound fragmentation** — `UdpFace` and `MulticastUdpFace` automatically
   fragment packets larger than the MTU before sending. Each face maintains an
   atomic sequence counter for fragment identification.
-- **Inbound reassembly** — UDP listener (`run_udp_listener`) maintains a per-peer
-  `ReassemblyBuffer`. Fragmented LpPackets are reassembled before injection into
-  the pipeline; a periodic purge (every 10s) cleans stale incomplete reassemblies.
+- **Inbound reassembly** — `TlvDecodeStage` maintains a per-face
+  `DashMap<FaceId, ReassemblyBuffer>`. Fragmented LpPackets are reassembled in
+  the pipeline before TLV decoding, keeping the Face layer protocol-agnostic and
+  avoiding duplicate reassembly logic in listeners and individual face types.
 
 #### Multicast LpPacket wrapping
 

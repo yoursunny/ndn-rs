@@ -126,22 +126,11 @@ pub async fn run_udp_listener(
     tracing::info!(addr=%local, "UDP listener ready");
 
     let mut peers = std::collections::HashMap::<std::net::SocketAddr, FaceId>::new();
-    let mut reassembly = std::collections::HashMap::<
-        std::net::SocketAddr,
-        ndn_packet::fragment::ReassemblyBuffer,
-    >::new();
     let mut buf = vec![0u8; 9000];
-    let mut purge_interval = tokio::time::interval(std::time::Duration::from_secs(10));
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
-            _ = purge_interval.tick() => {
-                for rb in reassembly.values_mut() {
-                    rb.purge_expired();
-                }
-                continue;
-            }
             r = socket.recv_from(&mut buf) => {
                 let (n, src) = match r {
                     Ok(pair) => pair,
@@ -173,34 +162,14 @@ pub async fn run_udp_listener(
                     face_id
                 };
 
-                // Check if this is a fragmented LpPacket that needs reassembly.
-                let packet = if ndn_packet::lp::is_lp_packet(&raw) {
-                    match ndn_packet::lp::LpPacket::decode(raw.clone()) {
-                        Ok(lp) if lp.is_fragmented() => {
-                            let rb = reassembly.entry(src)
-                                .or_insert_with(ndn_packet::fragment::ReassemblyBuffer::default);
-                            match rb.process(
-                                lp.sequence.unwrap_or(0),
-                                lp.frag_index.unwrap_or(0),
-                                lp.frag_count.unwrap_or(1),
-                                lp.fragment,
-                            ) {
-                                Some(complete) => complete,
-                                None => continue, // Still waiting for more fragments.
-                            }
-                        }
-                        _ => raw, // Not fragmented or decode error — pass through.
-                    }
-                } else {
-                    raw
-                };
-
-                // Inject the packet directly into the pipeline (bypasses the face's recv loop).
+                // Inject the raw datagram into the pipeline. Fragment reassembly
+                // is handled by the TlvDecode stage (per-face reassembly buffers),
+                // not here — keeping the listener simple and avoiding duplication.
                 let arrival = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos() as u64;
-                if engine.inject_packet(packet, face_id, arrival).await.is_err() {
+                if engine.inject_packet(raw, face_id, arrival).await.is_err() {
                     break; // Pipeline channel closed.
                 }
             }

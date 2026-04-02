@@ -90,11 +90,13 @@ impl Face for UdpFace {
         self.socket.local_addr().ok().map(|a| format!("udp4://{}:{}", a.ip(), a.port()))
     }
 
-    /// Receive the next NDN packet from the peer.
+    /// Receive the next datagram from the peer.
     ///
-    /// NDN Data can reach 8800 bytes. The 9000-byte buffer covers a single
-    /// unfragmented packet. Datagrams from addresses other than `self.peer`
-    /// are silently discarded.
+    /// Returns the raw datagram bytes (may be a bare packet or LpPacket).
+    /// Fragment reassembly is handled by the pipeline's TlvDecode stage,
+    /// not here — keeping the Face layer protocol-agnostic.
+    ///
+    /// Datagrams from addresses other than `self.peer` are silently discarded.
     async fn recv(&self) -> Result<Bytes, FaceError> {
         let mut buf = vec![0u8; 9000];
         loop {
@@ -104,7 +106,6 @@ impl Face for UdpFace {
                 buf.truncate(n);
                 return Ok(Bytes::from(buf));
             }
-            // Ignore datagrams from other sources.
             trace!(face=%self.id, expected=%self.peer, actual=%src, len=n, "udp: recv ignored (wrong source)");
         }
     }
