@@ -811,10 +811,12 @@ dependencies = [
  "ndn-packet",
  "ndn-pipeline",
  "ndn-security",
+ "ndn-sync",
  "ndn-tlv",
  "ndn-transport",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -1066,9 +1068,11 @@ name = "ndn-sync"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "ndn-app",
+ "fastrand",
  "ndn-packet",
+ "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

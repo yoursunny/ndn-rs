@@ -54,6 +54,27 @@ sliding window, with full CLI configurability.
 - **`--min-window`** / **`--max-window`** — window bounds.
 - Window now grows on successful Data and shrinks on timeout/congestion.
 
+#### Sync protocol network layer and pub/sub API
+
+Integrated sync and query primitives into the application API, inspired by
+Zenoh's pub/sub/queryable model but built on NDN's Interest/Data machinery.
+
+- **`ndn-sync` network layer** — `join_svs_group()` runs SVS as a background
+  task: periodic Sync Interests with state vector encoding, gap detection,
+  and `SyncUpdate` notifications.  `SyncHandle` provides `recv()` for updates
+  and `publish()` to announce local data.  Configurable via `SvsConfig`
+  (interval, jitter, channel capacity).
+- **`Subscriber`** (`ndn-app`) — high-level subscription API.
+  `Subscriber::connect(socket, "/chat/room1")` joins an SVS group and
+  returns a stream of `Sample`s (name, publisher, seq, optional payload).
+- **`Queryable`** (`ndn-app`) — register a prefix and serve queries via
+  `queryable.serve(|interest| { ... })`.  Cleaner alternative to `Producer`
+  for request/response patterns.
+- **`SyncProtocol` abstraction** — `SyncHandle`, `SyncUpdate`, `SyncError`
+  types in `ndn-sync::protocol` for future protocol backends (PSync network
+  layer planned).
+- Added to `ndn-app` prelude: `Subscriber`, `Queryable`.
+
 ### Fixed
 
 #### NDNLPv2 reliability lingering traffic after flow completion
