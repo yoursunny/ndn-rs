@@ -448,6 +448,21 @@ conventions (`/localhost/nfd/<module>/<verb>/<ControlParameters>`).
   expensive wakeup syscalls when packets arrive within microseconds of each other.
 - **SHM ring capacity** increased from 64 to 256 slots — reduces backpressure
   during burst traffic and gives headroom for pipeline processing jitter.
+- **SHM liveness detection for dead router** — `SpscHandle::recv()` now uses a
+  `tokio::select!` with a 5-second timeout alongside the pipe wakeup. Two
+  consecutive timeouts with an empty ring signal the peer is dead, returning
+  `None`. `SpscHandle::send()` uses a bounded yield loop (100K iterations) that
+  returns `ShmError::Closed` if the ring stays full. Both methods check a
+  `CancellationToken` propagated from the control face. `pipe_await` now returns
+  `Err` on EOF (n==0) instead of looping forever.
+- **`RouterClient` liveness tracking** — `RouterClient` now carries a
+  `CancellationToken` and `dead` flag. SHM handles receive a child token from the
+  control face. `probe_alive()` sends a probe Interest on the control face and
+  cancels the token on failure, causing SHM recv/send to abort promptly.
+- **Idle sweep skips local faces** — `run_idle_face_task` now skips App, Shm, and
+  Internal faces when checking for idle timeouts. Previously SHM faces were killed
+  after 5 minutes of apparent inactivity (the idle sweep didn't track local face
+  activity), causing iperf sessions to fail at ~324 seconds.
 
 #### NDN spec compliance — SPEC-GAPS.md tracker and fixes
 

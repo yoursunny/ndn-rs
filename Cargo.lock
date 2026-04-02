@@ -951,6 +951,7 @@ dependencies = [
  "ndn-transport",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
