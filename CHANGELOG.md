@@ -422,11 +422,10 @@ conventions (`/localhost/nfd/<module>/<verb>/<ControlParameters>`).
   symmetric (pre-shared key) authentication using `ring::hmac`.
   Significantly faster than Ed25519 (~10×) for scenarios where
   asymmetric key distribution is unnecessary.
-- **Parallel signing in ndn-iperf** — server `--sign` and `--hmac`
-  modes now use `tokio::spawn_blocking` + `sign_sync` to distribute
-  signing work across Tokio's blocking thread pool.  Ed25519 signing
-  (~50µs/packet) previously saturated one core at ~30K pkt/s; parallel
-  signing scales linearly with available cores.
+- **`ndn-iperf` signing fast-path** — server `--sign` and `--hmac`
+  modes now use inline `sign_sync` + `DataBuilder::sign_sync()`,
+  eliminating per-packet `Box::pin`, 8 KB `region.to_vec()` copy, and
+  3 intermediate buffer allocations from the async signing path.
 - **`ndn-iperf --hmac` flag** — server-side HMAC-SHA256 signing mode
   for benchmarking signing overhead without the cost of elliptic curve
   math.

@@ -302,22 +302,19 @@ async fn run_server(
         };
         total_interests += 1;
 
-        // Build the Data packet using DataBuilder.
+        // Build the Data packet.
         let mut builder = DataBuilder::new((*interest.name).clone(), &payload);
         if let Some(f) = freshness {
             builder = builder.freshness(f);
         }
 
         let data = if let Some(ref signer) = signer {
+            // Inline sign_sync: no spawn overhead, no region copy, no Box::pin.
             let sig_type = signer.sig_type();
             let key_name = signer.key_name().clone();
-            let s = Arc::clone(signer);
-            // sign_sync on the blocking pool — scales across cores.
-            tokio::task::spawn_blocking(move || {
-                builder.sign_sync(sig_type, Some(&key_name), |region| {
-                    s.sign_sync(region).expect("signing failed")
-                })
-            }).await?
+            builder.sign_sync(sig_type, Some(&key_name), |region| {
+                signer.sign_sync(region).expect("signing failed")
+            })
         } else {
             builder.build()
         };
