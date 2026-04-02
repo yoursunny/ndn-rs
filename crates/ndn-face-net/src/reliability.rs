@@ -15,7 +15,14 @@ use ndn_packet::lp::{encode_lp_acks, encode_lp_reliable, extract_acks};
 const MAX_PIGGYBACKED_ACKS: usize = 16;
 
 /// Maximum retransmission attempts before giving up on a packet.
-const DEFAULT_MAX_RETRIES: u8 = 3;
+/// Keep low — NDN already has end-to-end recovery via Interest re-expression;
+/// per-hop reliability is just best-effort loss recovery.
+const DEFAULT_MAX_RETRIES: u8 = 1;
+
+/// Maximum retransmit packets per `check_retransmit()` call.
+/// Prevents burst retransmissions from blocking the face_sender, which would
+/// starve delivery of new packets and cause a throughput collapse.
+const MAX_RETX_PER_TICK: usize = 8;
 
 /// RTO parameters (RFC 6298).
 const INITIAL_RTO_US: u64 = 1_000_000;   // 1 second
@@ -145,6 +152,10 @@ impl LpReliability {
     }
 
     /// Check for retransmit-eligible entries. Returns wire packets to resend.
+    ///
+    /// Rate-limited to `MAX_RETX_PER_TICK` to prevent burst retransmissions
+    /// from blocking the face_sender (which would starve new packet delivery
+    /// and cause throughput collapse).
     pub fn check_retransmit(&mut self) -> Vec<Bytes> {
         let now = Instant::now();
         let rto = std::time::Duration::from_micros(self.rto_us);
@@ -166,20 +177,15 @@ impl LpReliability {
             self.unacked.remove(&seq);
         }
 
-        // Retransmit and apply exponential backoff.
-        let mut wires = Vec::with_capacity(retx.len());
-        for seq in retx {
+        // Rate-limit retransmissions to avoid blocking the face_sender.
+        let mut wires = Vec::with_capacity(retx.len().min(MAX_RETX_PER_TICK));
+        for seq in retx.into_iter().take(MAX_RETX_PER_TICK) {
             if let Some(entry) = self.unacked.get_mut(&seq) {
                 entry.last_sent = now;
                 entry.retx_count += 1;
                 entry.is_retx = true;
                 wires.push(entry.wire.clone());
             }
-        }
-
-        // Exponential backoff: double RTO on any retransmit.
-        if !wires.is_empty() {
-            self.rto_us = (self.rto_us * 2).min(MAX_RTO_US);
         }
 
         wires
