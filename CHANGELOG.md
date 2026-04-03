@@ -112,6 +112,25 @@ collided with stale PIT entries from the previous run.
   entries from suppressing future Interests.  Called from `run_face_reader`
   on face close, before FIB cleanup.
 
+#### AIMD/CUBIC congestion control produces inflated loss reports
+
+Adaptive congestion control (aimd, cubic) nearly saturated the link but
+reported 34–50% loss due to three compounding issues.
+
+- **Unbounded slow start** — `ssthresh` defaulted to `f64::MAX`, so the
+  window doubled every RTT and overshot link capacity in milliseconds on
+  low-RTT links (SHM, localhost).  Now `--window` sets both the initial
+  window and ssthresh, starting directly in congestion avoidance.
+- **Per-packet loss events** — each stale Interest called `on_timeout()`
+  individually, halving the window N times then re-inflating via slow
+  start in rapid oscillation.  Now all stale Interests in a single
+  retransmit check trigger one loss event.
+- **In-flight inflation** — Interests still in the pipeline at test end
+  were counted as lost.  Loss is now `(sent − in_flight_at_end − received)`
+  with in-flight reported separately.
+- **`CongestionController::with_ssthresh()`** — new builder method for
+  explicit slow-start threshold control.
+
 #### NDNLPv2 reliability lingering traffic after flow completion
 
 High-throughput flows accumulated thousands of unacked entries that drained

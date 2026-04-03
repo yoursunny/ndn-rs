@@ -528,6 +528,9 @@ async fn run_client(
                 }
 
                 // ── Fast re-expression of stale Interests ────────────
+                // Collapse all stale Interests into a SINGLE loss event
+                // to avoid halving the window once per stale packet (which
+                // would crater then re-inflate in oscillation).
                 let rto = Duration::from_micros((srtt_us * 3.0) as u64)
                     .max(Duration::from_millis(200));
                 let now = Instant::now();
@@ -535,21 +538,30 @@ async fn run_client(
                     .filter(|(_, t0)| now.duration_since(**t0) >= rto)
                     .map(|(seq, _)| *seq)
                     .collect();
-                for seq in stale {
+                if !stale.is_empty() {
+                    // Single loss event for all stale Interests in this check.
                     cc.on_timeout();
-                    let name = flow_prefix.clone().append(format!("{seq}"));
-                    let wire = InterestBuilder::new(name).lifetime(lifetime).build();
-                    timestamps.insert(seq, Instant::now());
-                    client.send(wire).await?;
-                    retx_count += 1;
+                    for seq in stale {
+                        let name = flow_prefix.clone().append(format!("{seq}"));
+                        let wire = InterestBuilder::new(name).lifetime(lifetime).build();
+                        timestamps.insert(seq, Instant::now());
+                        client.send(wire).await?;
+                        retx_count += 1;
+                    }
                 }
             }
         }
     };
 
     let actual_elapsed = start.elapsed();
-    let loss_pct = if sent > 0 {
-        (1.0 - received as f64 / sent as f64) * 100.0
+    // In-flight Interests that never received Data are NOT losses — they
+    // were simply still in the pipeline when the test ended.  Subtract
+    // them from the loss calculation for accurate reporting.
+    let in_flight_at_end = timestamps.len() as u64;
+    let effective_sent = sent.saturating_sub(in_flight_at_end);
+    let lost = effective_sent.saturating_sub(received);
+    let loss_pct = if effective_sent > 0 {
+        lost as f64 / effective_sent as f64 * 100.0
     } else {
         0.0
     };
@@ -567,7 +579,10 @@ async fn run_client(
         "  throughput:  {}",
         format_throughput(total_bytes, actual_elapsed),
     );
-    println!("  packets:     {sent} sent, {received} received ({loss_pct:.1}% loss)");
+    println!("  packets:     {sent} sent, {received} received, {lost} lost ({loss_pct:.1}% loss)");
+    if in_flight_at_end > 0 {
+        println!("  in-flight:   {in_flight_at_end} (excluded from loss)");
+    }
     if retx_count > 0 {
         println!("  retransmits: {retx_count}");
     }
@@ -615,6 +630,12 @@ async fn main() -> Result<()> {
                 "fixed" => CongestionController::fixed(window as f64),
                 other => anyhow::bail!("unknown congestion control algorithm: {other} (expected: aimd, cubic, fixed)"),
             };
+            // Set CC initial window and ssthresh from --window flag.
+            // This prevents unbounded slow start (ssthresh=MAX) from
+            // rocketing the window to 65k in milliseconds on low-RTT links.
+            controller = controller
+                .with_window(window as f64)
+                .with_ssthresh(window as f64);
             // Apply optional tuning parameters.
             if let Some(v) = min_window { controller = controller.with_min_window(v); }
             if let Some(v) = max_window { controller = controller.with_max_window(v); }
