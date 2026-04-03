@@ -1,9 +1,15 @@
-// NamedEtherFace (AF_PACKET raw sockets), WfbFace (802.11 monitor-mode
-// injection), and BluetoothFace (BlueZ RFCOMM) all require Linux kernel APIs
-// that do not exist on macOS, Windows, Android, or embedded targets.
+// AF_PACKET raw sockets, WfbFace (802.11 monitor-mode injection), and
+// BluetoothFace (BlueZ RFCOMM) all require Linux kernel APIs that do not
+// exist on macOS, Windows, Android, or embedded targets.
 // They are compiled only when the host is Linux.
 #[cfg(target_os = "linux")]
+pub mod af_packet;
+
+#[cfg(target_os = "linux")]
 pub mod ether;
+
+#[cfg(target_os = "linux")]
+pub mod multicast_ether;
 
 #[cfg(target_os = "linux")]
 pub mod wfb;
@@ -19,7 +25,13 @@ pub mod neighbor;
 pub mod radio;
 
 #[cfg(target_os = "linux")]
+pub use af_packet::MacAddr;
+
+#[cfg(target_os = "linux")]
 pub use ether::NamedEtherFace;
+
+#[cfg(target_os = "linux")]
+pub use multicast_ether::MulticastEtherFace;
 
 #[cfg(target_os = "linux")]
 pub use wfb::WfbFace;

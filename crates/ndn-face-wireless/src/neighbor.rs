@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use ndn_packet::Name;
-use crate::ether::MacAddr;
+use crate::af_packet::MacAddr;
 use ndn_transport::FaceId;
 
 /// A discovered neighbor and its per-radio face bindings.
