@@ -33,6 +33,10 @@ pub struct PacketContext {
     pub packet: DecodedPacket,
     /// PIT token — written by PitCheckStage, `None` before that stage runs.
     pub pit_token: Option<PitToken>,
+    /// NDNLPv2 PIT token (opaque, 1-32 bytes) from the incoming LP header.
+    /// Distinct from the internal `pit_token` hash — this is the wire-protocol
+    /// hop-by-hop token that must be echoed in Data/Nack responses.
+    pub lp_pit_token: Option<Bytes>,
     /// Faces selected for forwarding by the strategy stage.
     pub out_faces: SmallVec<[FaceId; 4]>,
     /// Set to `true` by CsLookupStage on a cache hit.
@@ -54,6 +58,7 @@ impl PacketContext {
             name: None,
             packet: DecodedPacket::Raw,
             pit_token: None,
+            lp_pit_token: None,
             out_faces: SmallVec::new(),
             cs_hit: false,
             verified: false,
