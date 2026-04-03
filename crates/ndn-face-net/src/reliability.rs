@@ -33,17 +33,17 @@ const MAX_UNACKED: usize = 256;
 
 /// RFC 6298 defaults.
 const RFC6298_INITIAL_RTO_US: u64 = 1_000_000; // 1 second
-const RFC6298_MIN_RTO_US: u64     =   200_000; // 200 ms
-const RFC6298_MAX_RTO_US: u64     = 4_000_000; // 4 seconds
-const RFC6298_GRANULARITY_US: u64 =   100_000; // 100 ms
+const RFC6298_MIN_RTO_US: u64 = 200_000; // 200 ms
+const RFC6298_MAX_RTO_US: u64 = 4_000_000; // 4 seconds
+const RFC6298_GRANULARITY_US: u64 = 100_000; // 100 ms
 const RFC6298_ALPHA: f64 = 0.125; // 1/8
-const RFC6298_BETA:  f64 = 0.25;  // 1/4
+const RFC6298_BETA: f64 = 0.25; // 1/4
 
 /// QUIC (RFC 9002) defaults.
-const QUIC_INITIAL_RTO_US: u64 = 333_000;  // 333 ms
-const QUIC_MIN_RTO_US: u64     =   1_000;  // 1 µs (QUIC has no minimum)
-const QUIC_MAX_RTO_US: u64     = 4_000_000; // 4 seconds
-const QUIC_GRANULARITY_US: u64 =     1_000; // 1 ms (kGranularity)
+const QUIC_INITIAL_RTO_US: u64 = 333_000; // 333 ms
+const QUIC_MIN_RTO_US: u64 = 1_000; // 1 µs (QUIC has no minimum)
+const QUIC_MAX_RTO_US: u64 = 4_000_000; // 4 seconds
+const QUIC_GRANULARITY_US: u64 = 1_000; // 1 ms (kGranularity)
 
 /// RTO computation strategy.
 ///
@@ -109,9 +109,9 @@ pub struct ReliabilityConfig {
 impl Default for ReliabilityConfig {
     fn default() -> Self {
         Self {
-            rto_strategy:      RtoStrategy::Rfc6298,
-            max_retries:       DEFAULT_MAX_RETRIES,
-            max_unacked:       MAX_UNACKED,
+            rto_strategy: RtoStrategy::Rfc6298,
+            max_retries: DEFAULT_MAX_RETRIES,
+            max_unacked: MAX_UNACKED,
             max_retx_per_tick: MAX_RETX_PER_TICK,
         }
     }
@@ -121,9 +121,9 @@ impl ReliabilityConfig {
     /// Local faces (Unix socket, SHM). Fixed 1ms RTO, minimal retries.
     pub fn local() -> Self {
         Self {
-            rto_strategy:      RtoStrategy::Fixed { rto_us: 1_000 },
-            max_retries:       0,
-            max_unacked:       64,
+            rto_strategy: RtoStrategy::Fixed { rto_us: 1_000 },
+            max_retries: 0,
+            max_unacked: 64,
             max_retx_per_tick: 4,
         }
     }
@@ -131,9 +131,9 @@ impl ReliabilityConfig {
     /// Stable wired Ethernet. QUIC-style adaptive with tight bounds.
     pub fn ethernet() -> Self {
         Self {
-            rto_strategy:      RtoStrategy::Quic,
-            max_retries:       1,
-            max_unacked:       256,
+            rto_strategy: RtoStrategy::Quic,
+            max_retries: 1,
+            max_unacked: 256,
             max_retx_per_tick: 8,
         }
     }
@@ -141,20 +141,20 @@ impl ReliabilityConfig {
     /// Lossy wireless (WiFi, Bluetooth). More retries, jitter-tolerant RTO.
     pub fn wifi() -> Self {
         Self {
-            rto_strategy:      RtoStrategy::Rfc6298,
-            max_retries:       3,
-            max_unacked:       512,
+            rto_strategy: RtoStrategy::Rfc6298,
+            max_retries: 3,
+            max_unacked: 512,
             max_retx_per_tick: 16,
         }
     }
 }
 
 struct UnackedEntry {
-    wire:       Bytes,
+    wire: Bytes,
     first_sent: Instant,
-    last_sent:  Instant,
+    last_sent: Instant,
     retx_count: u8,
-    is_retx:    bool,
+    is_retx: bool,
 }
 
 /// Per-face NDNLPv2 reliability state.
@@ -162,26 +162,26 @@ struct UnackedEntry {
 /// Tracks outbound TxSequences, piggybacked Acks, and adaptive RTO.
 /// All methods are synchronous and return wire-ready packets.
 pub struct LpReliability {
-    next_seq:         u64,
-    unacked:          HashMap<u64, UnackedEntry>,
-    pending_acks:     VecDeque<u64>,
-    srtt_us:          f64,
-    rttvar_us:        f64,
-    rto_us:           u64,
-    min_rtt_us:       u64,
-    mtu:              usize,
-    max_retries:      u8,
-    max_unacked:      usize,
+    next_seq: u64,
+    unacked: HashMap<u64, UnackedEntry>,
+    pending_acks: VecDeque<u64>,
+    srtt_us: f64,
+    rttvar_us: f64,
+    rto_us: u64,
+    min_rtt_us: u64,
+    mtu: usize,
+    max_retries: u8,
+    max_unacked: usize,
     max_retx_per_tick: usize,
-    rto_strategy:     RtoStrategy,
+    rto_strategy: RtoStrategy,
 }
 
 fn initial_rto_for(strategy: &RtoStrategy) -> u64 {
     match strategy {
         RtoStrategy::Rfc6298 => RFC6298_INITIAL_RTO_US,
-        RtoStrategy::Quic    => QUIC_INITIAL_RTO_US,
+        RtoStrategy::Quic => QUIC_INITIAL_RTO_US,
         RtoStrategy::MinRtt { margin_us } => *margin_us,
-        RtoStrategy::Fixed { rto_us }     => *rto_us,
+        RtoStrategy::Fixed { rto_us } => *rto_us,
     }
 }
 
@@ -195,18 +195,18 @@ impl LpReliability {
     pub fn from_config(mtu: usize, config: ReliabilityConfig) -> Self {
         let initial_rto = initial_rto_for(&config.rto_strategy);
         Self {
-            next_seq:          0,
-            unacked:           HashMap::new(),
-            pending_acks:      VecDeque::new(),
-            srtt_us:           0.0,
-            rttvar_us:         0.0,
-            rto_us:            initial_rto,
-            min_rtt_us:        u64::MAX,
+            next_seq: 0,
+            unacked: HashMap::new(),
+            pending_acks: VecDeque::new(),
+            srtt_us: 0.0,
+            rttvar_us: 0.0,
+            rto_us: initial_rto,
+            min_rtt_us: u64::MAX,
             mtu,
-            max_retries:       config.max_retries,
-            max_unacked:       config.max_unacked,
+            max_retries: config.max_retries,
+            max_unacked: config.max_unacked,
             max_retx_per_tick: config.max_retx_per_tick,
-            rto_strategy:      config.rto_strategy,
+            rto_strategy: config.rto_strategy,
         }
     }
 
@@ -225,9 +225,9 @@ impl LpReliability {
     /// Current configuration (snapshot).
     pub fn config(&self) -> ReliabilityConfig {
         ReliabilityConfig {
-            rto_strategy:      self.rto_strategy.clone(),
-            max_retries:       self.max_retries,
-            max_unacked:       self.max_unacked,
+            rto_strategy: self.rto_strategy.clone(),
+            max_retries: self.max_retries,
+            max_unacked: self.max_unacked,
             max_retx_per_tick: self.max_retx_per_tick,
         }
     }
@@ -240,7 +240,8 @@ impl LpReliability {
         let now = Instant::now();
 
         // Drain pending acks to piggyback.
-        let acks: Vec<u64> = self.pending_acks
+        let acks: Vec<u64> = self
+            .pending_acks
             .drain(..self.pending_acks.len().min(MAX_PIGGYBACKED_ACKS))
             .collect();
 
@@ -248,7 +249,8 @@ impl LpReliability {
         // Ack overhead: each Ack TLV is ~1-2 (type) + 1 (length) + 1-8 (value) bytes.
         // Conservative: 10 bytes per ack.
         let ack_overhead = acks.len() * 10;
-        let payload_cap = self.mtu
+        let payload_cap = self
+            .mtu
             .saturating_sub(FRAG_OVERHEAD)
             .saturating_sub(ack_overhead);
 
@@ -289,13 +291,16 @@ impl LpReliability {
                 }
             }
 
-            self.unacked.insert(seq, UnackedEntry {
-                wire:       wire.clone(),
-                first_sent: now,
-                last_sent:  now,
-                retx_count: 0,
-                is_retx:    false,
-            });
+            self.unacked.insert(
+                seq,
+                UnackedEntry {
+                    wire: wire.clone(),
+                    first_sent: now,
+                    last_sent: now,
+                    retx_count: 0,
+                    is_retx: false,
+                },
+            );
 
             wires.push(wire);
         }
@@ -403,14 +408,12 @@ impl LpReliability {
             }
             RtoStrategy::Rfc6298 => {
                 self.update_ewma(rtt_us, RFC6298_ALPHA, RFC6298_BETA);
-                let rto = self.srtt_us
-                    + (4.0 * self.rttvar_us).max(RFC6298_GRANULARITY_US as f64);
+                let rto = self.srtt_us + (4.0 * self.rttvar_us).max(RFC6298_GRANULARITY_US as f64);
                 self.rto_us = (rto as u64).clamp(RFC6298_MIN_RTO_US, RFC6298_MAX_RTO_US);
             }
             RtoStrategy::Quic => {
                 self.update_ewma(rtt_us, RFC6298_ALPHA, RFC6298_BETA);
-                let rto = self.srtt_us
-                    + (4.0 * self.rttvar_us).max(QUIC_GRANULARITY_US as f64);
+                let rto = self.srtt_us + (4.0 * self.rttvar_us).max(QUIC_GRANULARITY_US as f64);
                 self.rto_us = (rto as u64).clamp(QUIC_MIN_RTO_US, QUIC_MAX_RTO_US);
             }
         }
@@ -422,8 +425,7 @@ impl LpReliability {
             self.srtt_us = rtt_us;
             self.rttvar_us = rtt_us / 2.0;
         } else {
-            self.rttvar_us = (1.0 - beta) * self.rttvar_us
-                + beta * (self.srtt_us - rtt_us).abs();
+            self.rttvar_us = (1.0 - beta) * self.rttvar_us + beta * (self.srtt_us - rtt_us).abs();
             self.srtt_us = (1.0 - alpha) * self.srtt_us + alpha * rtt_us;
         }
     }
@@ -519,10 +521,13 @@ mod tests {
 
     #[test]
     fn max_retries_drops_entry() {
-        let mut rel = LpReliability::from_config(1400, ReliabilityConfig {
-            max_retries: 1,
-            ..fast_rto_config()
-        });
+        let mut rel = LpReliability::from_config(
+            1400,
+            ReliabilityConfig {
+                max_retries: 1,
+                ..fast_rto_config()
+            },
+        );
 
         let _wires = rel.on_send(&small_packet());
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -578,7 +583,10 @@ mod tests {
 
     #[test]
     fn quic_strategy_lower_initial_rto() {
-        let cfg = ReliabilityConfig { rto_strategy: RtoStrategy::Quic, ..Default::default() };
+        let cfg = ReliabilityConfig {
+            rto_strategy: RtoStrategy::Quic,
+            ..Default::default()
+        };
         let rel = LpReliability::from_config(1400, cfg);
         assert_eq!(rel.rto_us, QUIC_INITIAL_RTO_US);
         assert!(rel.rto_us < RFC6298_INITIAL_RTO_US);
@@ -586,7 +594,10 @@ mod tests {
 
     #[test]
     fn quic_strategy_converges_tighter() {
-        let cfg = ReliabilityConfig { rto_strategy: RtoStrategy::Quic, ..Default::default() };
+        let cfg = ReliabilityConfig {
+            rto_strategy: RtoStrategy::Quic,
+            ..Default::default()
+        };
         let mut rel = LpReliability::from_config(1400, cfg);
         for _ in 0..10 {
             rel.update_rto(500.0);
@@ -617,7 +628,7 @@ mod tests {
         };
         let mut rel = LpReliability::from_config(1400, cfg);
         rel.update_rto(10_000.0); // 10ms
-        rel.update_rto(8_000.0);  // 8ms
+        rel.update_rto(8_000.0); // 8ms
         rel.update_rto(15_000.0); // 15ms — should not raise RTO
         // RTO = min(10k, 8k, 15k) + 5k = 13k
         assert_eq!(rel.rto_us, 8_000 + 5_000);
@@ -644,8 +655,8 @@ mod tests {
     fn presets_are_consistent() {
         // Smoke test that presets produce valid configs.
         let local = LpReliability::from_config(1400, ReliabilityConfig::local());
-        let eth   = LpReliability::from_config(1400, ReliabilityConfig::ethernet());
-        let wifi  = LpReliability::from_config(1400, ReliabilityConfig::wifi());
+        let eth = LpReliability::from_config(1400, ReliabilityConfig::ethernet());
+        let wifi = LpReliability::from_config(1400, ReliabilityConfig::wifi());
 
         // Local should have lowest RTO, wifi the most retries.
         assert!(local.rto_us < eth.rto_us);

@@ -24,16 +24,19 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// The WebSocket stream is split into independent read and write halves, each
 /// behind its own `Mutex` — mirroring the `TcpFace` pattern.
 pub struct WebSocketFace {
-    id:          FaceId,
+    id: FaceId,
     remote_addr: String,
-    local_addr:  String,
-    reader:      Mutex<futures::stream::SplitStream<WsStream>>,
-    writer:      Mutex<futures::stream::SplitSink<WsStream, Message>>,
+    local_addr: String,
+    reader: Mutex<futures::stream::SplitStream<WsStream>>,
+    writer: Mutex<futures::stream::SplitSink<WsStream, Message>>,
 }
 
 impl WebSocketFace {
     /// Connect to a WebSocket endpoint (client side).
-    pub async fn connect(id: FaceId, url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn connect(
+        id: FaceId,
+        url: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let (ws, _response) = tokio_tungstenite::connect_async(url).await?;
 
         // Extract addresses from the underlying TCP stream before splitting.
@@ -72,13 +75,21 @@ impl WebSocketFace {
         }
     }
 
-    pub fn remote_addr(&self) -> &str { &self.remote_addr }
-    pub fn local_addr(&self) -> &str { &self.local_addr }
+    pub fn remote_addr(&self) -> &str {
+        &self.remote_addr
+    }
+    pub fn local_addr(&self) -> &str {
+        &self.local_addr
+    }
 }
 
 impl Face for WebSocketFace {
-    fn id(&self) -> FaceId { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::WebSocket }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::WebSocket
+    }
 
     fn remote_uri(&self) -> Option<String> {
         Some(self.remote_addr.clone())
@@ -91,11 +102,10 @@ impl Face for WebSocketFace {
     async fn recv(&self) -> Result<Bytes, FaceError> {
         let mut reader = self.reader.lock().await;
         loop {
-            let msg = reader
-                .next()
-                .await
-                .ok_or(FaceError::Closed)?
-                .map_err(|e| FaceError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            let msg =
+                reader.next().await.ok_or(FaceError::Closed)?.map_err(|e| {
+                    FaceError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+                })?;
 
             match msg {
                 Message::Binary(data) => {
@@ -134,9 +144,7 @@ mod tests {
         let accept_fut = async {
             let (stream, peer) = listener.accept().await.unwrap();
             let ws = accept_async(MaybeTlsStream::Plain(stream)).await.unwrap();
-            WebSocketFace::from_stream(
-                FaceId(1), ws, peer.to_string(), addr.to_string(),
-            )
+            WebSocketFace::from_stream(FaceId(1), ws, peer.to_string(), addr.to_string())
         };
 
         let connect_fut = WebSocketFace::connect(FaceId(0), &url);
@@ -169,8 +177,14 @@ mod tests {
         let (client, server) = loopback_pair().await;
         client.send(make_tlv(0x05, b"interest")).await.unwrap();
         server.send(make_tlv(0x06, b"data")).await.unwrap();
-        assert_eq!(server.recv().await.unwrap(), expected_on_wire(&make_tlv(0x05, b"interest")));
-        assert_eq!(client.recv().await.unwrap(), expected_on_wire(&make_tlv(0x06, b"data")));
+        assert_eq!(
+            server.recv().await.unwrap(),
+            expected_on_wire(&make_tlv(0x05, b"interest"))
+        );
+        assert_eq!(
+            client.recv().await.unwrap(),
+            expected_on_wire(&make_tlv(0x06, b"data"))
+        );
     }
 
     #[tokio::test]
@@ -179,11 +193,17 @@ mod tests {
         let (client, server) = loopback_pair().await;
         let client = Arc::new(client);
 
-        let handles: Vec<_> = (0u8..8).map(|i| {
-            let c = Arc::clone(&client);
-            tokio::spawn(async move { c.send(make_tlv(0x05, &[i])).await.unwrap(); })
-        }).collect();
-        for h in handles { h.await.unwrap(); }
+        let handles: Vec<_> = (0u8..8)
+            .map(|i| {
+                let c = Arc::clone(&client);
+                tokio::spawn(async move {
+                    c.send(make_tlv(0x05, &[i])).await.unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.await.unwrap();
+        }
 
         let mut received = Vec::new();
         for _ in 0u8..8 {

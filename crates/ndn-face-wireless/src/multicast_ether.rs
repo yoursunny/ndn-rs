@@ -10,11 +10,11 @@ use bytes::Bytes;
 use ndn_transport::{Face, FaceError, FaceId, FaceKind};
 use tokio::io::unix::AsyncFd;
 
-use crate::af_packet::{
-    MacAddr, get_ifindex, make_sockaddr_ll, open_packet_socket, setup_packet_ring,
-    setsockopt_val, PacketRing,
-};
 use crate::NDN_ETHERTYPE;
+use crate::af_packet::{
+    MacAddr, PacketRing, get_ifindex, make_sockaddr_ll, open_packet_socket, setsockopt_val,
+    setup_packet_ring,
+};
 
 /// NDN Ethernet multicast MAC address.
 ///
@@ -33,13 +33,13 @@ pub const NDN_ETHER_MCAST_MAC: MacAddr = MacAddr([0x01, 0x00, 0x5E, 0x00, 0x17, 
 ///
 /// Requires `CAP_NET_RAW` or root.  Linux only.
 pub struct MulticastEtherFace {
-    id:      FaceId,
-    iface:   String,
+    id: FaceId,
+    iface: String,
     ifindex: i32,
-    socket:  AsyncFd<std::os::unix::io::OwnedFd>,
-    ring:    PacketRing,
+    socket: AsyncFd<std::os::unix::io::OwnedFd>,
+    ring: PacketRing,
     /// Monotonic sequence counter for NDNLPv2 fragmentation.
-    seq:     AtomicU64,
+    seq: AtomicU64,
 }
 
 impl MulticastEtherFace {
@@ -52,13 +52,20 @@ impl MulticastEtherFace {
 
         // Resolve interface index.
         let probe_fd = unsafe {
-            libc::socket(libc::AF_PACKET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
-                         (NDN_ETHERTYPE as u16).to_be() as i32)
+            libc::socket(
+                libc::AF_PACKET,
+                libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+                (NDN_ETHERTYPE as u16).to_be() as i32,
+            )
         };
-        if probe_fd == -1 { return Err(std::io::Error::last_os_error()); }
+        if probe_fd == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
         let ifindex = {
             let idx = get_ifindex(probe_fd, &iface);
-            unsafe { libc::close(probe_fd); }
+            unsafe {
+                libc::close(probe_fd);
+            }
             idx?
         };
 
@@ -66,22 +73,34 @@ impl MulticastEtherFace {
 
         // Join the NDN Ethernet multicast group on this interface.
         let mreq = libc::packet_mreq {
-            mr_ifindex:  ifindex,
-            mr_type:     libc::PACKET_MR_MULTICAST as u16,
-            mr_alen:     6,
-            mr_address:  {
+            mr_ifindex: ifindex,
+            mr_type: libc::PACKET_MR_MULTICAST as u16,
+            mr_alen: 6,
+            mr_address: {
                 let mut addr = [0u8; 8];
                 addr[..6].copy_from_slice(NDN_ETHER_MCAST_MAC.as_bytes());
                 addr
             },
         };
-        setsockopt_val(fd.as_raw_fd(), libc::SOL_PACKET, libc::PACKET_ADD_MEMBERSHIP, &mreq)?;
+        setsockopt_val(
+            fd.as_raw_fd(),
+            libc::SOL_PACKET,
+            libc::PACKET_ADD_MEMBERSHIP,
+            &mreq,
+        )?;
 
         // Set up mmap ring buffers BEFORE registering with AsyncFd.
         let ring = setup_packet_ring(fd.as_raw_fd())?;
         let socket = AsyncFd::new(fd)?;
 
-        Ok(Self { id, iface, ifindex, socket, ring, seq: AtomicU64::new(0) })
+        Ok(Self {
+            id,
+            iface,
+            ifindex,
+            socket,
+            ring,
+            seq: AtomicU64::new(0),
+        })
     }
 
     /// Interface name this face is bound to.
@@ -91,8 +110,12 @@ impl MulticastEtherFace {
 }
 
 impl Face for MulticastEtherFace {
-    fn id(&self)   -> FaceId   { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::EtherMulticast }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::EtherMulticast
+    }
 
     fn remote_uri(&self) -> Option<String> {
         Some(format!("ether://[{}]/{}", NDN_ETHER_MCAST_MAC, self.iface))

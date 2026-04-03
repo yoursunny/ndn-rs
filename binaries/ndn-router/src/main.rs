@@ -9,9 +9,9 @@ use ndn_config::ForwarderConfig;
 #[cfg(unix)]
 use ndn_config::{ManagementRequest, ManagementResponse, ManagementServer};
 use ndn_engine::{EngineBuilder, EngineConfig, ForwarderEngine};
+use ndn_face_local::AppFace;
 use ndn_packet::Name;
 use ndn_security::{FilePib, SecurityManager};
-use ndn_face_local::AppFace;
 
 // Unix-socket bypass management I/O.
 #[cfg(unix)]
@@ -64,9 +64,9 @@ async fn main() -> Result<()> {
     };
 
     let engine_config = EngineConfig {
-        cs_capacity_bytes:    fwd_config.engine.cs_capacity_mb * 1024 * 1024,
+        cs_capacity_bytes: fwd_config.engine.cs_capacity_mb * 1024 * 1024,
         pipeline_channel_cap: fwd_config.engine.pipeline_channel_cap,
-        pipeline_threads:     fwd_config.engine.pipeline_threads,
+        pipeline_threads: fwd_config.engine.pipeline_threads,
     };
 
     // ── NDN management: pre-register management AppFace ───────────────────────
@@ -80,8 +80,7 @@ async fn main() -> Result<()> {
 
     let security_mgr = load_security(&fwd_config);
 
-    let mut builder = EngineBuilder::new(engine_config)
-        .face(mgmt_app_face);
+    let mut builder = EngineBuilder::new(engine_config).face(mgmt_app_face);
     if let Some(mgr) = security_mgr {
         builder = builder.security(mgr);
     }
@@ -112,36 +111,45 @@ async fn main() -> Result<()> {
 
     let cancel = CancellationToken::new();
 
-    let face_configs: std::borrow::Cow<'_, [ndn_config::FaceConfig]> = if fwd_config.faces.is_empty() {
-        tracing::info!("no [[face]] in config, using defaults: udp+tcp on 0.0.0.0:6363");
-        std::borrow::Cow::Owned(vec![
-            ndn_config::FaceConfig::Udp {
-                bind: Some("0.0.0.0:6363".into()),
-                remote: None,
-            },
-            ndn_config::FaceConfig::Tcp {
-                bind: Some("0.0.0.0:6363".into()),
-                remote: None,
-            },
-        ])
-    } else {
-        std::borrow::Cow::Borrowed(&fwd_config.faces)
-    };
+    let face_configs: std::borrow::Cow<'_, [ndn_config::FaceConfig]> =
+        if fwd_config.faces.is_empty() {
+            tracing::info!("no [[face]] in config, using defaults: udp+tcp on 0.0.0.0:6363");
+            std::borrow::Cow::Owned(vec![
+                ndn_config::FaceConfig::Udp {
+                    bind: Some("0.0.0.0:6363".into()),
+                    remote: None,
+                },
+                ndn_config::FaceConfig::Tcp {
+                    bind: Some("0.0.0.0:6363".into()),
+                    remote: None,
+                },
+            ])
+        } else {
+            std::borrow::Cow::Borrowed(&fwd_config.faces)
+        };
 
     for face_cfg in face_configs.iter() {
         match face_cfg {
             ndn_config::FaceConfig::Udp { bind, .. } => {
-                if let Some(addr) = parse_bind_addr(bind.as_deref().unwrap_or("0.0.0.0:6363"), "UDP") {
+                if let Some(addr) =
+                    parse_bind_addr(bind.as_deref().unwrap_or("0.0.0.0:6363"), "UDP")
+                {
                     let eng = engine.clone();
                     let c = cancel.clone();
-                    tokio::spawn(async move { mgmt_ndn::run_udp_listener(addr, eng, c).await; });
+                    tokio::spawn(async move {
+                        mgmt_ndn::run_udp_listener(addr, eng, c).await;
+                    });
                 }
             }
             ndn_config::FaceConfig::Tcp { bind, .. } => {
-                if let Some(addr) = parse_bind_addr(bind.as_deref().unwrap_or("0.0.0.0:6363"), "TCP") {
+                if let Some(addr) =
+                    parse_bind_addr(bind.as_deref().unwrap_or("0.0.0.0:6363"), "TCP")
+                {
                     let eng = engine.clone();
                     let c = cancel.clone();
-                    tokio::spawn(async move { mgmt_ndn::run_tcp_listener(addr, eng, c).await; });
+                    tokio::spawn(async move {
+                        mgmt_ndn::run_tcp_listener(addr, eng, c).await;
+                    });
                 }
             }
             ndn_config::FaceConfig::Multicast { .. } => {
@@ -160,7 +168,9 @@ async fn main() -> Result<()> {
                 if let Some(addr) = parse_bind_addr(bind_str, "WebSocket") {
                     let eng = engine.clone();
                     let c = cancel.clone();
-                    tokio::spawn(async move { run_ws_listener(addr, eng, c).await; });
+                    tokio::spawn(async move {
+                        run_ws_listener(addr, eng, c).await;
+                    });
                 }
             }
             ndn_config::FaceConfig::Serial { path, baud } => {
@@ -191,7 +201,11 @@ async fn main() -> Result<()> {
                     match ndn_face_wireless::MulticastEtherFace::new(id, interface) {
                         Ok(face) => {
                             let c = cancel.child_token();
-                            engine.add_face_with_persistency(face, c, ndn_transport::FacePersistency::Permanent);
+                            engine.add_face_with_persistency(
+                                face,
+                                c,
+                                ndn_transport::FacePersistency::Permanent,
+                            );
                             tracing::info!(iface=%interface, face=%id, "multicast ethernet face opened");
                         }
                         Err(e) => {
@@ -251,11 +265,17 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     let bypass_task = if !use_ndn_mgmt {
         let bypass_path = PathBuf::from(&fwd_config.management.bypass_socket);
-        let mgmt_engine  = engine.clone();
+        let mgmt_engine = engine.clone();
         let cancel_clone = cancel.clone();
         tracing::info!(path = %bypass_path.display(), "bypass: Unix socket management");
-        Some(tokio::spawn(run_unix_mgmt_server(bypass_path, mgmt_engine, cancel_clone)))
-    } else { None };
+        Some(tokio::spawn(run_unix_mgmt_server(
+            bypass_path,
+            mgmt_engine,
+            cancel_clone,
+        )))
+    } else {
+        None
+    };
 
     #[cfg(not(unix))]
     if !use_ndn_mgmt {
@@ -270,12 +290,18 @@ async fn main() -> Result<()> {
 
     #[cfg(unix)]
     {
-        if let Some(t) = ndn_handler_task { let _ = t.await; }
-        if let Some(t) = ndn_listener_task { let _ = t.await; }
+        if let Some(t) = ndn_handler_task {
+            let _ = t.await;
+        }
+        if let Some(t) = ndn_listener_task {
+            let _ = t.await;
+        }
     }
 
     #[cfg(unix)]
-    if let Some(t) = bypass_task { let _ = t.await; }
+    if let Some(t) = bypass_task {
+        let _ = t.await;
+    }
 
     shutdown.shutdown().await;
     Ok(())
@@ -296,17 +322,17 @@ fn handle_request(
     match req {
         ManagementRequest::AddRoute { prefix, face, cost } => {
             let name = parse_name(&prefix);
-            engine.fib().add_nexthop(
-                &name,
-                ndn_transport::FaceId(face),
-                cost,
-            );
+            engine
+                .fib()
+                .add_nexthop(&name, ndn_transport::FaceId(face), cost);
             tracing::info!(%prefix, face, cost, "management: route added");
             ManagementResponse::Ok
         }
         ManagementRequest::RemoveRoute { prefix, face } => {
             let name = parse_name(&prefix);
-            engine.fib().remove_nexthop(&name, ndn_transport::FaceId(face));
+            engine
+                .fib()
+                .remove_nexthop(&name, ndn_transport::FaceId(face));
             tracing::info!(%prefix, face, "management: route removed");
             ManagementResponse::Ok
         }
@@ -315,11 +341,18 @@ fn handle_request(
                 .faces()
                 .face_entries()
                 .into_iter()
-                .filter(|(_, kind)| !matches!(kind, ndn_transport::FaceKind::App | ndn_transport::FaceKind::Internal))
-                .map(|(id, kind)| serde_json::json!({
-                    "id":   id.0,
-                    "kind": kind.to_string(),
-                }))
+                .filter(|(_, kind)| {
+                    !matches!(
+                        kind,
+                        ndn_transport::FaceKind::App | ndn_transport::FaceKind::Internal
+                    )
+                })
+                .map(|(id, kind)| {
+                    serde_json::json!({
+                        "id":   id.0,
+                        "kind": kind.to_string(),
+                    })
+                })
                 .collect();
             ManagementResponse::OkData {
                 data: serde_json::json!({ "faces": entries }),
@@ -364,16 +397,12 @@ fn handle_request(
 /// Uses the raw JSON protocol (newline-delimited).  Only active when
 /// `[management] transport = "bypass"` and the `iceoryx2-mgmt` feature is off.
 #[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
-async fn run_unix_mgmt_server(
-    path: PathBuf,
-    engine: ForwarderEngine,
-    cancel: CancellationToken,
-) {
+async fn run_unix_mgmt_server(path: PathBuf, engine: ForwarderEngine, cancel: CancellationToken) {
     // Remove stale socket file if it exists.
     let _ = std::fs::remove_file(&path);
 
     let listener = match UnixListener::bind(&path) {
-        Ok(l)  => l,
+        Ok(l) => l,
         Err(e) => {
             tracing::error!(error = %e, "failed to bind management socket");
             return;
@@ -394,14 +423,14 @@ async fn run_unix_mgmt_server(
             },
         };
 
-        let eng    = Arc::clone(&engine);
+        let eng = Arc::clone(&engine);
         let cancel = cancel.clone();
         tokio::spawn(async move {
             let (reader, mut writer) = conn.into_split();
             let mut lines = BufReader::new(reader).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 let resp = match ManagementServer::decode_request(&line) {
-                    Ok(req)  => handle_request(req, &eng, &cancel),
+                    Ok(req) => handle_request(req, &eng, &cancel),
                     Err(msg) => ManagementResponse::Error { message: msg },
                 };
                 let encoded = ManagementServer::encode_response(&resp);
@@ -420,8 +449,8 @@ async fn run_unix_mgmt_server(
 #[cfg(feature = "websocket")]
 async fn run_ws_listener(
     bind_addr: std::net::SocketAddr,
-    engine:    ForwarderEngine,
-    cancel:    CancellationToken,
+    engine: ForwarderEngine,
+    cancel: CancellationToken,
 ) {
     let listener = match tokio::net::TcpListener::bind(bind_addr).await {
         Ok(l) => l,
@@ -446,19 +475,23 @@ async fn run_ws_listener(
             },
         };
 
-        let ws = match tokio_tungstenite::accept_async(
-            tokio_tungstenite::MaybeTlsStream::Plain(stream),
-        ).await {
-            Ok(ws) => ws,
-            Err(e) => {
-                tracing::warn!(peer=%peer, error=%e, "ws-listener: handshake failed");
-                continue;
-            }
-        };
+        let ws =
+            match tokio_tungstenite::accept_async(tokio_tungstenite::MaybeTlsStream::Plain(stream))
+                .await
+            {
+                Ok(ws) => ws,
+                Err(e) => {
+                    tracing::warn!(peer=%peer, error=%e, "ws-listener: handshake failed");
+                    continue;
+                }
+            };
 
         let face_id = engine.faces().alloc_id();
         let face = ndn_face_net::WebSocketFace::from_stream(
-            face_id, ws, peer.to_string(), local.to_string(),
+            face_id,
+            ws,
+            peer.to_string(),
+            local.to_string(),
         );
         let conn_cancel = cancel.child_token();
         engine.add_face(face, conn_cancel);
@@ -478,7 +511,9 @@ async fn run_ws_listener(
 fn load_security(cfg: &ForwarderConfig) -> Option<SecurityManager> {
     let identity_uri = cfg.security.identity.as_ref()?;
 
-    let pib_path = cfg.security.pib_path
+    let pib_path = cfg
+        .security
+        .pib_path
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(default_pib_path);

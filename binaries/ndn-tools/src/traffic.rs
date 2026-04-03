@@ -57,15 +57,16 @@ struct Cli {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn build_name(prefix: &Name, flow: u64, seq: u64) -> Name {
-    prefix.clone()
+    prefix
+        .clone()
         .append(format!("flow-{flow}"))
         .append(format!("{seq}"))
 }
 
 struct FlowResult {
-    sent:     u64,
+    sent: u64,
     received: u64,
-    rtts:     Vec<u64>, // microseconds
+    rtts: Vec<u64>, // microseconds
 }
 
 fn print_stats(results: &[FlowResult], elapsed: Duration, size: usize) {
@@ -88,7 +89,10 @@ fn print_stats(results: &[FlowResult], elapsed: Duration, size: usize) {
     println!("  sent={sent}  received={received}  lost={lost} ({loss_pct:.2}%)");
     println!("  throughput: {pps:.0} pps, {mbps:.2} Mbps");
 
-    let mut all_rtts: Vec<u64> = results.iter().flat_map(|r| r.rtts.iter().copied()).collect();
+    let mut all_rtts: Vec<u64> = results
+        .iter()
+        .flat_map(|r| r.rtts.iter().copied())
+        .collect();
     if !all_rtts.is_empty() {
         all_rtts.sort_unstable();
         let n = all_rtts.len();
@@ -98,7 +102,9 @@ fn print_stats(results: &[FlowResult], elapsed: Duration, size: usize) {
         let p50 = all_rtts[n / 2];
         let p95 = all_rtts[(n * 95) / 100];
         let p99 = all_rtts[(n * 99) / 100];
-        println!("  latency: min={min}us avg={avg}us p50={p50}us p95={p95}us p99={p99}us max={max}us");
+        println!(
+            "  latency: min={min}us avg={avg}us p50={p50}us p95={p95}us p99={p99}us max={max}us"
+        );
     }
 
     println!("  elapsed: {:.2}s", elapsed.as_secs_f64());
@@ -182,7 +188,11 @@ async fn main() -> Result<()> {
         "ndn-traffic: mode={} count={} rate={} size={}B concurrency={}",
         cli.mode,
         cli.count,
-        if cli.rate == 0 { "unlimited".to_string() } else { format!("{}", cli.rate) },
+        if cli.rate == 0 {
+            "unlimited".to_string()
+        } else {
+            format!("{}", cli.rate)
+        },
         cli.size,
         cli.concurrency,
     );
@@ -246,9 +256,7 @@ async fn main() -> Result<()> {
     for (i, handle) in consumer_handles.into_iter().enumerate() {
         let pfx = prefix.clone();
         let ri = rate_interval;
-        set.spawn(async move {
-            run_consumer(handle, pfx, i as u64, per_flow, ri).await
-        });
+        set.spawn(async move { run_consumer(handle, pfx, i as u64, per_flow, ri).await });
     }
 
     let mut results: Vec<FlowResult> = Vec::new();

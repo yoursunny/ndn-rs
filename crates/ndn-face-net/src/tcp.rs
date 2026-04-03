@@ -13,14 +13,22 @@ pub type TcpFace = StreamFace<OwnedReadHalf, OwnedWriteHalf, TlvCodec>;
 
 /// Wrap an accepted or connected `TcpStream` into a [`TcpFace`].
 pub fn tcp_face_from_stream(id: FaceId, stream: TcpStream) -> TcpFace {
-    let remote_addr = stream.peer_addr().unwrap_or_else(|_| ([0, 0, 0, 0], 0).into());
-    let local_addr = stream.local_addr().unwrap_or_else(|_| ([0, 0, 0, 0], 0).into());
+    let remote_addr = stream
+        .peer_addr()
+        .unwrap_or_else(|_| ([0, 0, 0, 0], 0).into());
+    let local_addr = stream
+        .local_addr()
+        .unwrap_or_else(|_| ([0, 0, 0, 0], 0).into());
     let (r, w) = stream.into_split();
     StreamFace::new(
         id,
         FaceKind::Tcp,
         true,
-        Some(format!("tcp4://{}:{}", remote_addr.ip(), remote_addr.port())),
+        Some(format!(
+            "tcp4://{}:{}",
+            remote_addr.ip(),
+            remote_addr.port()
+        )),
         Some(format!("tcp4://{}:{}", local_addr.ip(), local_addr.port())),
         r,
         w,
@@ -56,10 +64,13 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let connect_fut = tcp_face_connect(FaceId(0), addr);
-        let accept_fut  = listener.accept();
+        let accept_fut = listener.accept();
         let (client, accepted) = tokio::join!(connect_fut, accept_fut);
         let (accepted_stream, _) = accepted.unwrap();
-        (client.unwrap(), tcp_face_from_stream(FaceId(1), accepted_stream))
+        (
+            client.unwrap(),
+            tcp_face_from_stream(FaceId(1), accepted_stream),
+        )
     }
 
     #[tokio::test]
@@ -96,7 +107,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let connect_fut = TcpStream::connect(addr);
-        let accept_fut  = listener.accept();
+        let accept_fut = listener.accept();
         let (stream, accepted) = tokio::join!(connect_fut, accept_fut);
         let (accepted_stream, _) = accepted.unwrap();
         let server = tcp_face_from_stream(FaceId(1), accepted_stream);
@@ -109,8 +120,14 @@ mod tests {
         let (client, server) = loopback_pair().await;
         client.send(make_tlv(0x05, b"interest")).await.unwrap();
         server.send(make_tlv(0x06, b"data")).await.unwrap();
-        assert_eq!(server.recv().await.unwrap(), expected_on_wire(&make_tlv(0x05, b"interest")));
-        assert_eq!(client.recv().await.unwrap(), expected_on_wire(&make_tlv(0x06, b"data")));
+        assert_eq!(
+            server.recv().await.unwrap(),
+            expected_on_wire(&make_tlv(0x05, b"interest"))
+        );
+        assert_eq!(
+            client.recv().await.unwrap(),
+            expected_on_wire(&make_tlv(0x06, b"data"))
+        );
     }
 
     #[tokio::test]
@@ -119,11 +136,17 @@ mod tests {
         let (client, server) = loopback_pair().await;
         let client = Arc::new(client);
 
-        let handles: Vec<_> = (0u8..8).map(|i| {
-            let c = Arc::clone(&client);
-            tokio::spawn(async move { c.send(make_tlv(0x05, &[i])).await.unwrap(); })
-        }).collect();
-        for h in handles { h.await.unwrap(); }
+        let handles: Vec<_> = (0u8..8)
+            .map(|i| {
+                let c = Arc::clone(&client);
+                tokio::spawn(async move {
+                    c.send(make_tlv(0x05, &[i])).await.unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.await.unwrap();
+        }
 
         let mut received = Vec::new();
         for _ in 0u8..8 {

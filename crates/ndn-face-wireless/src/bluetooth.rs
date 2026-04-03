@@ -15,6 +15,10 @@ pub struct BluetoothFace {
 }
 
 impl BluetoothFace {
-    pub fn new(id: FaceId) -> Self { Self { id } }
-    pub fn id(&self) -> FaceId { self.id }
+    pub fn new(id: FaceId) -> Self {
+        Self { id }
+    }
+    pub fn id(&self) -> FaceId {
+        self.id
+    }
 }

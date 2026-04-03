@@ -105,12 +105,7 @@ async fn connect(opts: &ConnectOpts) -> Result<RouterClient> {
 
 // ─── Server ─────────────────────────────────────────────────────────────────
 
-async fn run_server(
-    conn: ConnectOpts,
-    prefix: String,
-    freshness: u64,
-    sign: bool,
-) -> Result<()> {
+async fn run_server(conn: ConnectOpts, prefix: String, freshness: u64, sign: bool) -> Result<()> {
     let prefix: Name = prefix.parse()?;
     let client = connect(&conn).await?;
     client.register_prefix(&prefix).await?;
@@ -216,7 +211,9 @@ async fn run_client(
         }
 
         let name = prefix.clone().append("ping").append(seq.to_string());
-        let wire = InterestBuilder::new(name.clone()).lifetime(lifetime_dur).build();
+        let wire = InterestBuilder::new(name.clone())
+            .lifetime(lifetime_dur)
+            .build();
 
         let t0 = Instant::now();
         match consumer.fetch_wire(wire, lifetime_dur).await {
@@ -275,7 +272,10 @@ async fn run_client(
 
         // Standard deviation.
         let avg_f = avg as f64;
-        let var = rtts.iter().map(|&r| (r as f64 - avg_f).powi(2)).sum::<f64>()
+        let var = rtts
+            .iter()
+            .map(|&r| (r as f64 - avg_f).powi(2))
+            .sum::<f64>()
             / rtts.len() as f64;
         let stddev = var.sqrt();
 

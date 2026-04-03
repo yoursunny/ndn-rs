@@ -28,8 +28,8 @@ use ndn_config::{ManagementRequest, ManagementResponse};
 
 #[derive(Parser)]
 #[command(
-    name    = "ndn-ctl",
-    about   = "Send management commands to a running ndn-router",
+    name = "ndn-ctl",
+    about = "Send management commands to a running ndn-router",
     version
 )]
 struct Cli {
@@ -169,38 +169,60 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
     let mgmt = MgmtClient::connect(&cli.face_socket)
         .await
         .with_context(|| {
-            format!("Cannot connect to '{}'. Is ndn-router running?", cli.face_socket)
+            format!(
+                "Cannot connect to '{}'. Is ndn-router running?",
+                cli.face_socket
+            )
         })?;
 
     match &cli.command {
         Command::Route { action } => match action {
             RouteAction::Add { prefix, face, cost } => {
-                let resp = mgmt.route_add(
-                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
-                    *face as u64,
-                    *cost as u64,
-                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .route_add(
+                        &prefix
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                        *face as u64,
+                        *cost as u64,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_params(&resp);
             }
             RouteAction::Remove { prefix, face } => {
-                let resp = mgmt.route_remove(
-                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
-                    *face as u64,
-                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .route_remove(
+                        &prefix
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                        *face as u64,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_params(&resp);
             }
             RouteAction::List => {
-                let resp = mgmt.route_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .route_list()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_control_response(&resp);
             }
         },
         Command::Face { action } => match action {
             FaceAction::Create { uri } => {
-                let resp = mgmt.face_create(uri).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .face_create(uri)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_params(&resp);
             }
             FaceAction::Destroy { face_id } => {
-                let resp = mgmt.face_destroy(*face_id as u64).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .face_destroy(*face_id as u64)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_params(&resp);
             }
             FaceAction::List => {
@@ -210,20 +232,35 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
         },
         Command::Strategy { action } => match action {
             StrategyAction::Set { prefix, strategy } => {
-                let resp = mgmt.strategy_set(
-                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
-                    &strategy.parse().map_err(|e| anyhow::anyhow!("bad strategy: {e}"))?,
-                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .strategy_set(
+                        &prefix
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                        &strategy
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad strategy: {e}"))?,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_params(&resp);
             }
             StrategyAction::Unset { prefix } => {
-                let resp = mgmt.strategy_unset(
-                    &prefix.parse().map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
-                ).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .strategy_unset(
+                        &prefix
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_params(&resp);
             }
             StrategyAction::List => {
-                let resp = mgmt.strategy_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                let resp = mgmt
+                    .strategy_list()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_control_response(&resp);
             }
         },
@@ -276,7 +313,9 @@ async fn send_unix(
     use tokio::net::UnixStream;
 
     let stream = UnixStream::connect(socket_path).await.with_context(|| {
-        format!("Could not connect to '{socket_path}'. Is ndn-router running with bypass transport?")
+        format!(
+            "Could not connect to '{socket_path}'. Is ndn-router running with bypass transport?"
+        )
     })?;
 
     let (reader, mut writer) = stream.into_split();
@@ -285,9 +324,10 @@ async fn send_unix(
     writer.write_all(json.as_bytes()).await?;
 
     let mut lines = BufReader::new(reader).lines();
-    let line = lines.next_line().await?.ok_or_else(|| {
-        anyhow::anyhow!("Connection closed before a response was received.")
-    })?;
+    let line = lines
+        .next_line()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Connection closed before a response was received."))?;
 
     serde_json::from_str::<ManagementResponse>(&line)
         .with_context(|| format!("Unparseable response: {line}"))
@@ -364,8 +404,7 @@ fn print_legacy_response(resp: ManagementResponse) {
         ManagementResponse::OkData { data } => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&data)
-                    .unwrap_or_else(|_| data.to_string())
+                serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string())
             );
         }
         ManagementResponse::Error { message } => {

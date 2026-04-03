@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use ndn_packet::Name;
 use crate::af_packet::MacAddr;
+use ndn_packet::Name;
 use ndn_transport::FaceId;
+use std::collections::HashMap;
 
 /// A discovered neighbor and its per-radio face bindings.
 #[derive(Clone, Debug)]
@@ -29,7 +29,9 @@ pub struct NeighborDiscovery {
 
 impl NeighborDiscovery {
     pub fn new() -> Self {
-        Self { neighbors: HashMap::new() }
+        Self {
+            neighbors: HashMap::new(),
+        }
     }
 
     pub fn neighbors(&self) -> impl Iterator<Item = &NeighborEntry> {
@@ -50,5 +52,7 @@ impl NeighborDiscovery {
 }
 
 impl Default for NeighborDiscovery {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

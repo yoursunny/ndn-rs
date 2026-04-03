@@ -22,7 +22,11 @@ pub type SerialFace = ndn_transport::StreamFace<
 
 /// Open a serial port and wrap it as an NDN [`SerialFace`].
 #[cfg(feature = "serial")]
-pub fn serial_face_open(id: FaceId, port: impl Into<String>, baud: u32) -> std::io::Result<SerialFace> {
+pub fn serial_face_open(
+    id: FaceId,
+    port: impl Into<String>,
+    baud: u32,
+) -> std::io::Result<SerialFace> {
     let port = port.into();
     let builder = tokio_serial::new(&port, baud);
     let stream = tokio_serial::SerialStream::open(&builder)?;
@@ -49,7 +53,7 @@ use ndn_transport::{Face, FaceError};
 
 #[cfg(not(feature = "serial"))]
 pub struct SerialFace {
-    id:   FaceId,
+    id: FaceId,
     port: String,
     baud: u32,
 }
@@ -57,14 +61,22 @@ pub struct SerialFace {
 #[cfg(not(feature = "serial"))]
 impl SerialFace {
     pub fn new(id: FaceId, port: impl Into<String>, baud: u32) -> Self {
-        Self { id, port: port.into(), baud }
+        Self {
+            id,
+            port: port.into(),
+            baud,
+        }
     }
 }
 
 #[cfg(not(feature = "serial"))]
 impl Face for SerialFace {
-    fn id(&self) -> FaceId { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::Serial }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::Serial
+    }
 
     async fn recv(&self) -> Result<Bytes, FaceError> {
         Err(FaceError::Closed)

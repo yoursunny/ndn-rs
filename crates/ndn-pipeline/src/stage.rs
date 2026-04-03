@@ -21,10 +21,10 @@ pub trait PipelineStage: Send + Sync + 'static {
 /// Used for stages that genuinely need dynamic dispatch (e.g., plugin stages).
 /// The built-in pipeline is monomorphised for zero-cost dispatch.
 pub type BoxedStage = Box<
-    dyn Fn(PacketContext)
-        -> std::pin::Pin<
+    dyn Fn(
+            PacketContext,
+        ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Action, crate::action::DropReason>> + Send>,
-        >
-        + Send
+        > + Send
         + Sync,
 >;

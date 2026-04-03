@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use tokio::task::JoinSet;
 
 use ndn_app::AppFace;
@@ -22,9 +22,15 @@ struct LatencyStats {
 }
 
 impl LatencyStats {
-    fn new() -> Self { Self { samples: Vec::new() } }
+    fn new() -> Self {
+        Self {
+            samples: Vec::new(),
+        }
+    }
 
-    fn record(&mut self, us: u64) { self.samples.push(us); }
+    fn record(&mut self, us: u64) {
+        self.samples.push(us);
+    }
 
     fn print(&mut self, label: &str) {
         if self.samples.is_empty() {
@@ -32,14 +38,12 @@ impl LatencyStats {
             return;
         }
         self.samples.sort_unstable();
-        let n  = self.samples.len();
+        let n = self.samples.len();
         let p50 = self.samples[n / 2];
         let p95 = self.samples[(n * 95) / 100];
         let p99 = self.samples[(n * 99) / 100];
         let avg = self.samples.iter().sum::<u64>() / n as u64;
-        println!(
-            "{label}: n={n} avg={avg}µs p50={p50}µs p95={p95}µs p99={p99}µs"
-        );
+        println!("{label}: n={n} avg={avg}µs p50={p50}µs p95={p95}µs p99={p99}µs");
     }
 }
 
@@ -48,22 +52,26 @@ async fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
 
     let mut total_interests: u64 = 1000;
-    let mut concurrency:     u64 = 10;
+    let mut concurrency: u64 = 10;
     let mut prefix_str = "/bench".to_string();
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
-            "--interests"   => { total_interests = args.next().unwrap_or_default().parse().unwrap_or(1000); }
-            "--concurrency" => { concurrency     = args.next().unwrap_or_default().parse().unwrap_or(10); }
-            "--name"        => { prefix_str      = args.next().unwrap_or("/bench".to_string()); }
-            other           => bail!("unknown flag: {other}"),
+            "--interests" => {
+                total_interests = args.next().unwrap_or_default().parse().unwrap_or(1000);
+            }
+            "--concurrency" => {
+                concurrency = args.next().unwrap_or_default().parse().unwrap_or(10);
+            }
+            "--name" => {
+                prefix_str = args.next().unwrap_or("/bench".to_string());
+            }
+            other => bail!("unknown flag: {other}"),
         }
     }
 
     // ── Engine setup ──────────────────────────────────────────────────────────
-    let (_engine, shutdown) = EngineBuilder::new(EngineConfig::default())
-        .build()
-        .await?;
+    let (_engine, shutdown) = EngineBuilder::new(EngineConfig::default()).build().await?;
 
     let prefix: Name = prefix_str.parse().unwrap_or_else(|_| Name::root());
     println!(
@@ -75,8 +83,8 @@ async fn main() -> Result<()> {
     // A real implementation would wire AppFace to the engine pipeline.
     // Here we measure the overhead of the AppFace channel round-trip only.
     let mut stats = LatencyStats::new();
-    let start     = Instant::now();
-    let batch     = total_interests / concurrency.max(1);
+    let start = Instant::now();
+    let batch = total_interests / concurrency.max(1);
 
     let mut set: JoinSet<Vec<u64>> = JoinSet::new();
 
@@ -107,7 +115,9 @@ async fn main() -> Result<()> {
 
     while let Some(result) = set.join_next().await {
         if let Ok(rtts) = result {
-            for rtt in rtts { stats.record(rtt); }
+            for rtt in rtts {
+                stats.record(rtt);
+            }
         }
     }
 
@@ -121,11 +131,14 @@ async fn main() -> Result<()> {
 
     println!(
         "ndn-bench: {:.0} interests/sec over {:.2}s",
-        tput, elapsed.as_secs_f64()
+        tput,
+        elapsed.as_secs_f64()
     );
     stats.print("rtt");
 
-    println!("ndn-bench: note — AppFace not wired to pipeline; results reflect channel overhead only");
+    println!(
+        "ndn-bench: note — AppFace not wired to pipeline; results reflect channel overhead only"
+    );
 
     shutdown.shutdown().await;
     Ok(())

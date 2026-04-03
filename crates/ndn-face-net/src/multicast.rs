@@ -29,11 +29,11 @@ pub const NDN_PORT: u16 = 6363;
 /// 3. Subsequent traffic uses the unicast face; the multicast face handles
 ///    only discovery and control traffic.
 pub struct MulticastUdpFace {
-    id:     FaceId,
+    id: FaceId,
     socket: Arc<UdpSocket>,
-    dest:   SocketAddr,
-    mtu:    usize,
-    seq:    AtomicU64,
+    dest: SocketAddr,
+    mtu: usize,
+    seq: AtomicU64,
 }
 
 impl MulticastUdpFace {
@@ -41,9 +41,9 @@ impl MulticastUdpFace {
     /// Use `NDN_MULTICAST_V4` and `NDN_PORT` for standard NDN.
     pub async fn new(
         iface: Ipv4Addr,
-        port:  u16,
+        port: u16,
         group: Ipv4Addr,
-        id:    FaceId,
+        id: FaceId,
     ) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).await?;
         socket.set_multicast_loop_v4(true)?;
@@ -65,7 +65,13 @@ impl MulticastUdpFace {
     /// Wrap a pre-configured socket. The caller is responsible for binding and
     /// joining the multicast group. Useful when `SO_REUSEADDR` is needed.
     pub fn with_socket(id: FaceId, socket: UdpSocket, dest: SocketAddr) -> Self {
-        Self { id, socket: Arc::new(socket), dest, mtu: DEFAULT_UDP_MTU, seq: AtomicU64::new(0) }
+        Self {
+            id,
+            socket: Arc::new(socket),
+            dest,
+            mtu: DEFAULT_UDP_MTU,
+            seq: AtomicU64::new(0),
+        }
     }
 
     pub fn dest(&self) -> SocketAddr {
@@ -74,8 +80,12 @@ impl MulticastUdpFace {
 }
 
 impl Face for MulticastUdpFace {
-    fn id(&self) -> FaceId { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::Multicast }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::Multicast
+    }
 
     /// Receive the next NDN packet from any sender on the multicast group.
     async fn recv(&self) -> Result<Bytes, FaceError> {
@@ -152,7 +162,7 @@ mod tests {
         }
 
         let dest = SocketAddr::V4(SocketAddrV4::new(group, recv_port));
-        let sender   = MulticastUdpFace::with_socket(FaceId(0), sock_send, dest);
+        let sender = MulticastUdpFace::with_socket(FaceId(0), sock_send, dest);
         let receiver = MulticastUdpFace::with_socket(FaceId(1), sock_recv, dest);
 
         let pkt = Bytes::from_static(b"\x05\x03ndn");
@@ -164,10 +174,7 @@ mod tests {
 
         // Wrap with a timeout — environments that route multicast away from loopback
         // will block recv() indefinitely without one.
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            receiver.recv(),
-        ).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), receiver.recv()).await {
             Ok(Ok(received)) => assert_eq!(received, expected),
             _ => { /* packet didn't arrive — skip */ }
         }

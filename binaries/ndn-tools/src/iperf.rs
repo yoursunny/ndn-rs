@@ -198,18 +198,18 @@ fn format_bytes(bytes: u64) -> String {
 // ─── Interval stats (lock-free) ─────────────────────────────────────────────
 
 struct IntervalCounters {
-    bytes:     AtomicU64,
-    pkts:      AtomicU64,
-    rtt_sum:   AtomicU64,
+    bytes: AtomicU64,
+    pkts: AtomicU64,
+    rtt_sum: AtomicU64,
     rtt_count: AtomicU64,
 }
 
 impl IntervalCounters {
     fn new() -> Self {
         Self {
-            bytes:     AtomicU64::new(0),
-            pkts:      AtomicU64::new(0),
-            rtt_sum:   AtomicU64::new(0),
+            bytes: AtomicU64::new(0),
+            pkts: AtomicU64::new(0),
+            rtt_sum: AtomicU64::new(0),
             rtt_count: AtomicU64::new(0),
         }
     }
@@ -267,13 +267,16 @@ async fn run_server(
         let keychain = KeyChain::new();
         Some(keychain.create_identity(prefix.clone(), None)?)
     } else if hmac {
-        use ndn_packet::{NameComponent, Name as NdnName};
+        use ndn_packet::{Name as NdnName, NameComponent};
         let key_name = NdnName::from_components([
             NameComponent::generic(Bytes::from_static(b"iperf")),
             NameComponent::generic(Bytes::from_static(b"hmac-key")),
         ]);
         // Fixed test key — iperf is a benchmark tool, not production security.
-        Some(Arc::new(ndn_security::HmacSha256Signer::new(b"ndn-iperf-bench-key", key_name)))
+        Some(Arc::new(ndn_security::HmacSha256Signer::new(
+            b"ndn-iperf-bench-key",
+            key_name,
+        )))
     } else {
         None
     };
@@ -386,13 +389,15 @@ async fn run_client(
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
     let lifetime = Duration::from_millis(lifetime_ms);
     let cc_name = match &cc {
-        CongestionController::Aimd { .. }  => "aimd",
+        CongestionController::Aimd { .. } => "aimd",
         CongestionController::Cubic { .. } => "cubic",
         CongestionController::Fixed { .. } => "fixed",
     };
 
     eprintln!("ndn-iperf client: prefix={prefix} transport={transport}");
-    eprintln!("  duration={duration_secs}s  window={initial_window}  cc={cc_name}  lifetime={lifetime_ms}ms");
+    eprintln!(
+        "  duration={duration_secs}s  window={initial_window}  cc={cc_name}  lifetime={lifetime_ms}ms"
+    );
     eprintln!("  testing...");
 
     // Unique flow ID per run to avoid PIT collisions with previous runs.
@@ -471,7 +476,11 @@ async fn run_client(
     let check_interval = Duration::from_millis(100);
 
     let sent = loop {
-        let timeout = if past_deadline { drain_timeout } else { check_interval };
+        let timeout = if past_deadline {
+            drain_timeout
+        } else {
+            check_interval
+        };
         match tokio::time::timeout(timeout, client.recv()).await {
             Ok(Some(data_bytes)) => {
                 let data_len = data_bytes.len() as u64;
@@ -521,10 +530,14 @@ async fn run_client(
             }
             Err(_) => {
                 if past_deadline {
-                    if timestamps.is_empty() { break next_seq; }
+                    if timestamps.is_empty() {
+                        break next_seq;
+                    }
                     let now = Instant::now();
                     timestamps.retain(|_, (t0, _)| now.duration_since(*t0) < drain_timeout);
-                    if timestamps.is_empty() { break next_seq; }
+                    if timestamps.is_empty() {
+                        break next_seq;
+                    }
                     continue;
                 }
                 if Instant::now() >= deadline {
@@ -539,11 +552,12 @@ async fn run_client(
                 //
                 // Cap retransmits per check to half the current window to
                 // prevent retransmit floods from overwhelming the pipeline.
-                let rto = Duration::from_micros((srtt_us * 3.0) as u64)
-                    .max(Duration::from_millis(200));
+                let rto =
+                    Duration::from_micros((srtt_us * 3.0) as u64).max(Duration::from_millis(200));
                 let now = Instant::now();
                 let max_retx_per_check = (cc.window() / 2.0).max(2.0) as usize;
-                let mut stale: Vec<(u64, u32)> = timestamps.iter()
+                let mut stale: Vec<(u64, u32)> = timestamps
+                    .iter()
                     .filter(|(_, (t0, _))| now.duration_since(*t0) >= rto)
                     .map(|(seq, (_, retries))| (*seq, *retries))
                     .collect();
@@ -642,22 +656,41 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Server {
-            conn, prefix, size, sign, hmac, freshness, quiet, interval,
+            conn,
+            prefix,
+            size,
+            sign,
+            hmac,
+            freshness,
+            quiet,
+            interval,
         } => {
             let prefix: Name = prefix.parse()?;
             run_server(&conn, &prefix, size, sign, hmac, freshness, quiet, interval).await
         }
         Command::Client {
-            conn, prefix, duration, window, cc,
-            min_window, max_window, ai, md, cubic_c,
-            lifetime, quiet, interval,
+            conn,
+            prefix,
+            duration,
+            window,
+            cc,
+            min_window,
+            max_window,
+            ai,
+            md,
+            cubic_c,
+            lifetime,
+            quiet,
+            interval,
         } => {
             let prefix: Name = prefix.parse()?;
             let mut controller = match cc.as_str() {
                 "aimd" => CongestionController::aimd(),
                 "cubic" => CongestionController::cubic(),
                 "fixed" => CongestionController::fixed(window as f64),
-                other => anyhow::bail!("unknown congestion control algorithm: {other} (expected: aimd, cubic, fixed)"),
+                other => anyhow::bail!(
+                    "unknown congestion control algorithm: {other} (expected: aimd, cubic, fixed)"
+                ),
             };
             // Set CC initial window and ssthresh from --window flag.
             // This prevents unbounded slow start (ssthresh=MAX) from
@@ -666,12 +699,25 @@ async fn main() -> Result<()> {
                 .with_window(window as f64)
                 .with_ssthresh(window as f64);
             // Apply optional tuning parameters.
-            if let Some(v) = min_window { controller = controller.with_min_window(v); }
-            if let Some(v) = max_window { controller = controller.with_max_window(v); }
-            if let Some(v) = ai         { controller = controller.with_additive_increase(v); }
-            if let Some(v) = md         { controller = controller.with_decrease_factor(v); }
-            if let Some(v) = cubic_c    { controller = controller.with_cubic_c(v); }
-            run_client(&conn, &prefix, duration, window, controller, lifetime, quiet, interval).await
+            if let Some(v) = min_window {
+                controller = controller.with_min_window(v);
+            }
+            if let Some(v) = max_window {
+                controller = controller.with_max_window(v);
+            }
+            if let Some(v) = ai {
+                controller = controller.with_additive_increase(v);
+            }
+            if let Some(v) = md {
+                controller = controller.with_decrease_factor(v);
+            }
+            if let Some(v) = cubic_c {
+                controller = controller.with_cubic_c(v);
+            }
+            run_client(
+                &conn, &prefix, duration, window, controller, lifetime, quiet, interval,
+            )
+            .await
         }
     }
 }

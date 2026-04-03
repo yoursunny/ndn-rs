@@ -125,9 +125,9 @@ fn main() -> anyhow::Result<()> {
             cmd_delete(&pib_path, &name)?;
         }
         Command::Anchor { subcmd } => match subcmd {
-            AnchorCmd::Add { name }    => cmd_anchor_add(&pib_path, &name)?,
+            AnchorCmd::Add { name } => cmd_anchor_add(&pib_path, &name)?,
             AnchorCmd::Remove { name } => cmd_anchor_remove(&pib_path, &name)?,
-            AnchorCmd::List            => cmd_anchor_list(&pib_path)?,
+            AnchorCmd::List => cmd_anchor_list(&pib_path)?,
         },
     }
 
@@ -136,7 +136,12 @@ fn main() -> anyhow::Result<()> {
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
-fn cmd_keygen(pib_path: &PathBuf, name_str: &str, make_anchor: bool, days: u64) -> anyhow::Result<()> {
+fn cmd_keygen(
+    pib_path: &PathBuf,
+    name_str: &str,
+    make_anchor: bool,
+    days: u64,
+) -> anyhow::Result<()> {
     let key_name = parse_name(name_str)?;
     let pib = FilePib::new(pib_path)?;
 
@@ -148,9 +153,9 @@ fn cmd_keygen(pib_path: &PathBuf, name_str: &str, make_anchor: bool, days: u64) 
     let now = now_ns();
     let validity_ns = days * 24 * 3600 * 1_000_000_000;
     let cert = Certificate {
-        name:        Arc::new(key_name.clone()),
-        public_key:  pk.clone(),
-        valid_from:  now,
+        name: Arc::new(key_name.clone()),
+        public_key: pk.clone(),
+        valid_from: now,
         valid_until: now.saturating_add(validity_ns),
     };
     pib.store_cert(&key_name, &cert)?;
@@ -173,14 +178,19 @@ fn cmd_keygen(pib_path: &PathBuf, name_str: &str, make_anchor: bool, days: u64) 
 fn cmd_certdump(pib_path: &PathBuf, name_str: &str) -> anyhow::Result<()> {
     let key_name = parse_name(name_str)?;
     let pib = open_pib(pib_path)?;
-    let cert = pib.get_cert(&key_name)
+    let cert = pib
+        .get_cert(&key_name)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let expired = cert.valid_until != u64::MAX && cert.valid_until < now_ns();
     println!("Certificate for {name_str}");
     println!("  Public key : {}", hex_encode(&cert.public_key));
     println!("  Valid from : {}", format_ns(cert.valid_from));
-    println!("  Valid until: {}{}", format_ns(cert.valid_until), if expired { "  [EXPIRED]" } else { "" });
+    println!(
+        "  Valid until: {}{}",
+        format_ns(cert.valid_until),
+        if expired { "  [EXPIRED]" } else { "" }
+    );
 
     Ok(())
 }
@@ -198,7 +208,11 @@ fn cmd_list(pib_path: &PathBuf) -> anyhow::Result<()> {
     for name in &keys {
         let uri = name_to_uri(name);
         let has_cert = pib.get_cert(name).is_ok();
-        println!("  {}  {}", uri, if has_cert { "[cert]" } else { "[no cert]" });
+        println!(
+            "  {}  {}",
+            uri,
+            if has_cert { "[cert]" } else { "[no cert]" }
+        );
     }
 
     Ok(())
@@ -215,8 +229,9 @@ fn cmd_delete(pib_path: &PathBuf, name_str: &str) -> anyhow::Result<()> {
 fn cmd_anchor_add(pib_path: &PathBuf, name_str: &str) -> anyhow::Result<()> {
     let key_name = parse_name(name_str)?;
     let pib = open_pib(pib_path)?;
-    let cert = pib.get_cert(&key_name)
-        .map_err(|_| anyhow::anyhow!("No certificate for {name_str}. Run `ndn-sec keygen {name_str}` first."))?;
+    let cert = pib.get_cert(&key_name).map_err(|_| {
+        anyhow::anyhow!("No certificate for {name_str}. Run `ndn-sec keygen {name_str}` first.")
+    })?;
     pib.add_trust_anchor(&key_name, &cert)?;
     println!("Marked {name_str} as a trust anchor.");
     Ok(())
@@ -272,13 +287,17 @@ fn dirs_next() -> PathBuf {
 
 fn open_pib(path: &PathBuf) -> anyhow::Result<FilePib> {
     FilePib::open(path).map_err(|e| {
-        anyhow::anyhow!("{e}\nRun `ndn-sec keygen <name>` to create a PIB at {}.", path.display())
+        anyhow::anyhow!(
+            "{e}\nRun `ndn-sec keygen <name>` to create a PIB at {}.",
+            path.display()
+        )
     })
 }
 
 /// Parse an NDN URI like `/ndn/router1` into a `Name`.
 fn parse_name(s: &str) -> anyhow::Result<Name> {
-    s.parse().map_err(|e| anyhow::anyhow!("Invalid NDN name '{s}': {e}"))
+    s.parse()
+        .map_err(|e| anyhow::anyhow!("Invalid NDN name '{s}': {e}"))
 }
 
 fn now_ns() -> u64 {
@@ -290,7 +309,9 @@ fn now_ns() -> u64 {
 
 /// Format a nanosecond Unix timestamp as a human-readable date/time.
 fn format_ns(ns: u64) -> String {
-    if ns == u64::MAX { return "never".to_string(); }
+    if ns == u64::MAX {
+        return "never".to_string();
+    }
     let secs = ns / 1_000_000_000;
     format_unix_secs(secs)
 }
@@ -309,12 +330,12 @@ fn format_unix_secs(secs: u64) -> String {
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u64;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y   = yoe as i64 + era * 400;
+    let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp  = (5 * doy + 2) / 153;
+    let mp = (5 * doy + 2) / 153;
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year  = if month <= 2 { y + 1 } else { y };
+    let year = if month <= 2 { y + 1 } else { y };
 
     format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
 }

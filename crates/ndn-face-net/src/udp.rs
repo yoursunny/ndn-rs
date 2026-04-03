@@ -25,11 +25,11 @@ use ndn_transport::{Face, FaceError, FaceId, FaceKind};
 /// Packets larger than the configured MTU are automatically fragmented into
 /// NDNLPv2 LpPacket fragments before sending.
 pub struct UdpFace {
-    id:     FaceId,
+    id: FaceId,
     socket: Arc<UdpSocket>,
-    peer:   SocketAddr,
-    mtu:    usize,
-    seq:    AtomicU64,
+    peer: SocketAddr,
+    mtu: usize,
+    seq: AtomicU64,
 }
 
 impl UdpFace {
@@ -42,11 +42,7 @@ impl UdpFace {
     /// specific local interface that the OS routes to `peer`.  This avoids
     /// `EHOSTUNREACH` on macOS when the peer is on a non-default-route
     /// subnet (e.g. a VM bridge network).
-    pub async fn bind(
-        local: SocketAddr,
-        peer:  SocketAddr,
-        id:    FaceId,
-    ) -> std::io::Result<Self> {
+    pub async fn bind(local: SocketAddr, peer: SocketAddr, id: FaceId) -> std::io::Result<Self> {
         let local = if local.ip().is_unspecified() {
             let resolved = resolve_local_addr(peer, local.port())?;
             trace!(peer=%peer, resolved=%resolved, "udp: resolved local addr for peer");
@@ -56,12 +52,24 @@ impl UdpFace {
         };
         let socket = UdpSocket::bind(local).await?;
         trace!(face=%id, local=%socket.local_addr().unwrap_or(local), peer=%peer, "udp: bound");
-        Ok(Self { id, socket: Arc::new(socket), peer, mtu: DEFAULT_UDP_MTU, seq: AtomicU64::new(0) })
+        Ok(Self {
+            id,
+            socket: Arc::new(socket),
+            peer,
+            mtu: DEFAULT_UDP_MTU,
+            seq: AtomicU64::new(0),
+        })
     }
 
     /// Wrap an already-bound socket, targeting `peer` for all sends.
     pub fn from_socket(id: FaceId, socket: UdpSocket, peer: SocketAddr) -> Self {
-        Self { id, socket: Arc::new(socket), peer, mtu: DEFAULT_UDP_MTU, seq: AtomicU64::new(0) }
+        Self {
+            id,
+            socket: Arc::new(socket),
+            peer,
+            mtu: DEFAULT_UDP_MTU,
+            seq: AtomicU64::new(0),
+        }
     }
 
     /// Create a face that shares an existing socket (e.g. the UDP listener socket).
@@ -70,7 +78,13 @@ impl UdpFace {
     /// remote peer's connected/filtered socket accepts them.  The `recv()`
     /// loop filters datagrams by `peer` address.
     pub fn from_shared_socket(id: FaceId, socket: Arc<UdpSocket>, peer: SocketAddr) -> Self {
-        Self { id, socket, peer, mtu: DEFAULT_UDP_MTU, seq: AtomicU64::new(0) }
+        Self {
+            id,
+            socket,
+            peer,
+            mtu: DEFAULT_UDP_MTU,
+            seq: AtomicU64::new(0),
+        }
     }
 
     pub fn peer(&self) -> SocketAddr {
@@ -79,15 +93,22 @@ impl UdpFace {
 }
 
 impl Face for UdpFace {
-    fn id(&self) -> FaceId { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::Udp }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::Udp
+    }
 
     fn remote_uri(&self) -> Option<String> {
         Some(format!("udp4://{}:{}", self.peer.ip(), self.peer.port()))
     }
 
     fn local_uri(&self) -> Option<String> {
-        self.socket.local_addr().ok().map(|a| format!("udp4://{}:{}", a.ip(), a.port()))
+        self.socket
+            .local_addr()
+            .ok()
+            .map(|a| format!("udp4://{}:{}", a.ip(), a.port()))
     }
 
     /// Receive the next datagram from the peer.
@@ -210,8 +231,14 @@ mod tests {
         face_a.send(test_packet(1)).await.unwrap();
         face_b.send(test_packet(2)).await.unwrap();
 
-        assert_eq!(face_b.recv().await.unwrap(), expected_on_wire(&test_packet(1)));
-        assert_eq!(face_a.recv().await.unwrap(), expected_on_wire(&test_packet(2)));
+        assert_eq!(
+            face_b.recv().await.unwrap(),
+            expected_on_wire(&test_packet(1))
+        );
+        assert_eq!(
+            face_a.recv().await.unwrap(),
+            expected_on_wire(&test_packet(2))
+        );
     }
 
     #[tokio::test]
@@ -220,7 +247,10 @@ mod tests {
 
         for i in 0u8..5 {
             face_a.send(test_packet(i)).await.unwrap();
-            assert_eq!(face_b.recv().await.unwrap(), expected_on_wire(&test_packet(i)));
+            assert_eq!(
+                face_b.recv().await.unwrap(),
+                expected_on_wire(&test_packet(i))
+            );
         }
     }
 

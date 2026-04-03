@@ -1,25 +1,25 @@
-use tokio::sync::mpsc;
 use ndn_pipeline::{Action, DropReason, PacketContext, PipelineStage};
+use tokio::sync::mpsc;
 
 /// A pipeline stage that emits observation events without blocking forwarding.
 ///
 /// Uses `try_send` on a bounded channel — events are dropped when the receiver
 /// falls behind rather than slowing the forwarding pipeline.
 pub struct FlowObserverStage {
-    tx:              mpsc::Sender<FlowEvent>,
+    tx: mpsc::Sender<FlowEvent>,
     /// Optional sampling rate (0.0–1.0). Events are dropped probabilistically
     /// to limit observer overhead on high-rate testbeds.
-    sampling_rate:   f32,
+    sampling_rate: f32,
 }
 
 /// An observation event emitted for each packet.
 #[derive(Debug, Clone)]
 pub struct FlowEvent {
-    pub arrival_ns:  u64,
-    pub face_id:     ndn_transport::FaceId,
-    pub name:        Option<std::sync::Arc<ndn_packet::Name>>,
+    pub arrival_ns: u64,
+    pub face_id: ndn_transport::FaceId,
+    pub name: Option<std::sync::Arc<ndn_packet::Name>>,
     pub packet_type: PacketType,
-    pub cs_hit:      bool,
+    pub cs_hit: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +32,10 @@ pub enum PacketType {
 
 impl FlowObserverStage {
     pub fn new(tx: mpsc::Sender<FlowEvent>) -> Self {
-        Self { tx, sampling_rate: 1.0 }
+        Self {
+            tx,
+            sampling_rate: 1.0,
+        }
     }
 
     pub fn with_sampling_rate(mut self, rate: f32) -> Self {
@@ -51,17 +54,17 @@ impl PipelineStage for FlowObserverStage {
     async fn process(&self, ctx: PacketContext) -> Result<Action, DropReason> {
         let packet_type = match &ctx.packet {
             ndn_pipeline::DecodedPacket::Interest(_) => PacketType::Interest,
-            ndn_pipeline::DecodedPacket::Data(_)     => PacketType::Data,
-            ndn_pipeline::DecodedPacket::Nack(_)     => PacketType::Nack,
-            ndn_pipeline::DecodedPacket::Raw         => PacketType::Unknown,
+            ndn_pipeline::DecodedPacket::Data(_) => PacketType::Data,
+            ndn_pipeline::DecodedPacket::Nack(_) => PacketType::Nack,
+            ndn_pipeline::DecodedPacket::Raw => PacketType::Unknown,
         };
 
         let event = FlowEvent {
-            arrival_ns:  ctx.arrival,
-            face_id:     ctx.face_id,
-            name:        ctx.name.clone(),
+            arrival_ns: ctx.arrival,
+            face_id: ctx.face_id,
+            name: ctx.name.clone(),
             packet_type,
-            cs_hit:      ctx.cs_hit,
+            cs_hit: ctx.cs_hit,
         };
 
         // try_send is non-blocking — drops the event if the receiver is behind.
@@ -100,8 +103,11 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         // Fill the channel first.
         let _ = tx.try_send(FlowEvent {
-            arrival_ns: 0, face_id: FaceId(0),
-            name: None, packet_type: PacketType::Unknown, cs_hit: false,
+            arrival_ns: 0,
+            face_id: FaceId(0),
+            name: None,
+            packet_type: PacketType::Unknown,
+            cs_hit: false,
         });
         let stage = FlowObserverStage::new(tx);
         // Should not block or error even though the channel is full.

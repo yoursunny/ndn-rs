@@ -6,15 +6,15 @@ use std::sync::Arc;
 /// Per-prefix flow entry tracking observed throughput and preferred radio face.
 #[derive(Clone, Debug)]
 pub struct FlowEntry {
-    pub prefix:         Arc<Name>,
+    pub prefix: Arc<Name>,
     /// The radio face that has been giving the best performance.
     pub preferred_face: FaceId,
     /// EWMA bytes/sec observed on this prefix.
-    pub observed_tput:  f32,
+    pub observed_tput: f32,
     /// EWMA RTT in milliseconds.
     pub observed_rtt_ms: f32,
     /// Timestamp of last update (ns since Unix epoch).
-    pub last_updated:   u64,
+    pub last_updated: u64,
 }
 
 /// Maps name prefixes to preferred radio faces based on observed flow performance.
@@ -28,7 +28,9 @@ pub struct FlowTable {
 
 impl FlowTable {
     pub fn new() -> Self {
-        Self { entries: DashMap::new() }
+        Self {
+            entries: DashMap::new(),
+        }
     }
 
     pub fn get(&self, name: &Arc<Name>) -> Option<FlowEntry> {
@@ -44,12 +46,18 @@ impl FlowTable {
         self.entries.retain(|_, v| v.preferred_face != face_id);
     }
 
-    pub fn len(&self) -> usize { self.entries.len() }
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 impl Default for FlowTable {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -59,15 +67,15 @@ mod tests {
     use ndn_packet::NameComponent;
 
     fn make_entry(comp: &'static str, face: u32, tput: f32) -> FlowEntry {
-        let prefix = Arc::new(Name::from_components([
-            NameComponent::generic(Bytes::from_static(comp.as_bytes()))
-        ]));
+        let prefix = Arc::new(Name::from_components([NameComponent::generic(
+            Bytes::from_static(comp.as_bytes()),
+        )]));
         FlowEntry {
             prefix,
-            preferred_face:   FaceId(face),
-            observed_tput:    tput,
-            observed_rtt_ms:  10.0,
-            last_updated:     0,
+            preferred_face: FaceId(face),
+            observed_tput: tput,
+            observed_rtt_ms: 10.0,
+            last_updated: 0,
         }
     }
 

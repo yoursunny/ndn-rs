@@ -48,10 +48,10 @@ pub enum Action {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smallvec::smallvec;
-    use ndn_transport::FaceId;
     use crate::context::PacketContext;
     use bytes::Bytes;
+    use ndn_transport::FaceId;
+    use smallvec::smallvec;
 
     #[test]
     fn drop_reason_variants_are_distinct() {
@@ -123,7 +123,10 @@ mod tests {
 
     #[test]
     fn forwarding_action_suppress() {
-        assert!(matches!(ForwardingAction::Suppress, ForwardingAction::Suppress));
+        assert!(matches!(
+            ForwardingAction::Suppress,
+            ForwardingAction::Suppress
+        ));
     }
 
     #[test]

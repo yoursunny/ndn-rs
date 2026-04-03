@@ -29,7 +29,9 @@ impl ChannelManager {
 }
 
 impl Default for ChannelManager {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug)]
@@ -42,9 +44,9 @@ pub enum SwitchError {
 impl std::fmt::Display for SwitchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SwitchError::NotImplemented       => write!(f, "channel switching not yet implemented"),
-            SwitchError::NetlinkError(e)       => write!(f, "nl80211 error: {e}"),
-            SwitchError::InterfaceNotFound    => write!(f, "interface not found"),
+            SwitchError::NotImplemented => write!(f, "channel switching not yet implemented"),
+            SwitchError::NetlinkError(e) => write!(f, "nl80211 error: {e}"),
+            SwitchError::InterfaceNotFound => write!(f, "interface not found"),
         }
     }
 }

@@ -5,11 +5,11 @@ use ndn_packet::Name;
 use ndn_transport::{Face, FaceError, FaceId, FaceKind};
 use tokio::io::unix::AsyncFd;
 
+use crate::NDN_ETHERTYPE;
 use crate::af_packet::{
-    MacAddr, get_ifindex, make_sockaddr_ll, open_packet_socket, setup_packet_ring, PacketRing,
+    MacAddr, PacketRing, get_ifindex, make_sockaddr_ll, open_packet_socket, setup_packet_ring,
 };
 use crate::radio::RadioFaceMetadata;
-use crate::NDN_ETHERTYPE;
 
 // Re-export MacAddr so existing users of `ether::MacAddr` still work.
 pub use crate::af_packet::MacAddr;
@@ -29,21 +29,21 @@ pub use crate::af_packet::MacAddr;
 ///
 /// Requires `CAP_NET_RAW` or root.
 pub struct NamedEtherFace {
-    id:          FaceId,
+    id: FaceId,
     /// NDN node name of the remote peer.
     pub node_name: Name,
     /// Resolved MAC address of the remote peer.
-    peer_mac:    MacAddr,
+    peer_mac: MacAddr,
     /// Local network interface name.
-    iface:       String,
+    iface: String,
     /// Interface index (cached from constructor).
-    ifindex:     i32,
+    ifindex: i32,
     /// Radio metadata for multi-radio strategies.
-    pub radio:   RadioFaceMetadata,
+    pub radio: RadioFaceMetadata,
     /// Non-blocking AF_PACKET socket registered with tokio.
-    socket:      AsyncFd<std::os::unix::io::OwnedFd>,
+    socket: AsyncFd<std::os::unix::io::OwnedFd>,
     /// Mmap'd TPACKET_V2 RX + TX ring buffers.
-    ring:        PacketRing,
+    ring: PacketRing,
 }
 
 impl NamedEtherFace {
@@ -53,23 +53,30 @@ impl NamedEtherFace {
     /// ring buffer, binds to the given network interface, and registers the
     /// socket with the tokio reactor.  Requires `CAP_NET_RAW`.
     pub fn new(
-        id:        FaceId,
+        id: FaceId,
         node_name: Name,
-        peer_mac:  MacAddr,
-        iface:     impl Into<String>,
-        radio:     RadioFaceMetadata,
+        peer_mac: MacAddr,
+        iface: impl Into<String>,
+        radio: RadioFaceMetadata,
     ) -> std::io::Result<Self> {
         let iface = iface.into();
 
         // Temporary socket to resolve the interface index.
         let probe_fd = unsafe {
-            libc::socket(libc::AF_PACKET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
-                         (NDN_ETHERTYPE as u16).to_be() as i32)
+            libc::socket(
+                libc::AF_PACKET,
+                libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+                (NDN_ETHERTYPE as u16).to_be() as i32,
+            )
         };
-        if probe_fd == -1 { return Err(std::io::Error::last_os_error()); }
+        if probe_fd == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
         let ifindex = {
             let idx = get_ifindex(probe_fd, &iface);
-            unsafe { libc::close(probe_fd); }
+            unsafe {
+                libc::close(probe_fd);
+            }
             idx?
         };
 
@@ -79,7 +86,16 @@ impl NamedEtherFace {
         let ring = setup_packet_ring(fd.as_raw_fd())?;
         let socket = AsyncFd::new(fd)?;
 
-        Ok(Self { id, node_name, peer_mac, iface, ifindex, radio, socket, ring })
+        Ok(Self {
+            id,
+            node_name,
+            peer_mac,
+            iface,
+            ifindex,
+            radio,
+            socket,
+            ring,
+        })
     }
 
     /// Update the peer MAC address (e.g. after a mobility event).
@@ -99,8 +115,12 @@ impl NamedEtherFace {
 }
 
 impl Face for NamedEtherFace {
-    fn id(&self)   -> FaceId   { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::Ethernet }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::Ethernet
+    }
 
     async fn recv(&self) -> Result<Bytes, FaceError> {
         loop {
@@ -156,7 +176,11 @@ mod tests {
     async fn new_fails_without_cap_net_raw() {
         let name = Name::from_str("/test/node").unwrap();
         let result = NamedEtherFace::new(
-            FaceId(1), name, MacAddr::BROADCAST, "lo", RadioFaceMetadata::default(),
+            FaceId(1),
+            name,
+            MacAddr::BROADCAST,
+            "lo",
+            RadioFaceMetadata::default(),
         );
         if let Err(e) = result {
             let raw = e.raw_os_error().unwrap_or(0);
@@ -174,19 +198,24 @@ mod tests {
         let name = Name::from_str("/test/node").unwrap();
         let lo_mac = MacAddr::new([0; 6]);
         let face_a = NamedEtherFace::new(
-            FaceId(1), name.clone(), lo_mac, "lo", RadioFaceMetadata::default(),
-        ).expect("need CAP_NET_RAW");
-        let face_b = NamedEtherFace::new(
-            FaceId(2), name, lo_mac, "lo", RadioFaceMetadata::default(),
-        ).expect("need CAP_NET_RAW");
+            FaceId(1),
+            name.clone(),
+            lo_mac,
+            "lo",
+            RadioFaceMetadata::default(),
+        )
+        .expect("need CAP_NET_RAW");
+        let face_b =
+            NamedEtherFace::new(FaceId(2), name, lo_mac, "lo", RadioFaceMetadata::default())
+                .expect("need CAP_NET_RAW");
 
         let pkt = Bytes::from_static(b"\x05\x03\x01\x02\x03");
         face_a.send(pkt.clone()).await.unwrap();
 
-        let received = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            face_b.recv(),
-        ).await.expect("timed out").unwrap();
+        let received = tokio::time::timeout(std::time::Duration::from_secs(2), face_b.recv())
+            .await
+            .expect("timed out")
+            .unwrap();
 
         assert_eq!(received, pkt);
     }

@@ -2,7 +2,7 @@
 //!
 //! Usage: ndn-put /name/of/data <file> [--chunk-size <bytes>]
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use ndn_ipc::chunked::{ChunkedProducer, NDN_DEFAULT_SEGMENT_SIZE};
 use ndn_packet::Name;
@@ -53,7 +53,12 @@ async fn main() -> Result<()> {
 
     for i in 0..producer.segment_count() {
         let seg = producer.segment(i).unwrap();
-        println!("  segment {}/{}: {} bytes", i, producer.segment_count() - 1, seg.len());
+        println!(
+            "  segment {}/{}: {} bytes",
+            i,
+            producer.segment_count() - 1,
+            seg.len()
+        );
         // TODO: register prefix handler and serve each segment as Data via AppFace
     }
 

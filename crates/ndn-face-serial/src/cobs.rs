@@ -27,7 +27,9 @@ pub struct CobsCodec {
 
 impl CobsCodec {
     pub fn new() -> Self {
-        Self { max_frame_len: DEFAULT_MAX_FRAME_LEN }
+        Self {
+            max_frame_len: DEFAULT_MAX_FRAME_LEN,
+        }
     }
 
     pub fn with_max_frame_len(max_frame_len: usize) -> Self {
@@ -36,7 +38,9 @@ impl CobsCodec {
 }
 
 impl Default for CobsCodec {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ─── COBS encode ────────────────────────────────────────────────────────────

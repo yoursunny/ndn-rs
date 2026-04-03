@@ -1,8 +1,8 @@
-pub mod observer;
 pub mod flow_table;
+pub mod observer;
 
-pub use observer::FlowObserverStage;
 pub use flow_table::FlowTable;
+pub use observer::FlowObserverStage;
 
 // ChannelManager uses nl80211 Netlink sockets which are Linux-specific.
 // The module is compiled only on Linux so that the rest of the research

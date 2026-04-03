@@ -2,7 +2,7 @@
 //!
 //! Usage: ndn-peek /name/of/data [--timeout-ms <ms>]
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use ndn_packet::{Interest, Name};
 
 #[tokio::main]

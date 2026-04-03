@@ -24,9 +24,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use ndn_face_local::AppHandle;
 use ndn_engine::ForwarderEngine;
 use ndn_engine::stages::ErasedStrategy;
+use ndn_face_local::AppHandle;
 use ndn_packet::{Interest, Name, NameComponent, encode::encode_data_unsigned};
 use ndn_store::ContentStore;
 use ndn_strategy::{BestRouteStrategy, MulticastStrategy};
@@ -37,7 +37,7 @@ use ndn_config::{
     ControlParameters, ControlResponse,
     control_parameters::{origin, route_flags},
     control_response::status,
-    nfd_command::{module, verb, parse_command_name},
+    nfd_command::{module, parse_command_name, verb},
 };
 
 // ─── Socket helpers ──────────────────────────────────────────────────────────
@@ -82,15 +82,11 @@ pub fn mgmt_prefix() -> Name {
 // ─── Face listener ────────────────────────────────────────────────────────────
 
 /// Accept NDN face connections on `path` and register each as a dynamic face.
-pub async fn run_face_listener(
-    path:   &Path,
-    engine: ForwarderEngine,
-    cancel: CancellationToken,
-) {
+pub async fn run_face_listener(path: &Path, engine: ForwarderEngine, cancel: CancellationToken) {
     let _ = std::fs::remove_file(path);
 
     let listener = match tokio::net::UnixListener::bind(path) {
-        Ok(l)  => l,
+        Ok(l) => l,
         Err(e) => {
             tracing::error!(path = %path.display(), error = %e, "face-listener: bind failed");
             return;
@@ -112,7 +108,7 @@ pub async fn run_face_listener(
         };
 
         let face_id = engine.faces().alloc_id();
-        let face    = ndn_face_local::unix_face_from_stream(face_id, stream, path);
+        let face = ndn_face_local::unix_face_from_stream(face_id, stream, path);
         tracing::debug!(face = %face_id, "face-listener: accepted connection");
         // Per-connection child token: cancelling it on disconnect only affects
         // this connection and its child faces (e.g. SHM), not the whole router.
@@ -140,8 +136,8 @@ pub async fn run_face_listener(
 /// listener pushes received bytes directly into the pipeline channel.
 pub async fn run_udp_listener(
     bind_addr: std::net::SocketAddr,
-    engine:    ForwarderEngine,
-    cancel:    CancellationToken,
+    engine: ForwarderEngine,
+    cancel: CancellationToken,
 ) {
     let socket = match tokio::net::UdpSocket::bind(bind_addr).await {
         Ok(s) => {
@@ -221,8 +217,8 @@ pub async fn run_udp_listener(
 /// each.  TLV length-prefix framing is handled by `TcpFace` internally.
 pub async fn run_tcp_listener(
     bind_addr: std::net::SocketAddr,
-    engine:    ForwarderEngine,
-    cancel:    CancellationToken,
+    engine: ForwarderEngine,
+    cancel: CancellationToken,
 ) {
     let listener = match tokio::net::TcpListener::bind(bind_addr).await {
         Ok(l) => l,
@@ -263,8 +259,8 @@ pub async fn run_tcp_listener(
 /// and write Data responses back.
 pub async fn run_ndn_mgmt_handler(
     handle: AppHandle,
-    engine:     ForwarderEngine,
-    cancel:     CancellationToken,
+    engine: ForwarderEngine,
+    cancel: CancellationToken,
 ) {
     loop {
         let raw = tokio::select! {
@@ -276,7 +272,7 @@ pub async fn run_ndn_mgmt_handler(
         };
 
         let interest = match Interest::decode(raw) {
-            Ok(i)  => i,
+            Ok(i) => i,
             Err(e) => {
                 tracing::warn!(error = %e, "nfd-mgmt: malformed Interest; skipping");
                 continue;
@@ -308,7 +304,8 @@ pub async fn run_ndn_mgmt_handler(
             source_face,
             &engine,
             &cancel,
-        ).await;
+        )
+        .await;
 
         send_response(&handle, &interest.name, &resp).await;
     }
@@ -320,19 +317,19 @@ pub async fn run_ndn_mgmt_handler(
 
 async fn dispatch_command(
     module_name: &[u8],
-    verb_name:   &[u8],
-    params:      ControlParameters,
+    verb_name: &[u8],
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
-    cancel:      &CancellationToken,
+    engine: &ForwarderEngine,
+    cancel: &CancellationToken,
 ) -> ControlResponse {
     match module_name {
-        m if m == module::RIB      => handle_rib(verb_name, params, source_face, engine),
-        m if m == module::FACES    => handle_faces(verb_name, params, source_face, engine).await,
-        m if m == module::FIB      => handle_fib(verb_name, params, source_face, engine),
+        m if m == module::RIB => handle_rib(verb_name, params, source_face, engine),
+        m if m == module::FACES => handle_faces(verb_name, params, source_face, engine).await,
+        m if m == module::FIB => handle_fib(verb_name, params, source_face, engine),
         m if m == module::STRATEGY => handle_strategy(verb_name, params, engine),
-        m if m == module::CS       => handle_cs(verb_name, engine),
-        m if m == module::STATUS   => handle_status(verb_name, engine, cancel),
+        m if m == module::CS => handle_cs(verb_name, engine),
+        m if m == module::STATUS => handle_status(verb_name, engine, cancel),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown module"),
     }
 }
@@ -340,23 +337,23 @@ async fn dispatch_command(
 // ─── RIB module ───────────────────────────────────────────────────────────────
 
 fn handle_rib(
-    verb_name:   &[u8],
-    params:      ControlParameters,
+    verb_name: &[u8],
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     match verb_name {
-        v if v == verb::REGISTER   => rib_register(params, source_face, engine),
+        v if v == verb::REGISTER => rib_register(params, source_face, engine),
         v if v == verb::UNREGISTER => rib_unregister(params, source_face, engine),
-        v if v == verb::LIST       => rib_list(engine),
+        v if v == verb::LIST => rib_list(engine),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown rib verb"),
     }
 }
 
 fn rib_register(
-    params:      ControlParameters,
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     let name = match &params.name {
         Some(n) => n.clone(),
@@ -385,9 +382,9 @@ fn rib_register(
 }
 
 fn rib_unregister(
-    params:      ControlParameters,
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     let name = match &params.name {
         Some(n) => n.clone(),
@@ -419,23 +416,23 @@ fn rib_list(engine: &ForwarderEngine) -> ControlResponse {
 // ─── Faces module ─────────────────────────────────────────────────────────────
 
 async fn handle_faces(
-    verb_name:   &[u8],
-    params:      ControlParameters,
+    verb_name: &[u8],
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     match verb_name {
-        v if v == verb::CREATE  => faces_create(params, source_face, engine).await,
+        v if v == verb::CREATE => faces_create(params, source_face, engine).await,
         v if v == verb::DESTROY => faces_destroy(params, engine),
-        v if v == verb::LIST    => faces_list(engine),
+        v if v == verb::LIST => faces_list(engine),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown faces verb"),
     }
 }
 
 async fn faces_create(
-    params:      ControlParameters,
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     let uri = match &params.uri {
         Some(u) => u.clone(),
@@ -460,10 +457,12 @@ async fn faces_create(
 async fn faces_create_udp(addr_str: &str, engine: &ForwarderEngine) -> ControlResponse {
     let peer: std::net::SocketAddr = match addr_str.parse() {
         Ok(a) => a,
-        Err(e) => return ControlResponse::error(
-            status::BAD_PARAMS,
-            format!("invalid UDP address '{addr_str}': {e}"),
-        ),
+        Err(e) => {
+            return ControlResponse::error(
+                status::BAD_PARAMS,
+                format!("invalid UDP address '{addr_str}': {e}"),
+            );
+        }
     };
 
     let face_id = engine.faces().alloc_id();
@@ -490,7 +489,10 @@ async fn faces_create_udp(addr_str: &str, engine: &ForwarderEngine) -> ControlRe
         }
         Err(e) => {
             tracing::warn!(error = %e, remote = %peer, "faces/create udp4 failed");
-            ControlResponse::error(status::SERVER_ERROR, format!("UDP face creation failed: {e}"))
+            ControlResponse::error(
+                status::SERVER_ERROR,
+                format!("UDP face creation failed: {e}"),
+            )
         }
     }
 }
@@ -498,10 +500,12 @@ async fn faces_create_udp(addr_str: &str, engine: &ForwarderEngine) -> ControlRe
 async fn faces_create_tcp(addr_str: &str, engine: &ForwarderEngine) -> ControlResponse {
     let peer: std::net::SocketAddr = match addr_str.parse() {
         Ok(a) => a,
-        Err(e) => return ControlResponse::error(
-            status::BAD_PARAMS,
-            format!("invalid TCP address '{addr_str}': {e}"),
-        ),
+        Err(e) => {
+            return ControlResponse::error(
+                status::BAD_PARAMS,
+                format!("invalid TCP address '{addr_str}': {e}"),
+            );
+        }
     };
 
     let face_id = engine.faces().alloc_id();
@@ -523,16 +527,19 @@ async fn faces_create_tcp(addr_str: &str, engine: &ForwarderEngine) -> ControlRe
         }
         Err(e) => {
             tracing::warn!(error = %e, remote = %peer, "faces/create tcp4 failed");
-            ControlResponse::error(status::SERVER_ERROR, format!("TCP face creation failed: {e}"))
+            ControlResponse::error(
+                status::SERVER_ERROR,
+                format!("TCP face creation failed: {e}"),
+            )
         }
     }
 }
 
 #[cfg(all(unix, feature = "spsc-shm"))]
 fn faces_create_shm(
-    shm_name:    &str,
+    shm_name: &str,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     let face_id = engine.faces().alloc_id();
 
@@ -567,11 +574,14 @@ fn faces_create_shm(
 
 #[cfg(not(all(unix, feature = "spsc-shm")))]
 fn faces_create_shm(
-    _shm_name:    &str,
+    _shm_name: &str,
     _source_face: Option<FaceId>,
-    _engine:      &ForwarderEngine,
+    _engine: &ForwarderEngine,
 ) -> ControlResponse {
-    ControlResponse::error(status::SERVER_ERROR, "SHM faces not supported on this platform")
+    ControlResponse::error(
+        status::SERVER_ERROR,
+        "SHM faces not supported on this platform",
+    )
 }
 
 fn faces_destroy(params: ControlParameters, engine: &ForwarderEngine) -> ControlResponse {
@@ -581,7 +591,10 @@ fn faces_destroy(params: ControlParameters, engine: &ForwarderEngine) -> Control
     };
 
     if engine.faces().get(face_id).is_none() {
-        return ControlResponse::error(status::NOT_FOUND, format!("face {} does not exist", face_id.0));
+        return ControlResponse::error(
+            status::NOT_FOUND,
+            format!("face {} does not exist", face_id.0),
+        );
     }
 
     // Cancel the face's token — this triggers run_face_reader cleanup which:
@@ -610,10 +623,12 @@ fn faces_list(engine: &ForwarderEngine) -> ControlResponse {
     let face_states = engine.face_states();
     let mut text = format!("{} faces\n", entries.len());
     for info in &entries {
-        let persistency = face_states.get(&info.id)
+        let persistency = face_states
+            .get(&info.id)
             .map(|s| s.persistency)
             .unwrap_or(FacePersistency::OnDemand);
-        let mut line = format!("  faceid={} remote={} local={} persistency={:?}",
+        let mut line = format!(
+            "  faceid={} remote={} local={} persistency={:?}",
             info.id.0,
             info.remote_uri.as_deref().unwrap_or("N/A"),
             info.local_uri.as_deref().unwrap_or("N/A"),
@@ -621,8 +636,10 @@ fn faces_list(engine: &ForwarderEngine) -> ControlResponse {
         );
         // Show kind if no URIs are available (e.g. App, Internal faces).
         if info.remote_uri.is_none() && info.local_uri.is_none() {
-            line = format!("  faceid={} kind={:?} persistency={:?}",
-                info.id.0, info.kind, persistency);
+            line = format!(
+                "  faceid={} kind={:?} persistency={:?}",
+                info.id.0, info.kind, persistency
+            );
         }
         text.push_str(&line);
         text.push('\n');
@@ -633,23 +650,23 @@ fn faces_list(engine: &ForwarderEngine) -> ControlResponse {
 // ─── FIB module ───────────────────────────────────────────────────────────────
 
 fn handle_fib(
-    verb_name:   &[u8],
-    params:      ControlParameters,
+    verb_name: &[u8],
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     match verb_name {
-        v if v == verb::ADD_NEXTHOP    => fib_add_nexthop(params, source_face, engine),
+        v if v == verb::ADD_NEXTHOP => fib_add_nexthop(params, source_face, engine),
         v if v == verb::REMOVE_NEXTHOP => fib_remove_nexthop(params, source_face, engine),
-        v if v == verb::LIST           => fib_list(engine),
+        v if v == verb::LIST => fib_list(engine),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown fib verb"),
     }
 }
 
 fn fib_add_nexthop(
-    params:      ControlParameters,
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     let name = match &params.name {
         Some(n) => n.clone(),
@@ -675,9 +692,9 @@ fn fib_add_nexthop(
 }
 
 fn fib_remove_nexthop(
-    params:      ControlParameters,
+    params: ControlParameters,
     source_face: Option<FaceId>,
-    engine:      &ForwarderEngine,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     let name = match &params.name {
         Some(n) => n.clone(),
@@ -704,11 +721,12 @@ fn fib_list(engine: &ForwarderEngine) -> ControlResponse {
     let routes = engine.fib().dump();
     let mut text = format!("{} routes\n", routes.len());
     for (name, entry) in &routes {
-        let nexthops: Vec<String> = entry.nexthops.iter()
+        let nexthops: Vec<String> = entry
+            .nexthops
+            .iter()
             .map(|nh| format!("faceid={} cost={}", nh.face_id.0, nh.cost))
             .collect();
-        text.push_str(&format!("  {name} nexthops=[{}]\n",
-            nexthops.join(", ")));
+        text.push_str(&format!("  {name} nexthops=[{}]\n", nexthops.join(", ")));
     }
     ControlResponse::ok_empty(text)
 }
@@ -717,13 +735,13 @@ fn fib_list(engine: &ForwarderEngine) -> ControlResponse {
 
 fn handle_strategy(
     verb_name: &[u8],
-    params:    ControlParameters,
-    engine:    &ForwarderEngine,
+    params: ControlParameters,
+    engine: &ForwarderEngine,
 ) -> ControlResponse {
     match verb_name {
-        v if v == verb::SET    => strategy_set(params, engine),
-        v if v == verb::UNSET  => strategy_unset(params, engine),
-        v if v == verb::LIST   => strategy_list(engine),
+        v if v == verb::SET => strategy_set(params, engine),
+        v if v == verb::UNSET => strategy_unset(params, engine),
+        v if v == verb::LIST => strategy_list(engine),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown strategy-choice verb"),
     }
 }
@@ -751,7 +769,7 @@ fn create_strategy_by_name(name: &Name) -> Option<Arc<dyn ErasedStrategy>> {
 
     match short_name {
         b"best-route" => Some(Arc::new(BestRouteStrategy::new())),
-        b"multicast"  => Some(Arc::new(MulticastStrategy::new())),
+        b"multicast" => Some(Arc::new(MulticastStrategy::new())),
         _ => None,
     }
 }
@@ -769,10 +787,12 @@ fn strategy_set(params: ControlParameters, engine: &ForwarderEngine) -> ControlR
 
     let strategy = match create_strategy_by_name(&strategy_name) {
         Some(s) => s,
-        None => return ControlResponse::error(
-            status::NOT_FOUND,
-            format!("unknown strategy: {}", strategy_name),
-        ),
+        None => {
+            return ControlResponse::error(
+                status::NOT_FOUND,
+                format!("unknown strategy: {}", strategy_name),
+            );
+        }
     };
 
     engine.strategy_table().insert(&prefix, strategy);
@@ -799,10 +819,7 @@ fn strategy_unset(params: ControlParameters, engine: &ForwarderEngine) -> Contro
 
     // Prevent unsetting the root strategy.
     if prefix.is_empty() {
-        return ControlResponse::error(
-            status::BAD_PARAMS,
-            "cannot unset strategy at root prefix"
-        );
+        return ControlResponse::error(status::BAD_PARAMS, "cannot unset strategy at root prefix");
     }
 
     engine.strategy_table().remove(&prefix);
@@ -820,21 +837,17 @@ fn strategy_list(engine: &ForwarderEngine) -> ControlResponse {
     let entries = engine.strategy_table().dump();
     let mut text = format!("{} strategy entries\n", entries.len());
     for (prefix, strategy) in &entries {
-        text.push_str(&format!("  prefix={prefix} strategy={}\n",
-            strategy.name()));
+        text.push_str(&format!("  prefix={prefix} strategy={}\n", strategy.name()));
     }
     ControlResponse::ok_empty(text)
 }
 
 // ─── CS module ───────────────────────────────────────────────────────────────
 
-fn handle_cs(
-    verb_name: &[u8],
-    engine:    &ForwarderEngine,
-) -> ControlResponse {
+fn handle_cs(verb_name: &[u8], engine: &ForwarderEngine) -> ControlResponse {
     match verb_name {
         v if v == verb::CONFIG => cs_config(engine),
-        v if v == verb::INFO   => cs_info(engine),
+        v if v == verb::INFO => cs_info(engine),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown cs verb"),
     }
 }
@@ -868,19 +881,17 @@ fn cs_info(engine: &ForwarderEngine) -> ControlResponse {
 
 fn handle_status(
     verb_name: &[u8],
-    engine:    &ForwarderEngine,
-    cancel:    &CancellationToken,
+    engine: &ForwarderEngine,
+    cancel: &CancellationToken,
 ) -> ControlResponse {
     match verb_name {
         b"general" => {
             let n_faces = engine.faces().face_entries().len();
-            let n_fib   = engine.fib().dump().len();
-            let n_pit   = engine.pit().len();
-            let n_cs    = engine.cs().len();
+            let n_fib = engine.fib().dump().len();
+            let n_pit = engine.pit().len();
+            let n_cs = engine.cs().len();
 
-            let text = format!(
-                "faces={n_faces} fib={n_fib} pit={n_pit} cs={n_cs}"
-            );
+            let text = format!("faces={n_faces} fib={n_fib} pit={n_pit} cs={n_cs}");
             ControlResponse::ok_empty(text)
         }
         b"shutdown" => {
@@ -903,9 +914,8 @@ fn resolve_face_id(
 ) -> Result<FaceId, ControlResponse> {
     match params.face_id {
         Some(id) => Ok(FaceId(id as u32)),
-        None => source_face.ok_or_else(|| {
-            ControlResponse::error(status::BAD_PARAMS, "cannot determine FaceId")
-        }),
+        None => source_face
+            .ok_or_else(|| ControlResponse::error(status::BAD_PARAMS, "cannot determine FaceId")),
     }
 }
 
@@ -916,4 +926,3 @@ async fn send_response(handle: &AppHandle, name: &Name, resp: &ControlResponse) 
         tracing::warn!(error = %e, "nfd-mgmt: failed to send Data response");
     }
 }
-
