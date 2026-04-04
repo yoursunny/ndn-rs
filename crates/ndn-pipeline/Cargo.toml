@@ -9,7 +9,7 @@ license.workspace = true
 ndn-packet   = { workspace = true }
 ndn-transport = { workspace = true }
 ndn-store    = { workspace = true }
-bytes        = { workspace = true }
+bytes         = { workspace = true, features = ["std"] }
 smallvec     = { workspace = true }
 tokio        = { workspace = true, features = ["sync", "time"] }
 thiserror    = { workspace = true }

@@ -16,7 +16,7 @@ serial  = ["dep:tokio-serial"]
 [dependencies]
 ndn-packet    = { workspace = true }
 ndn-transport = { workspace = true }
-bytes         = { workspace = true }
+bytes         = { workspace = true, features = ["std"] }
 tokio         = { workspace = true, features = ["sync", "io-util"] }
 tokio-serial  = { workspace = true, optional = true }
 tokio-util    = { workspace = true, features = ["codec"] }
