@@ -15,6 +15,10 @@ pub enum DropReason {
     /// Incomplete fragment reassembly — waiting for more fragments.
     /// Not an error; suppresses noisy logging.
     FragmentCollect,
+    /// Data packet failed signature/chain validation.
+    ValidationFailed,
+    /// Certificate fetch timed out during validation.
+    ValidationTimeout,
     Other,
 }
 
@@ -64,6 +68,8 @@ mod tests {
             DropReason::HopLimitExceeded,
             DropReason::ScopeViolation,
             DropReason::FragmentCollect,
+            DropReason::ValidationFailed,
+            DropReason::ValidationTimeout,
             DropReason::Other,
         ];
         for (i, a) in reasons.iter().enumerate() {
