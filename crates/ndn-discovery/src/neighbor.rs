@@ -199,6 +199,18 @@ impl Default for NeighborTable {
     }
 }
 
+impl crate::NeighborTableView for NeighborTable {
+    fn get(&self, name: &Name) -> Option<NeighborEntry> {
+        NeighborTable::get(self, name)
+    }
+    fn all(&self) -> Vec<NeighborEntry> {
+        NeighborTable::all(self)
+    }
+    fn face_for_peer(&self, mac: &crate::MacAddr, iface: &str) -> Option<FaceId> {
+        NeighborTable::face_for_peer(self, mac, iface)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

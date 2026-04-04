@@ -12,6 +12,37 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### Discovery integration in `ndn-engine`
+
+Wired `DiscoveryProtocol` fully into the forwarding engine:
+
+- **`EngineBuilder::discovery(d)`** — attach any `DiscoveryProtocol` impl;
+  defaults to `NoDiscovery` (static-route operation unchanged)
+- **`ForwarderEngine::neighbors()`** — access the engine-owned `NeighborTable`
+- **`ForwarderEngine::discovery_ctx()`** — access the `EngineDiscoveryContext`
+  for direct manipulation from management code
+- **`EngineDiscoveryContext`** — engine-side `DiscoveryContext` implementation:
+  - `add_face` / `remove_face` — spawn/cancel face tasks dynamically
+  - `add_fib_entry` / `remove_fib_entry` / `remove_fib_entries_by_owner` —
+    ProtocolId-tagged FIB management (side-table tracks ownership)
+  - `neighbors()` / `update_neighbor()` — engine-owned `NeighborTable` access
+  - `send_on` — bypass pipeline and enqueue directly to a face's outbound queue
+- **`on_face_up` / `on_face_down` hooks** — called on every face lifecycle event
+  (add, send error cleanup, idle timeout sweep)
+- **`on_inbound` intercept** — called in `run_face_reader` before packets enter
+  the NDN forwarding pipeline; discovery packets (hellos, probes) are consumed
+  without forwarding
+- **Discovery tick task** — `on_tick` called every 100 ms for hello/probe scheduling
+- `pipeline_tx` and `discovery_ctx` in `EngineInner` use `OnceLock` to enable
+  safe construction ordering without unsafe code
+
+#### Source MAC extraction in `ndn-face-wireless`
+
+`MulticastEtherFace::recv_with_source() -> (Bytes, MacAddr)` extracts the
+sender's Ethernet address from the TPACKET_V2 `sockaddr_ll` embedded in each
+ring frame — no extra syscall needed.  Used by link-layer neighbor discovery
+to identify peers and create unicast faces.
+
 #### `ndn-python` — PyO3 Python bindings (`bindings/ndn-python`)
 
 Added `bindings/ndn-python`, a PyO3-based Python extension module exposing

@@ -1435,6 +1435,7 @@ dependencies = [
  "bytes",
  "criterion",
  "dashmap",
+ "ndn-discovery",
  "ndn-face-net",
  "ndn-packet",
  "ndn-pipeline",
