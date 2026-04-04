@@ -4,6 +4,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use ndn_config::{CsConfig, ForwarderConfig};
 #[cfg(unix)]
@@ -25,10 +27,17 @@ mod mgmt_ndn;
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-/// Parse `argv` into a config file path.
-fn parse_args() -> Option<PathBuf> {
+/// Parsed CLI arguments.
+struct CliArgs {
+    config_path: Option<PathBuf>,
+    log_level: Option<String>,
+}
+
+/// Parse `argv` into CLI arguments.
+fn parse_args() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
     let mut config_path = None;
+    let mut log_level = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -38,31 +47,115 @@ fn parse_args() -> Option<PathBuf> {
                     config_path = Some(PathBuf::from(p));
                 }
             }
+            "--log-level" => {
+                i += 1;
+                if let Some(l) = args.get(i) {
+                    log_level = Some(l.clone());
+                }
+            }
             _ => {}
         }
         i += 1;
     }
-    config_path
+    CliArgs {
+        config_path,
+        log_level,
+    }
+}
+
+/// Initialise the tracing subscriber.
+///
+/// **Precedence** (highest wins):
+/// 1. `RUST_LOG` environment variable
+/// 2. `--log-level` CLI flag
+/// 3. `[logging] level` from the config file
+///
+/// When `[logging] file` is set, logs are written to *both* stderr and the
+/// file. The file appender is non-blocking so log writes never stall the
+/// forwarder.
+///
+/// Returns an optional guard that must be held for the lifetime of the
+/// process — dropping it flushes the file appender.
+fn init_tracing(
+    config: &ndn_config::LoggingConfig,
+    cli_log_level: Option<&str>,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    // Resolve filter: RUST_LOG > --log-level > config level.
+    let filter_str = if std::env::var("RUST_LOG").is_ok() {
+        // EnvFilter::from_default_env() will pick up RUST_LOG automatically,
+        // but we still need a string for the file layer's filter.
+        std::env::var("RUST_LOG").unwrap()
+    } else if let Some(cli) = cli_log_level {
+        cli.to_owned()
+    } else {
+        config.level.clone()
+    };
+
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_thread_ids(true);
+
+    // If a log file is configured, set up a non-blocking file appender.
+    if let Some(ref path) = config.file {
+        let log_path = std::path::Path::new(path);
+
+        // Create parent directories if they don't exist.
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let file_appender = tracing_appender::rolling::never(
+            log_path.parent().unwrap_or(std::path::Path::new(".")),
+            log_path.file_name().unwrap_or(std::ffi::OsStr::new("ndn-router.log")),
+        );
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_thread_ids(true)
+            .with_ansi(false)
+            .with_writer(non_blocking);
+
+        tracing_subscriber::registry()
+            .with(EnvFilter::new(&filter_str))
+            .with(stderr_layer)
+            .with(file_layer)
+            .init();
+
+        Some(guard)
+    } else {
+        tracing_subscriber::registry()
+            .with(EnvFilter::new(&filter_str))
+            .with(stderr_layer)
+            .init();
+
+        None
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(true)
-        .with_thread_ids(true)
-        .init();
+    let cli = parse_args();
 
-    let config_path = parse_args();
-
-    // Load config or use defaults.
-    let fwd_config = if let Some(path) = config_path {
-        tracing::info!(path = %path.display(), "loading config");
-        ForwarderConfig::from_file(&path)?
+    // Load config or use defaults (before tracing init so we have the
+    // logging section available).
+    let fwd_config = if let Some(ref path) = cli.config_path {
+        ForwarderConfig::from_file(path)?
     } else {
-        tracing::info!("no config file specified, using defaults");
         ForwarderConfig::default()
     };
+
+    // Initialise tracing — must hold the guard until shutdown.
+    let _log_guard = init_tracing(&fwd_config.logging, cli.log_level.as_deref());
+
+    if let Some(ref path) = cli.config_path {
+        tracing::info!(path = %path.display(), "loading config");
+    } else {
+        tracing::info!("no config file specified, using defaults");
+    }
+    if let Some(ref file) = fwd_config.logging.file {
+        tracing::info!(path = %file, "logging to file");
+    }
 
     // Resolve CS capacity: prefer [cs] section, fall back to engine.cs_capacity_mb.
     let cs_cap_mb = if fwd_config.cs.capacity_mb != 0 {
