@@ -12,6 +12,74 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### Spec-compliant NDN neighbor discovery hello format
+
+Migrated `EtherNeighborDiscovery` and `UdpNeighborDiscovery` from a custom
+hello format (sender name embedded in Interest name components + AppParams) to
+the format specified in `docs/discovery.md`:
+
+- **`HelloPayload` TLV** (`ndn-discovery/src/hello.rs`) — encodes/decodes the
+  Data Content for hello replies:
+  - `NODE-NAME` (0xC1): sender's NDN node name
+  - `SERVED-PREFIX` (0xC2): prefixes the sender can serve (zero or more)
+  - `CAPABILITIES` (0xC3): advisory flags — `CAP_FRAGMENTATION`, `CAP_CONTENT_STORE`,
+    `CAP_VALIDATION`, `CAP_SVS`
+  - `NEIGHBOR-DIFF` (0xC4): SWIM gossip piggyback (add/remove entries)
+  - All types use the application-specific range (≥ 0xC0); unknown types are
+    silently skipped for forward compatibility
+- **Hello Interest name**: `/ndn/local/nd/hello/<nonce-u32>` (flat, no embedded
+  sender name, no AppParams)
+- **`InboundMeta`** (`ndn-discovery/src/protocol.rs`) — thin per-packet metadata
+  struct passed to `DiscoveryProtocol::on_inbound`; carries `source: Option<LinkAddr>`
+  (either `LinkAddr::Ether(MacAddr)` or `LinkAddr::Udp(SocketAddr)`) so protocols
+  can learn the sender's link-layer address without embedding it in the NDN packet
+- **`MulticastUdpFace::recv_with_source()`** — returns `(Bytes, SocketAddr)`;
+  `Face::recv()` now delegates to it, eliminating code duplication
+- **`UdpNeighborDiscovery`** constructor simplified from 3 args to 2 — no longer
+  needs to know its own UDP address (sender learns responder address from `meta.source`)
+- **`DiscoveryContext::alloc_face_id()`** — allocates a unique `FaceId` before
+  constructing a face object that requires an ID at construction time
+
+#### Renamed `ndn-face-wireless` → `ndn-face-l2`
+
+Renamed the link-layer face crate from `ndn-face-wireless` to `ndn-face-l2` to
+better reflect its scope (all L2 / raw Ethernet faces, not just wireless ones).
+
+#### macOS raw Ethernet via `PF_NDRV` (`ndn-face-l2/src/ndrv.rs`)
+
+Added `NdrvSocket` — an async-capable `PF_NDRV` socket for macOS that
+provides the same send/receive API as the Linux `AF_PACKET` implementation:
+
+- `NdrvSocket::new(iface)` — opens `socket(PF_NDRV=27, SOCK_RAW, 0)`, binds to
+  the interface, registers EtherType 0x8624 via `NDRV_SETDMXSPEC`, joins the NDN
+  multicast group (`01:00:5e:00:17:aa`) via `NDRV_ADDMULTICAST`
+- `recv()` — strips 14-byte Ethernet header; returns `(payload, src_mac)` where
+  source MAC is extracted from frame bytes `[6..12]`
+- `send_to(payload, dst_mac)` / `send_to_mcast(payload)` — prepends the full
+  Ethernet header before injecting the frame
+- `get_iface_mac(iface)` — looks up the interface's MAC via `getifaddrs(3)`
+- `NamedEtherFace` and `MulticastEtherFace` for macOS (`ndn-face-l2/src/ether_macos.rs`)
+  wrap `NdrvSocket` and implement `Face`; `NamedEtherFace::recv` filters in
+  software by source MAC
+
+#### Windows raw Ethernet via Npcap (`ndn-face-l2/src/pcap_face.rs`)
+
+Added `PcapSocket` — a Tokio-compatible Npcap socket for Windows:
+
+- Two background OS threads bridge the blocking `pcap` API to Tokio `mpsc`
+  channels: a **recv thread** (BPF filter `"ether proto 0x8624"`) and a **send
+  thread** (`sendpacket`)
+- `recv(&self)` uses `Mutex<mpsc::Receiver>` so it satisfies the `Face` trait's
+  `&self` requirement
+- **`get_iface_mac(iface)`** — fully implemented via `GetAdaptersAddresses`
+  (`iphlpapi.dll` / `windows-sys`); accepts either the Npcap GUID device name
+  (`\Device\NPF_{...}`) or the adapter's friendly name (e.g. `"Ethernet"`)
+- `PcapSocket::new(iface)` auto-detects the local MAC; `new_with_mac(iface, mac)`
+  is available for virtual interfaces
+- `NamedEtherFace` and `MulticastEtherFace` for Windows (`ndn-face-l2/src/ether_windows.rs`)
+  have the same constructor signatures as Linux and macOS
+- Added `pcap = "2"` and `windows-sys = "0.61"` workspace dependencies
+
 #### Discovery integration in `ndn-engine`
 
 Wired `DiscoveryProtocol` fully into the forwarding engine:
@@ -36,7 +104,7 @@ Wired `DiscoveryProtocol` fully into the forwarding engine:
 - `pipeline_tx` and `discovery_ctx` in `EngineInner` use `OnceLock` to enable
   safe construction ordering without unsafe code
 
-#### Source MAC extraction in `ndn-face-wireless`
+#### Source MAC extraction in `ndn-face-l2`
 
 `MulticastEtherFace::recv_with_source() -> (Bytes, MacAddr)` extracts the
 sender's Ethernet address from the TPACKET_V2 `sockaddr_ll` embedded in each
@@ -1380,7 +1448,7 @@ NDNLPv2. Created `SPEC-GAPS.md` checklist. All 25 gaps resolved:
   satisfied or expired, the Interest is not forwarded.  The `StrategyStage`
   struct now holds `Arc<Pit>` and `Arc<FaceTable>` for this purpose.
 
-#### `ndn-face-wireless` — NamedEtherFace with TPACKET_V2 mmap ring buffers
+#### `ndn-face-l2` — NamedEtherFace with TPACKET_V2 mmap ring buffers
 
 - **`NamedEtherFace`** — NDN face over raw Ethernet (`AF_PACKET` + `SOCK_DGRAM`,
   Ethertype `0x8624`).  Uses TPACKET_V2 mmap'd ring buffers for zero-copy packet
@@ -2306,7 +2374,7 @@ Running total across all crates: **357 tests**, all passing.
 - **`data.rs` / `signature.rs`** — removed erroneous `core::sync::OnceLock`
   references (does not exist in `core`); replaced with `std::sync::OnceLock` and
   `std::sync::Arc`.
-- **`ndn-face-wireless`** — `pub mod neighbor` and `NeighborDiscovery` re-export
+- **`ndn-face-l2`** — `pub mod neighbor` and `NeighborDiscovery` re-export
   gated behind `#[cfg(target_os = "linux")]` because `NeighborEntry` holds
   `MacAddr` which is only available on Linux.
 

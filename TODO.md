@@ -6,13 +6,14 @@ Tracked stubs, placeholders, and deferred work across the codebase.
 
 ## Face implementations (all stub — recv/send return `FaceError::Closed`)
 
-- [x] **NamedEtherFace** — `ndn-face-wireless/src/ether.rs`
-      AF_PACKET + SOCK_DGRAM with TPACKET_V2 mmap ring buffers (RX + TX).
-      Zero-copy packet I/O via `PacketRing`; `AsyncFd` for epoll integration.
-- [ ] **WfbFace** — `ndn-face-wireless/src/wfb.rs`
+- [x] **NamedEtherFace** — `ndn-face-l2/src/ether.rs` (Linux), `ether_macos.rs` (macOS), `ether_windows.rs` (Windows)
+      Linux: AF_PACKET + SOCK_DGRAM with TPACKET_V2 mmap ring buffers (RX + TX).
+      macOS: PF_NDRV raw Ethernet via `NdrvSocket`; source-MAC filtering in software.
+      Windows: Npcap via `PcapSocket`; background recv/send threads bridge to Tokio.
+- [ ] **WfbFace** — `ndn-face-l2/src/wfb.rs`
       Unidirectional 802.11 monitor-mode injection via wfb-ng.
       Tx recv parks with `pending()`; Rx recv/send stub.
-- [ ] **BluetoothFace** — `ndn-face-wireless/src/bluetooth.rs`
+- [ ] **BluetoothFace** — `ndn-face-l2/src/bluetooth.rs`
       RFCOMM stream with COBS framing (reuse SerialFace model).
 - [ ] **SerialFace** — `ndn-face-serial/src/serial.rs`
       UART/LoRa/RS-485 with COBS framing via `tokio-serial`.
