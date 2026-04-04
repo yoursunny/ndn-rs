@@ -431,7 +431,7 @@ async fn main() -> Result<()> {
 ///
 /// Used only by the bypass Unix socket transport. The primary management
 /// path uses NFD-compatible TLV protocol via `mgmt_ndn`.
-#[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+#[cfg(unix)]
 fn handle_request(
     req: ManagementRequest,
     engine: &ForwarderEngine,
@@ -513,8 +513,8 @@ fn handle_request(
 /// Accept bypass management connections on a Unix socket until `cancel` fires.
 ///
 /// Uses the raw JSON protocol (newline-delimited).  Only active when
-/// `[management] transport = "bypass"` and the `iceoryx2-mgmt` feature is off.
-#[cfg(all(unix, not(feature = "iceoryx2-mgmt")))]
+/// `[management] transport = "bypass"`.
+#[cfg(unix)]
 async fn run_unix_mgmt_server(path: PathBuf, engine: ForwarderEngine, cancel: CancellationToken) {
     // Remove stale socket file if it exists.
     let _ = std::fs::remove_file(&path);
