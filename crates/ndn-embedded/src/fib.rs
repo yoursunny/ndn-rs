@@ -56,6 +56,37 @@ impl<const N: usize> Fib<N> {
         let _ = self.entries.push(entry);
     }
 
+    /// Ergonomic helper: add a route from a slash-delimited NDN name string.
+    ///
+    /// Parses `prefix` (e.g. `"/ndn/sensor"`) by splitting on `'/'` and
+    /// skipping empty segments. Uses a stack-allocated buffer of up to 16
+    /// components; silently returns early if the name exceeds that limit.
+    ///
+    /// Equivalent to computing `prefix_hash` / `prefix_len` manually and
+    /// calling [`add`](Self::add).
+    ///
+    /// ```rust,ignore
+    /// fib.add_route("/ndn/sensor", 1);
+    /// fib.add_route("/",           0); // default route (face 0)
+    /// ```
+    pub fn add_route(&mut self, prefix: &str, nexthop: FaceId) {
+        let mut components: heapless::Vec<&[u8], 16> = heapless::Vec::new();
+        for part in prefix.split('/') {
+            if part.is_empty() {
+                continue;
+            }
+            if components.push(part.as_bytes()).is_err() {
+                return; // >16 components: silently drop, same contract as add() when full
+            }
+        }
+        self.add(FibEntry {
+            prefix_hash: hash_prefix(&components),
+            prefix_len: components.len() as u8,
+            nexthop,
+            cost: 0,
+        });
+    }
+
     /// Removes a route by prefix hash and length.
     pub fn remove(&mut self, prefix_hash: u64, prefix_len: u8) {
         self.entries.retain(|e| !(e.prefix_hash == prefix_hash && e.prefix_len == prefix_len));

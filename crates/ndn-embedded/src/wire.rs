@@ -114,6 +114,53 @@ pub fn encode_data(buf: &mut [u8], name_components: &[&[u8]], content: &[u8]) ->
     Some(out.pos)
 }
 
+/// Encode an Interest packet from a slash-delimited NDN name string.
+///
+/// Parses `name` (e.g. `"/ndn/sensor/temp"`) into components and delegates to
+/// [`encode_interest`]. Up to 16 components are supported; returns `None` if
+/// the name has more than 16 components or `buf` is too small.
+///
+/// ```rust,ignore
+/// let n = wire::encode_interest_name(&mut buf, "/ndn/sensor/temp", 42, 4000, false, false)?;
+/// ```
+pub fn encode_interest_name(
+    buf: &mut [u8],
+    name: &str,
+    nonce: u32,
+    lifetime_ms: u32,
+    can_be_prefix: bool,
+    must_be_fresh: bool,
+) -> Option<usize> {
+    let mut components: heapless::Vec<&[u8], 16> = heapless::Vec::new();
+    for part in name.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        components.push(part.as_bytes()).ok()?;
+    }
+    encode_interest(buf, &components, nonce, lifetime_ms, can_be_prefix, must_be_fresh)
+}
+
+/// Encode a Data packet from a slash-delimited NDN name string.
+///
+/// Parses `name` (e.g. `"/ndn/sensor/temp"`) into components and delegates to
+/// [`encode_data`]. Up to 16 components are supported; returns `None` if the
+/// name has more than 16 components or `buf` is too small.
+///
+/// ```rust,ignore
+/// let n = wire::encode_data_name(&mut buf, "/ndn/sensor/temp", b"23.5")?;
+/// ```
+pub fn encode_data_name(buf: &mut [u8], name: &str, content: &[u8]) -> Option<usize> {
+    let mut components: heapless::Vec<&[u8], 16> = heapless::Vec::new();
+    for part in name.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        components.push(part.as_bytes()).ok()?;
+    }
+    encode_data(buf, &components, content)
+}
+
 // ── NonNegativeInteger encoding ───────────────────────────────────────────────
 
 struct NniBytes {

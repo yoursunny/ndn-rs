@@ -16,13 +16,27 @@
 //! # Quickstart
 //!
 //! ```rust,ignore
-//! use ndn_embedded::{Forwarder, Fib, FibEntry, NoOpClock};
+//! use ndn_embedded::{Forwarder, Fib, FnClock, NoOpClock, wire};
 //!
-//! let fib = Fib::<8>::new();
+//! // One-line route registration from a name string:
+//! let mut fib = Fib::<8>::new();
+//! fib.add_route("/ndn/sensor", 1);   // forward /ndn/sensor/** to face 1
+//!
+//! // NoOpClock: PIT entries never expire (useful with fixed-size PIT + FIFO).
+//! // FnClock:   supply a hardware millisecond counter.
+//! // let clock = FnClock(|| read_systick_ms());
 //! let mut fw = Forwarder::<64, 8, _>::new(fib, NoOpClock);
+//!
+//! // Encode packets without splitting names manually:
+//! let mut buf = [0u8; 256];
+//! let n = wire::encode_interest_name(&mut buf, "/ndn/sensor/temp", 42, 4000, false, false)
+//!     .expect("buf too small");
+//! let n = wire::encode_data_name(&mut buf, "/ndn/sensor/temp", b"23.5")
+//!     .expect("buf too small");
+//!
 //! // In your MCU main loop:
 //! // fw.process_packet(&raw_bytes, incoming_face_id, &mut faces);
-//! // fw.run_one_tick();
+//! // fw.run_one_tick();   // purge expired PIT entries
 //! ```
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -45,7 +59,7 @@ pub mod ipc;
 
 pub mod cobs;
 
-pub use clock::{Clock, NoOpClock};
+pub use clock::{Clock, FnClock, NoOpClock};
 pub use face::{ErasedFace, Face, FaceId};
 pub use fib::{Fib, FibEntry};
 pub use forwarder::Forwarder;
