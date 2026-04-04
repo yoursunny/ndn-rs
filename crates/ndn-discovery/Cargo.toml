@@ -1,0 +1,15 @@
+[package]
+name = "ndn-discovery"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Pluggable neighbor and service discovery for ndn-rs"
+
+[dependencies]
+ndn-packet   = { workspace = true }
+ndn-transport = { workspace = true }
+bytes  = { workspace = true, features = ["std"] }
+tokio  = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+dashmap = { workspace = true }

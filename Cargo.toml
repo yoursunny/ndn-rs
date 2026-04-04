@@ -20,6 +20,7 @@ members = [
     "crates/ndn-app",
     "crates/ndn-ipc",
     "crates/ndn-config",
+    "crates/ndn-discovery",
     # Layer 5 — research extensions
     "crates/ndn-strategy-wasm",
     "crates/ndn-research",
@@ -62,6 +63,7 @@ ndn-engine    = { path = "crates/ndn-engine" }
 ndn-app       = { path = "crates/ndn-app" }
 ndn-ipc       = { path = "crates/ndn-ipc" }
 ndn-config    = { path = "crates/ndn-config" }
+ndn-discovery = { path = "crates/ndn-discovery" }
 ndn-face-net      = { path = "crates/ndn-face-net" }
 ndn-face-local    = { path = "crates/ndn-face-local" }
 ndn-face-serial   = { path = "crates/ndn-face-serial" }

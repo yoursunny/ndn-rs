@@ -1404,6 +1404,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndn-discovery"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "dashmap",
+ "ndn-packet",
+ "ndn-transport",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ndn-embedded"
 version = "0.1.0"
 dependencies = [
