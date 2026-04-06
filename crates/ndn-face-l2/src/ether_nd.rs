@@ -726,11 +726,13 @@ impl DiscoveryProtocol for EtherNeighborDiscovery {
                         }
                         ctx.update_neighbor(NeighborUpdate::Remove(entry.node_name.clone()));
                     } else if now.duration_since(*last_seen) > liveness_timeout {
+                        // Advance last_seen to now so the next miss fires after
+                        // another full liveness_timeout, not on the next tick.
                         ctx.update_neighbor(NeighborUpdate::SetState {
                             name: entry.node_name.clone(),
                             state: NeighborState::Stale {
                                 miss_count: miss_count + 1,
-                                last_seen: *last_seen,
+                                last_seen: now,
                             },
                         });
                     }

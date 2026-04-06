@@ -115,11 +115,21 @@ impl DiscoveryConfig {
     }
 
     /// Link-local LAN: stable topology, low overhead.
+    ///
+    /// # Liveness invariant
+    ///
+    /// `liveness_timeout` (30 s) must exceed `hello_interval_max × (1 + jitter)`
+    /// so that a healthy peer at full backoff never triggers a false Stale
+    /// transition.  With `hello_interval_max = 20 s` and `jitter = 0.25`:
+    /// `20 × 1.25 = 25 s < 30 s` ✓
+    ///
+    /// Failure detection: `liveness_timeout × liveness_miss_count = 90 s`
+    /// from the last received hello.
     fn lan() -> Self {
         Self {
             hello_strategy: HelloStrategyKind::Backoff,
             hello_interval_base: Duration::from_secs(5),
-            hello_interval_max: Duration::from_secs(60),
+            hello_interval_max: Duration::from_secs(20),
             hello_jitter: 0.25,
             liveness_timeout: Duration::from_secs(30),
             liveness_miss_count: 3,
@@ -133,11 +143,19 @@ impl DiscoveryConfig {
     }
 
     /// Campus / enterprise: mix of stable and dynamic peers.
+    ///
+    /// # Liveness invariant
+    ///
+    /// `liveness_timeout` (120 s) must exceed `hello_interval_max × (1 + jitter)`.
+    /// With `hello_interval_max = 100 s` and `jitter = 0.10`:
+    /// `100 × 1.10 = 110 s < 120 s` ✓
+    ///
+    /// Failure detection: `120 s × 3 = 360 s` (~6 min).
     fn campus() -> Self {
         Self {
             hello_strategy: HelloStrategyKind::Backoff,
             hello_interval_base: Duration::from_secs(30),
-            hello_interval_max: Duration::from_secs(300),
+            hello_interval_max: Duration::from_secs(100),
             hello_jitter: 0.10,
             liveness_timeout: Duration::from_secs(120),
             liveness_miss_count: 3,
@@ -151,13 +169,21 @@ impl DiscoveryConfig {
     }
 
     /// Mobile / vehicular: topology changes at human-movement timescales.
+    ///
+    /// # Liveness invariant
+    ///
+    /// `liveness_timeout` (3 s) must exceed `hello_interval_max × (1 + jitter)`.
+    /// With `hello_interval_max = 2 s` and `jitter = 0.15`:
+    /// `2 × 1.15 = 2.3 s < 3 s` ✓
+    ///
+    /// Failure detection: `3 s × 5 = 15 s`.
     fn mobile() -> Self {
         Self {
             hello_strategy: HelloStrategyKind::Reactive,
             hello_interval_base: Duration::from_millis(200),
             hello_interval_max: Duration::from_secs(2),
             hello_jitter: 0.15,
-            liveness_timeout: Duration::from_secs(2),
+            liveness_timeout: Duration::from_secs(3),
             liveness_miss_count: 5,
             probe_timeout: Duration::from_millis(500),
             swim_indirect_fanout: 3,
@@ -169,13 +195,21 @@ impl DiscoveryConfig {
     }
 
     /// High-mobility (drones, V2X): sub-second topology changes.
+    ///
+    /// # Liveness invariant
+    ///
+    /// `liveness_timeout` (750 ms) must exceed `hello_interval_max × (1 + jitter)`.
+    /// With `hello_interval_max = 500 ms` and `jitter = 0.10`:
+    /// `500 × 1.10 = 550 ms < 750 ms` ✓
+    ///
+    /// Failure detection: `750 ms × 3 = 2.25 s`.
     fn high_mobility() -> Self {
         Self {
             hello_strategy: HelloStrategyKind::Passive,
             hello_interval_base: Duration::from_millis(50),
             hello_interval_max: Duration::from_millis(500),
             hello_jitter: 0.10,
-            liveness_timeout: Duration::from_millis(500),
+            liveness_timeout: Duration::from_millis(750),
             liveness_miss_count: 3,
             probe_timeout: Duration::from_millis(200),
             swim_indirect_fanout: 5,

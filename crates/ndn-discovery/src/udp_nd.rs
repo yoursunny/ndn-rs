@@ -641,9 +641,14 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
                     } else if now.duration_since(*last_seen) > liveness_timeout {
                         let new_miss = miss_count + 1;
                         debug!(peer = %entry.node_name, miss_count = new_miss, limit = miss_limit, "UdpND: missed hello, incrementing miss count");
+                        // Advance last_seen to now so the NEXT miss fires after
+                        // another full liveness_timeout, not on the very next
+                        // tick.  Without this, miss_count would increment every
+                        // tick_interval (500 ms) until the peer reaches Absent
+                        // in ~1.5 s instead of liveness_timeout × miss_count.
                         ctx.update_neighbor(NeighborUpdate::SetState {
                             name: entry.node_name.clone(),
-                            state: NeighborState::Stale { miss_count: new_miss, last_seen: *last_seen },
+                            state: NeighborState::Stale { miss_count: new_miss, last_seen: now },
                         });
                     }
                 }
