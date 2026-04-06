@@ -1151,15 +1151,30 @@ fn service_announce(
         .map(|r| r.node_name)
         .unwrap_or_else(|| prefix.clone());
 
-    // Use publish_with_ttl so that records registered at runtime via ndn-ctl
-    // auto-expire if the app exits without calling service/withdraw.
-    // TTL = 10 × freshness_ms (default 30 s × 10 = 5 min).
-    // Apps that want a durable registration should re-announce before expiry
-    // or add the prefix to served_prefixes in the router config instead.
+    // Find the FIB nexthop face for this prefix — that is the app's data face.
+    // Linking the service record to that face means it is automatically
+    // withdrawn when the app's face goes down (app exit, crash, disconnect),
+    // without requiring the app to call service/withdraw explicitly.
+    //
+    // If no FIB route exists for the prefix yet, publish permanently and let
+    // the operator call service/withdraw manually.
     let record = ServiceRecord::new(prefix.clone(), node_name);
-    let ttl_ms = record.freshness_ms * 10;
-    sd.publish_with_ttl(record, ttl_ms);
-    tracing::info!(prefix = %prefix, ttl_ms, "service/announce");
+    let owner_face = engine.fib().lpm(&prefix)
+        .and_then(|e| {
+            // Prefer a non-management nexthop (the app's data face).
+            e.nexthops_excluding(source_face.unwrap_or(FaceId(u32::MAX)))
+                .into_iter()
+                .next()
+                .map(|nh| nh.face_id)
+        });
+
+    if let Some(face) = owner_face {
+        sd.publish_with_owner(record, face);
+        tracing::info!(prefix = %prefix, owner_face = ?face, "service/announce (owned by face)");
+    } else {
+        sd.publish(record);
+        tracing::info!(prefix = %prefix, "service/announce (permanent — no FIB route found)");
+    }
 
     let echo = ControlParameters {
         name: Some(prefix),

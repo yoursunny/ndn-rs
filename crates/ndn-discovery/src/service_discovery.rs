@@ -53,9 +53,13 @@ struct RecordEntry {
     record: ServiceRecord,
     /// Timestamp used for the Data version component.
     published_at_ms: u64,
-    /// When this record expires (auto-withdrawn).  `None` = permanent
-    /// (config-based or explicitly pinned).
-    expires_at: Option<std::time::Instant>,
+    /// The local face that "owns" this record — typically the face registered
+    /// in the FIB for the announced prefix (i.e. the app's data face).
+    ///
+    /// When this face goes down the record is automatically withdrawn so that
+    /// stale records do not accumulate after an app exits.  `None` means the
+    /// record is permanent (config-based via `served_prefixes`).
+    owner_face: Option<FaceId>,
 }
 
 /// An auto-populated FIB entry that must be expired after its TTL.
@@ -166,7 +170,7 @@ impl ServiceDiscoveryProtocol {
             freshness_ms = record.freshness_ms,
             "service record published",
         );
-        let entry = RecordEntry { record, published_at_ms: ts, expires_at: None };
+        let entry = RecordEntry { record, published_at_ms: ts, owner_face: None };
         if let Some(idx) = existing {
             records[idx] = entry;
         } else {
@@ -174,31 +178,30 @@ impl ServiceDiscoveryProtocol {
         }
     }
 
-    /// Publish a service record with a finite TTL.
+    /// Publish a service record owned by a specific local face.
     ///
-    /// The record is automatically withdrawn after `ttl_ms` milliseconds if
-    /// not re-published.  Use this for runtime announcements (e.g. via
-    /// `ndn-ctl service announce`) where the registering app may exit without
-    /// explicitly withdrawing the record.
+    /// The record is automatically withdrawn when `owner_face` goes down.
+    /// Use this for runtime announcements (e.g. `ndn-ctl service announce`)
+    /// so that the record disappears when the app's data face closes, without
+    /// requiring the app to explicitly call withdraw.
     ///
     /// Config-based records (from `served_prefixes`) should use the permanent
     /// [`publish`](Self::publish) instead.
-    pub fn publish_with_ttl(&self, record: ServiceRecord, ttl_ms: u64) {
+    pub fn publish_with_owner(&self, record: ServiceRecord, owner_face: FaceId) {
         let ts = current_timestamp_ms();
-        let expires_at = std::time::Instant::now() + Duration::from_millis(ttl_ms);
         let mut records = self.local_records.lock().unwrap();
         let existing = records.iter().position(|e| {
             e.record.announced_prefix == record.announced_prefix
                 && e.record.node_name == record.node_name
         });
         info!(
-            prefix = %record.announced_prefix,
-            node   = %record.node_name,
+            prefix       = %record.announced_prefix,
+            node         = %record.node_name,
             freshness_ms = record.freshness_ms,
-            ttl_ms,
-            "service record published (TTL)",
+            owner_face   = ?owner_face,
+            "service record published (owned by face)",
         );
-        let entry = RecordEntry { record, published_at_ms: ts, expires_at: Some(expires_at) };
+        let entry = RecordEntry { record, published_at_ms: ts, owner_face: Some(owner_face) };
         if let Some(idx) = existing {
             records[idx] = entry;
         } else {
@@ -642,6 +645,19 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
     }
 
     fn on_face_down(&self, face_id: FaceId, ctx: &dyn DiscoveryContext) {
+        // Withdraw local service records that were owned by this face.
+        // This fires when an app's data face goes down, removing service
+        // records that would otherwise remain stale indefinitely.
+        {
+            let mut local = self.local_records.lock().unwrap();
+            let before = local.len();
+            local.retain(|e| e.owner_face != Some(face_id));
+            let removed = before - local.len();
+            if removed > 0 {
+                info!(face = ?face_id, count = removed, "ServiceDiscovery: withdrew local records for downed face");
+            }
+        }
+
         // Find which neighbors were reachable via this face.
         let affected: Vec<Name> = ctx.neighbors().all()
             .into_iter()
@@ -771,20 +787,6 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
                     face   = ?e.face_id,
                     "ServiceDiscovery: expired auto-FIB entry",
                 );
-            }
-        }
-
-        // Expire local service records that have a finite TTL (published via
-        // `publish_with_ttl`).  Config-based records (`publish`) are permanent.
-        {
-            let mut local = self.local_records.lock().unwrap();
-            let before = local.len();
-            local.retain(|e| {
-                e.expires_at.map_or(true, |exp| now < exp)
-            });
-            let removed = before - local.len();
-            if removed > 0 {
-                debug!(count = removed, "ServiceDiscovery: expired {} local record(s)", removed);
             }
         }
 
