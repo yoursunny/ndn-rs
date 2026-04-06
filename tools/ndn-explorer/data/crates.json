@@ -1,0 +1,399 @@
+{
+  "generated": "2026-04-06",
+  "layers": [
+    { "num": 4, "id": "foundation", "label": "Foundation" },
+    { "num": 3, "id": "faces", "label": "Face Implementations" },
+    { "num": 2, "id": "pipeline", "label": "Pipeline, Strategy, Security" },
+    { "num": 1, "id": "engine", "label": "Engine & Application" },
+    { "num": 0, "id": "binaries", "label": "Binaries" },
+    { "num": -1, "id": "simulation", "label": "Simulation" },
+    { "num": -2, "id": "research", "label": "Research Extensions" },
+    { "num": -3, "id": "embedded", "label": "Embedded" },
+    { "num": -4, "id": "bindings", "label": "Language Bindings" },
+    { "num": -5, "id": "examples", "label": "Examples" }
+  ],
+  "crates": [
+    {
+      "name": "ndn-tlv",
+      "layer": "foundation",
+      "layer_num": 4,
+      "description": "TLV encoding foundation for NDN -- zero-copy parser and encoder over bytes::Bytes buffers",
+      "key_types": ["TlvReader", "TlvWriter", "TlvError", "read_varu64", "write_varu64", "varu64_size"],
+      "workspace_deps": [],
+      "features": {
+        "default": ["std"],
+        "std": ["bytes/std"]
+      },
+      "no_std": true,
+      "path": "crates/ndn-tlv"
+    },
+    {
+      "name": "ndn-packet",
+      "layer": "foundation",
+      "layer_num": 4,
+      "description": "NDN packet types and wire-format codec with lazy decode via OnceLock",
+      "key_types": ["Name", "NameComponent", "Interest", "Selector", "Data", "MetaInfo", "Nack", "NackReason", "SignatureInfo", "SignatureType", "LpHeaders", "CachePolicyType", "PacketError"],
+      "workspace_deps": ["ndn-tlv"],
+      "features": {
+        "default": ["std"],
+        "std": ["ndn-tlv/std", "bytes/std", "dep:ring"]
+      },
+      "no_std": true,
+      "path": "crates/ndn-packet"
+    },
+    {
+      "name": "ndn-transport",
+      "layer": "foundation",
+      "layer_num": 4,
+      "description": "Face abstraction and transport layer -- async send/recv, FaceTable, TlvCodec, and congestion control",
+      "key_types": ["Face", "FaceId", "FaceKind", "FaceAddr", "FaceError", "FacePersistency", "FaceScope", "FaceTable", "ErasedFace", "FaceInfo", "FaceEvent", "FacePairTable", "StreamFace", "TlvCodec", "RawPacket", "CongestionController", "AnyMap"],
+      "workspace_deps": ["ndn-packet", "ndn-tlv"],
+      "features": {
+        "default": [],
+        "serde": ["dep:serde"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-transport"
+    },
+    {
+      "name": "ndn-store",
+      "layer": "foundation",
+      "layer_num": 4,
+      "description": "Forwarding tables and content storage -- NameTrie, FIB, PIT, ContentStore with pluggable backends",
+      "key_types": ["NameTrie", "Fib", "FibEntry", "FibNexthop", "Pit", "PitEntry", "PitToken", "InRecord", "OutRecord", "ContentStore", "ErasedContentStore", "CsEntry", "CsMeta", "CsStats", "CsCapacity", "CsAdmissionPolicy", "InsertResult", "LruCs", "ShardedCs", "FjallCs", "NullCs", "ObservableCs", "CsEvent", "CsObserver", "StrategyTable"],
+      "workspace_deps": ["ndn-packet"],
+      "features": {
+        "default": [],
+        "fjall": ["dep:fjall"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-store"
+    },
+    {
+      "name": "ndn-face-net",
+      "layer": "faces",
+      "layer_num": 3,
+      "description": "Network transport faces -- UdpFace, TcpFace, MulticastUdpFace, WebSocketFace, and LpReliability",
+      "key_types": ["UdpFace", "TcpFace", "MulticastUdpFace", "WebSocketFace", "LpReliability", "ReliabilityConfig", "RtoStrategy"],
+      "workspace_deps": ["ndn-packet", "ndn-transport"],
+      "features": {
+        "default": ["websocket"],
+        "websocket": ["dep:tokio-tungstenite"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-face-net"
+    },
+    {
+      "name": "ndn-face-local",
+      "layer": "faces",
+      "layer_num": 3,
+      "description": "Local and IPC faces -- AppFace, UnixFace, IpcFace, and ShmFace for same-machine communication",
+      "key_types": ["AppFace", "AppHandle", "UnixFace", "IpcFace", "IpcListener", "ShmFace", "ShmHandle", "ShmError"],
+      "workspace_deps": ["ndn-packet", "ndn-transport"],
+      "features": {
+        "spsc-shm": ["dep:libc"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-face-local"
+    },
+    {
+      "name": "ndn-face-serial",
+      "layer": "faces",
+      "layer_num": 3,
+      "description": "Serial port faces for NDN -- UART/RS-232/RS-485 with COBS framing",
+      "key_types": ["SerialFace", "serial_face_open", "CobsCodec"],
+      "workspace_deps": ["ndn-packet", "ndn-transport"],
+      "features": {
+        "default": ["serial"],
+        "serial": ["dep:tokio-serial"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-face-serial"
+    },
+    {
+      "name": "ndn-face-l2",
+      "layer": "faces",
+      "layer_num": 3,
+      "description": "Layer-2 faces -- raw Ethernet (AF_PACKET/PF_NDRV/Npcap), Wifibroadcast, Bluetooth RFCOMM",
+      "key_types": ["NamedEtherFace", "MulticastEtherFace", "WfbFace", "BluetoothFace", "RadioTable", "RadioFaceMetadata", "EtherNeighborDiscovery", "NeighborDiscovery", "NDN_ETHERTYPE"],
+      "workspace_deps": ["ndn-tlv", "ndn-packet", "ndn-transport", "ndn-face-net", "ndn-discovery"],
+      "features": {
+        "default": []
+      },
+      "no_std": false,
+      "path": "crates/ndn-face-l2"
+    },
+    {
+      "name": "ndn-pipeline",
+      "layer": "pipeline",
+      "layer_num": 2,
+      "description": "Packet processing pipeline -- PipelineStage trait, PacketContext, and Action enum",
+      "key_types": ["PipelineStage", "PacketContext", "DecodedPacket", "Action", "DropReason", "ForwardingAction", "NackReason"],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-store"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-pipeline"
+    },
+    {
+      "name": "ndn-strategy",
+      "layer": "pipeline",
+      "layer_num": 2,
+      "description": "Forwarding strategy framework -- Strategy trait, BestRoute, Multicast, cross-layer DTOs, composable filters",
+      "key_types": ["Strategy", "StrategyContext", "FibEntry", "FibNexthop", "StrategyFilter", "BestRouteStrategy", "MulticastStrategy", "RssiFilter", "MeasurementsTable", "MeasurementsEntry", "FaceLinkQuality", "LinkQualitySnapshot"],
+      "workspace_deps": ["ndn-packet", "ndn-pipeline", "ndn-store", "ndn-transport"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-strategy"
+    },
+    {
+      "name": "ndn-security",
+      "layer": "pipeline",
+      "layer_num": 2,
+      "description": "Packet signing, verification, trust schema, certificate management, and SafeData enforcement",
+      "key_types": ["Signer", "Verifier", "Ed25519Signer", "Ed25519Verifier", "HmacSha256Signer", "Validator", "ValidationResult", "VerifyOutcome", "TrustSchema", "NamePattern", "PatternComponent", "SafeData", "CertCache", "Certificate", "CertFetcher", "KeyStore", "MemKeyStore", "KeyAlgorithm", "SecurityManager", "SecurityProfile", "FilePib", "TrustError"],
+      "workspace_deps": ["ndn-packet", "ndn-tlv"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-security"
+    },
+    {
+      "name": "ndn-engine",
+      "layer": "engine",
+      "layer_num": 1,
+      "description": "Forwarder engine and pipeline wiring -- EngineBuilder, ForwarderEngine, task topology, composed strategies",
+      "key_types": ["ForwarderEngine", "EngineBuilder", "EngineConfig", "ShutdownHandle", "ComposedStrategy", "ContextEnricher", "EngineDiscoveryContext", "Fib", "FibEntry", "FibNexthop"],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-face-net", "ndn-discovery", "ndn-store", "ndn-pipeline", "ndn-strategy", "ndn-security"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-engine"
+    },
+    {
+      "name": "ndn-app",
+      "layer": "engine",
+      "layer_num": 1,
+      "description": "NDN Application API -- Consumer, Producer, Subscriber, Queryable, KeyChain, and connection management",
+      "key_types": ["Consumer", "Producer", "Subscriber", "SubscriberConfig", "Sample", "Queryable", "Query", "KeyChain", "AppFace", "NdnConnection", "AppError", "OutboundRequest"],
+      "workspace_deps": ["ndn-packet", "ndn-pipeline", "ndn-engine", "ndn-security", "ndn-transport", "ndn-face-local", "ndn-ipc", "ndn-sync"],
+      "features": {
+        "default": [],
+        "blocking": ["tokio/rt"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-app"
+    },
+    {
+      "name": "ndn-ipc",
+      "layer": "engine",
+      "layer_num": 1,
+      "description": "Inter-process communication -- IpcClient/Server, RouterClient, MgmtClient, chunked transfer, service registry",
+      "key_types": ["IpcClient", "IpcServer", "RouterClient", "MgmtClient", "ChunkedProducer", "ChunkedConsumer", "ServiceRegistry"],
+      "workspace_deps": ["ndn-packet", "ndn-config", "ndn-face-local", "ndn-transport"],
+      "features": {
+        "default": ["spsc-shm"],
+        "spsc-shm": ["ndn-face-local/spsc-shm"]
+      },
+      "no_std": false,
+      "path": "crates/ndn-ipc"
+    },
+    {
+      "name": "ndn-config",
+      "layer": "engine",
+      "layer_num": 1,
+      "description": "TOML configuration parsing and NFD-compatible management protocol for runtime control",
+      "key_types": ["ForwarderConfig", "EngineConfig", "FaceConfig", "FaceKind", "RouteConfig", "CsConfig", "LoggingConfig", "ManagementConfig", "SecurityConfig", "DiscoveryTomlConfig", "ManagementServer", "ManagementRequest", "ManagementResponse", "ControlParameters", "ControlResponse", "ParsedCommand", "ConfigError"],
+      "workspace_deps": ["ndn-tlv", "ndn-packet", "ndn-transport"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-config"
+    },
+    {
+      "name": "ndn-discovery",
+      "layer": "engine",
+      "layer_num": 1,
+      "description": "Pluggable neighbor (SWIM/Hello) and service discovery with composite protocol support",
+      "key_types": ["DiscoveryProtocol", "DiscoveryContext", "NeighborTableView", "NeighborTable", "NeighborEntry", "NeighborState", "NeighborUpdate", "NoDiscovery", "CompositeDiscovery", "HelloProtocol", "UdpNeighborDiscovery", "EpidemicGossip", "SvsServiceDiscovery", "ServiceDiscoveryProtocol", "ServiceRecord", "DiscoveryConfig", "DiscoveryProfile", "BackoffConfig", "NeighborProbeStrategy", "MacAddr"],
+      "workspace_deps": ["ndn-tlv", "ndn-packet", "ndn-transport", "ndn-face-net", "ndn-security", "ndn-sync"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-discovery"
+    },
+    {
+      "name": "ndn-sim",
+      "layer": "simulation",
+      "layer_num": -1,
+      "description": "In-process NDN network simulation with configurable link delay, loss, and bandwidth emulation",
+      "key_types": ["Simulation", "RunningSimulation", "NodeId", "SimFace", "SimLink", "LinkConfig", "SimTracer", "SimEvent", "EventKind"],
+      "workspace_deps": ["ndn-transport", "ndn-engine", "ndn-packet", "ndn-store"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-sim"
+    },
+    {
+      "name": "ndn-strategy-wasm",
+      "layer": "research",
+      "layer_num": -2,
+      "description": "Hot-loadable WASM forwarding strategies via wasmtime with fuel-limited sandboxed execution",
+      "key_types": ["WasmStrategy"],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-pipeline", "ndn-strategy", "ndn-engine"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-strategy-wasm"
+    },
+    {
+      "name": "ndn-research",
+      "layer": "research",
+      "layer_num": -2,
+      "description": "Research and measurement extensions -- per-flow statistics, pipeline observer, nl80211 Wi-Fi channel control",
+      "key_types": ["FlowTable", "FlowObserverStage", "ChannelManager"],
+      "workspace_deps": ["ndn-packet", "ndn-pipeline", "ndn-transport", "ndn-face-l2"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-research"
+    },
+    {
+      "name": "ndn-compute",
+      "layer": "research",
+      "layer_num": -2,
+      "description": "In-network computation -- routes Interests to registered compute handlers for named-function networking",
+      "key_types": ["ComputeFace", "ComputeRegistry", "ComputeHandler"],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-engine", "ndn-store"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-compute"
+    },
+    {
+      "name": "ndn-sync",
+      "layer": "research",
+      "layer_num": -2,
+      "description": "NDN dataset synchronisation protocols -- State Vector Sync (SVS) and Partial Sync (PSync)",
+      "key_types": ["SyncHandle", "SyncUpdate", "SyncError", "SvsConfig", "join_svs_group", "PSyncConfig", "join_psync_group"],
+      "workspace_deps": ["ndn-packet"],
+      "features": {},
+      "no_std": false,
+      "path": "crates/ndn-sync"
+    },
+    {
+      "name": "ndn-embedded",
+      "layer": "embedded",
+      "layer_num": -3,
+      "description": "Minimal no_std NDN forwarder for bare-metal targets (ARM Cortex-M, RISC-V, ESP32)",
+      "key_types": ["Forwarder", "Face", "ErasedFace", "FaceId", "Fib", "FibEntry", "Pit", "PitEntry", "Clock", "FnClock", "NoOpClock"],
+      "workspace_deps": ["ndn-tlv", "ndn-packet"],
+      "features": {
+        "default": [],
+        "alloc": ["dep:hashbrown"],
+        "cs": [],
+        "ipc": []
+      },
+      "no_std": true,
+      "path": "crates/ndn-embedded"
+    },
+    {
+      "name": "ndn-router",
+      "layer": "binaries",
+      "layer_num": 0,
+      "description": "Standalone NDN forwarder binary with TOML config, management socket, and full face/strategy support",
+      "key_types": [],
+      "workspace_deps": ["ndn-engine", "ndn-discovery", "ndn-app", "ndn-face-net", "ndn-face-local", "ndn-face-serial", "ndn-face-l2", "ndn-strategy", "ndn-store", "ndn-security", "ndn-config", "ndn-packet", "ndn-transport"],
+      "features": {
+        "default": ["spsc-shm", "websocket", "serial"],
+        "spsc-shm": ["ndn-face-local/spsc-shm"],
+        "websocket": ["ndn-face-net/websocket", "dep:tokio-tungstenite"],
+        "serial": ["ndn-face-serial/serial"]
+      },
+      "no_std": false,
+      "path": "binaries/ndn-router"
+    },
+    {
+      "name": "ndn-tools",
+      "layer": "binaries",
+      "layer_num": 0,
+      "description": "NDN command-line tools: ndn-peek, ndn-put, ndn-ping, ndn-sec, ndn-ctl, ndn-traffic, ndn-iperf",
+      "key_types": [],
+      "workspace_deps": ["ndn-engine", "ndn-app", "ndn-ipc", "ndn-packet", "ndn-security", "ndn-config", "ndn-face-local", "ndn-transport"],
+      "features": {},
+      "no_std": false,
+      "path": "binaries/ndn-tools"
+    },
+    {
+      "name": "ndn-bench",
+      "layer": "binaries",
+      "layer_num": 0,
+      "description": "Throughput and latency benchmarking tool for the NDN forwarder",
+      "key_types": [],
+      "workspace_deps": ["ndn-app", "ndn-engine", "ndn-packet", "ndn-transport"],
+      "features": {},
+      "no_std": false,
+      "path": "binaries/ndn-bench"
+    },
+    {
+      "name": "ndn-python",
+      "layer": "bindings",
+      "layer_num": -4,
+      "description": "PyO3 Python bindings for ndn-rs -- blocking Consumer and Producer classes",
+      "key_types": ["Consumer", "Producer", "Data"],
+      "workspace_deps": ["ndn-app", "ndn-packet"],
+      "features": {
+        "default": [],
+        "extension-module": ["pyo3/extension-module"]
+      },
+      "no_std": false,
+      "path": "bindings/ndn-python"
+    },
+    {
+      "name": "example-strategy-custom",
+      "layer": "examples",
+      "layer_num": -5,
+      "description": "Example: implementing a custom RandomStrategy from scratch and registering it with the engine",
+      "key_types": [],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-pipeline", "ndn-strategy", "ndn-engine", "ndn-app", "ndn-face-local"],
+      "features": {},
+      "no_std": false,
+      "path": "examples/strategy-custom"
+    },
+    {
+      "name": "example-strategy-composed",
+      "layer": "examples",
+      "layer_num": -5,
+      "description": "Example: composing BestRouteStrategy with RSSI and latency filters via ComposedStrategy",
+      "key_types": [],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-pipeline", "ndn-strategy", "ndn-engine"],
+      "features": {},
+      "no_std": false,
+      "path": "examples/strategy-composed"
+    },
+    {
+      "name": "example-cross-layer-enricher",
+      "layer": "examples",
+      "layer_num": -5,
+      "description": "Example: feeding external data (radio metrics, GPS) into the strategy layer via ContextEnricher",
+      "key_types": [],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-pipeline", "ndn-strategy", "ndn-engine"],
+      "features": {},
+      "no_std": false,
+      "path": "examples/cross-layer-enricher"
+    },
+    {
+      "name": "example-wasm-strategy",
+      "layer": "examples",
+      "layer_num": -5,
+      "description": "Example: loading and registering a WASM forwarding strategy module at runtime",
+      "key_types": [],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-strategy", "ndn-engine", "ndn-strategy-wasm"],
+      "features": {},
+      "no_std": false,
+      "path": "examples/wasm-strategy"
+    },
+    {
+      "name": "example-discovery-lan",
+      "layer": "examples",
+      "layer_num": -5,
+      "description": "Example: LAN neighbor and service discovery with multicast UDP and composite protocols",
+      "key_types": [],
+      "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-engine", "ndn-discovery", "ndn-face-net"],
+      "features": {},
+      "no_std": false,
+      "path": "examples/discovery-lan"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ndn-rs Explorer</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav>
+    <span class="logo">ndn-rs</span>
+    <div class="nav-links">
+      <button class="nav-btn active" data-view="layer-map">Layers</button>
+      <button class="nav-btn" data-view="dep-graph">Graph</button>
+      <button class="nav-btn" data-view="pipeline-trace">Pipeline</button>
+      <button class="nav-btn" data-view="tour">Tour</button>
+    </div>
+    <input type="text" id="search-box" placeholder="Search crates, types...  ( / )">
+  </nav>
+  <main>
+    <div id="layer-map" class="view active"></div>
+    <div id="crate-detail" class="view"></div>
+    <div id="dep-graph" class="view"></div>
+    <div id="pipeline-trace" class="view"></div>
+    <div id="search" class="view"></div>
+    <div id="tour" class="view"></div>
+  </main>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
