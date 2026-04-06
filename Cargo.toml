@@ -21,6 +21,8 @@ members = [
     "crates/ndn-ipc",
     "crates/ndn-config",
     "crates/ndn-discovery",
+    # Simulation
+    "crates/ndn-sim",
     # Layer 5 — research extensions
     "crates/ndn-strategy-wasm",
     "crates/ndn-research",
@@ -74,6 +76,7 @@ ndn-research  = { path = "crates/ndn-research" }
 ndn-compute   = { path = "crates/ndn-compute" }
 ndn-sync      = { path = "crates/ndn-sync" }
 ndn-embedded  = { path = "crates/ndn-embedded" }
+ndn-sim       = { path = "crates/ndn-sim" }
 
 # Core async runtime — individual crates enable only the features they need
 tokio      = { version = "1", default-features = false }
