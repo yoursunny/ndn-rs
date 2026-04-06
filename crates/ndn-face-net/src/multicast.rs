@@ -6,7 +6,7 @@ use bytes::Bytes;
 use tokio::net::UdpSocket;
 
 use ndn_packet::fragment::{DEFAULT_UDP_MTU, fragment_packet};
-use ndn_transport::{Face, FaceError, FaceId, FaceKind};
+use ndn_transport::{Face, FaceAddr, FaceError, FaceId, FaceKind};
 
 /// IANA-assigned NDN IPv4 link-local multicast group.
 pub const NDN_MULTICAST_V4: Ipv4Addr = Ipv4Addr::new(224, 0, 23, 170);
@@ -108,9 +108,9 @@ impl Face for MulticastUdpFace {
     }
 
     /// Receive packet and expose the UDP source address to the discovery layer.
-    async fn recv_with_addr(&self) -> Result<(Bytes, Option<std::net::SocketAddr>), FaceError> {
+    async fn recv_with_addr(&self) -> Result<(Bytes, Option<FaceAddr>), FaceError> {
         let (pkt, src) = self.recv_with_source().await?;
-        Ok((pkt, Some(src)))
+        Ok((pkt, Some(FaceAddr::Udp(src))))
     }
 
     /// Broadcast an NDN packet to the multicast group.
