@@ -54,7 +54,7 @@ name = "ndn-rs"
 [workspace.dependencies]
 # NDN workspace crates
 ndn-tlv       = { path = "crates/ndn-tlv", default-features = false }
-ndn-packet    = { path = "crates/ndn-packet" }
+ndn-packet    = { path = "crates/ndn-packet", default-features = false }
 ndn-transport = { path = "crates/ndn-transport" }
 ndn-store     = { path = "crates/ndn-store" }
 ndn-pipeline  = { path = "crates/ndn-pipeline" }

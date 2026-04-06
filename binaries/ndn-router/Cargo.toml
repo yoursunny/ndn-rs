@@ -27,7 +27,7 @@ ndn-strategy     = { workspace = true }
 ndn-store        = { workspace = true }
 ndn-security     = { workspace = true }
 ndn-config       = { workspace = true }
-ndn-packet       = { workspace = true }
+ndn-packet       = { workspace = true, features = ["std"] }
 ndn-transport    = { workspace = true }
 bytes         = { workspace = true, features = ["std"] }
 serde_json       = { workspace = true }

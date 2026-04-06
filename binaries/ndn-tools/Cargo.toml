@@ -37,7 +37,7 @@ path = "src/iperf.rs"
 ndn-engine    = { workspace = true }
 ndn-app        = { workspace = true }
 ndn-ipc        = { workspace = true }
-ndn-packet     = { workspace = true }
+ndn-packet     = { workspace = true, features = ["std"] }
 ndn-security   = { workspace = true }
 ndn-config     = { workspace = true }
 ndn-face-local = { workspace = true }

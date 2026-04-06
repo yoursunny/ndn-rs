@@ -9,7 +9,7 @@ name = "discovery-lan"
 path = "src/main.rs"
 
 [dependencies]
-ndn-packet    = { workspace = true }
+ndn-packet    = { workspace = true, features = ["std"] }
 ndn-transport = { workspace = true }
 ndn-engine    = { workspace = true }
 ndn-discovery = { workspace = true }

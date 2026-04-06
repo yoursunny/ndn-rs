@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 ndn-app       = { workspace = true }
 ndn-engine    = { workspace = true }
-ndn-packet    = { workspace = true }
+ndn-packet    = { workspace = true, features = ["std"] }
 ndn-transport = { workspace = true }
 bytes         = { workspace = true, features = ["std"] }
 tokio      = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
