@@ -55,7 +55,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     DiffEntry, DiscoveryContext, DiscoveryProtocol, HelloPayload, InboundMeta,
-    LinkAddr, NeighborDiff, NeighborEntry, NeighborState, NeighborUpdate, ProtocolId,
+    LinkAddr, MacAddr, NeighborDiff, NeighborEntry, NeighborState, NeighborUpdate, ProtocolId,
 };
 use crate::config::{DiscoveryConfig, DiscoveryProfile, PrefixAnnouncementMode};
 use crate::probe::{
@@ -446,6 +446,16 @@ impl UdpNeighborDiscovery {
         if ctx.neighbors().get(peer_name).is_none() {
             ctx.update_neighbor(NeighborUpdate::Upsert(NeighborEntry::new(peer_name.clone())));
         }
+        // Register the unicast face with the neighbor entry so that protocols
+        // iterating entry.faces (e.g. service discovery browse) can reach the
+        // peer.  For UDP there is no MAC; use the peer address as the iface
+        // string for stable deduplication.
+        ctx.update_neighbor(NeighborUpdate::AddFace {
+            name: peer_name.clone(),
+            face_id,
+            mac: MacAddr::new([0; 6]),
+            iface: peer_addr.to_string(),
+        });
         ctx.add_fib_entry(peer_name, face_id, 0, PROTOCOL);
         Some(face_id)
     }
