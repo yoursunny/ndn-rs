@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use ndn_packet::Name;
-use ndn_transport::{Face, FaceError, FaceId, FaceKind};
+use ndn_transport::{Face, FaceAddr, FaceError, FaceId, FaceKind};
 
 use ndn_discovery::MacAddr;
 
@@ -166,6 +166,11 @@ impl Face for MulticastEtherFace {
     async fn recv(&self) -> Result<Bytes, FaceError> {
         let (payload, _src) = self.socket.recv().await.map_err(FaceError::Io)?;
         Ok(payload)
+    }
+
+    async fn recv_with_addr(&self) -> Result<(Bytes, Option<FaceAddr>), FaceError> {
+        let (payload, src_mac) = self.socket.recv().await.map_err(FaceError::Io)?;
+        Ok((payload, Some(FaceAddr::Ether(src_mac.0))))
     }
 
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {

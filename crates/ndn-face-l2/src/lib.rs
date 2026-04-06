@@ -46,6 +46,8 @@ pub mod ether_nd;
 
 #[cfg(target_os = "linux")]
 pub use af_packet::MacAddr;
+#[cfg(target_os = "linux")]
+pub use af_packet::get_interface_mac;
 
 #[cfg(target_os = "linux")]
 pub use ether::NamedEtherFace;

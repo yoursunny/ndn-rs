@@ -7,7 +7,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
-use ndn_transport::{Face, FaceError, FaceId, FaceKind};
+use ndn_transport::{Face, FaceAddr, FaceError, FaceId, FaceKind};
 use tokio::io::unix::AsyncFd;
 
 use crate::NDN_ETHERTYPE;
@@ -149,6 +149,11 @@ impl Face for MulticastEtherFace {
             let mut guard = self.socket.readable().await?;
             guard.clear_ready();
         }
+    }
+
+    async fn recv_with_addr(&self) -> Result<(Bytes, Option<FaceAddr>), FaceError> {
+        let (pkt, src_mac) = self.recv_with_source().await?;
+        Ok((pkt, Some(FaceAddr::Ether(src_mac.0))))
     }
 
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {

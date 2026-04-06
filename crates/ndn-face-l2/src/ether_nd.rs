@@ -57,7 +57,7 @@ use ndn_discovery::scope::{probe_direct, probe_via};
 use ndn_discovery::strategy::{
     NeighborProbeStrategy, ProbeRequest, TriggerEvent, build_strategy,
 };
-use ndn_discovery::wire::{parse_raw_data, parse_raw_interest, unwrap_lp, write_name_tlv, write_nni};
+use ndn_discovery::wire::{parse_raw_data, parse_raw_interest, write_name_tlv, write_nni};
 use ndn_packet::{Name, tlv_type};
 use ndn_tlv::TlvWriter;
 use ndn_transport::FaceId;
@@ -617,30 +617,27 @@ impl DiscoveryProtocol for EtherNeighborDiscovery {
         if raw.is_empty() {
             return false;
         }
-        // EtherFaces don't LP-wrap, but handle it defensively.
-        let inner = match ndn_discovery::wire::unwrap_lp(raw) {
-            Some(b) => b,
-            None => return false,
-        };
-        match inner.first() {
+        // Bytes arrive LP-unwrapped from the pipeline (TlvDecodeStage strips LP
+        // before on_inbound is called). Dispatch directly on the NDN type byte.
+        match raw.first() {
             Some(&0x05) => {
                 if self.config.swim_indirect_fanout > 0 {
-                    if let Some(parsed) = parse_raw_interest(&inner) {
+                    if let Some(parsed) = parse_raw_interest(raw) {
                         if parsed.name.has_prefix(probe_via()) {
-                            return self.handle_via_probe_interest(&inner, incoming_face, ctx);
+                            return self.handle_via_probe_interest(raw, incoming_face, ctx);
                         }
                         if parsed.name.has_prefix(probe_direct()) {
-                            return self.handle_direct_probe_interest(&inner, incoming_face, ctx);
+                            return self.handle_direct_probe_interest(raw, incoming_face, ctx);
                         }
                     }
                 }
-                self.handle_hello_interest(&inner, incoming_face, meta, ctx)
+                self.handle_hello_interest(raw, incoming_face, meta, ctx)
             }
             Some(&0x06) => {
-                if self.config.swim_indirect_fanout > 0 && is_probe_ack(&inner) {
-                    return self.handle_probe_ack(&inner, incoming_face, ctx).unwrap_or(false);
+                if self.config.swim_indirect_fanout > 0 && is_probe_ack(raw) {
+                    return self.handle_probe_ack(raw, incoming_face, ctx).unwrap_or(false);
                 }
-                self.handle_hello_data(&inner, incoming_face, meta, ctx)
+                self.handle_hello_data(raw, incoming_face, meta, ctx)
             }
             _ => false,
         }

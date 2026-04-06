@@ -307,6 +307,50 @@ pub fn setup_packet_ring(fd: RawFd) -> std::io::Result<PacketRing> {
     })
 }
 
+/// Query the hardware (MAC) address of `iface` via `SIOCGIFHWADDR`.
+///
+/// Returns an error if the interface does not exist or if the process lacks
+/// the necessary permissions to open a raw socket for the ioctl.
+pub fn get_interface_mac(iface: &str) -> std::io::Result<MacAddr> {
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_PACKET,
+            libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if fd == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    let name_bytes = iface.as_bytes();
+    let copy_len = name_bytes.len().min(libc::IFNAMSIZ - 1);
+    // SAFETY: ifr_name is a fixed-size C array, zeroed above.
+    let name_ptr = ifr.ifr_name.as_mut_ptr() as *mut u8;
+    unsafe { std::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, copy_len) };
+
+    let ret = unsafe {
+        libc::ioctl(fd.as_raw_fd(), libc::SIOCGIFHWADDR, &mut ifr as *mut _)
+    };
+    if ret == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    // ifr_hwaddr.sa_data holds the MAC bytes at offset 0.
+    let sa_data = unsafe { ifr.ifr_ifru.ifru_hwaddr.sa_data };
+    let mac = [
+        sa_data[0] as u8,
+        sa_data[1] as u8,
+        sa_data[2] as u8,
+        sa_data[3] as u8,
+        sa_data[4] as u8,
+        sa_data[5] as u8,
+    ];
+    Ok(MacAddr::new(mac))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
