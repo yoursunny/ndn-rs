@@ -53,12 +53,14 @@ struct RecordEntry {
     record: ServiceRecord,
     /// Timestamp used for the Data version component.
     published_at_ms: u64,
+    /// When this record expires (auto-withdrawn).  `None` = no TTL expiry.
+    expires_at: Option<std::time::Instant>,
     /// The local face that "owns" this record — typically the face registered
     /// in the FIB for the announced prefix (i.e. the app's data face).
     ///
     /// When this face goes down the record is automatically withdrawn so that
-    /// stale records do not accumulate after an app exits.  `None` means the
-    /// record is permanent (config-based via `served_prefixes`).
+    /// stale records do not accumulate after an app exits.  `None` means no
+    /// face-based cleanup (permanent or TTL-only).
     owner_face: Option<FaceId>,
 }
 
@@ -170,7 +172,43 @@ impl ServiceDiscoveryProtocol {
             freshness_ms = record.freshness_ms,
             "service record published",
         );
-        let entry = RecordEntry { record, published_at_ms: ts, owner_face: None };
+        let entry = RecordEntry { record, published_at_ms: ts, expires_at: None, owner_face: None };
+        if let Some(idx) = existing {
+            records[idx] = entry;
+        } else {
+            records.push(entry);
+        }
+    }
+
+    /// Publish a service record with a finite TTL.
+    ///
+    /// The record is automatically withdrawn after `ttl_ms` milliseconds.
+    /// Use this for explicitly time-limited runtime announcements where the
+    /// caller manages their own renewal (e.g. a short-lived reservation).
+    ///
+    /// For app-lifetime tracking prefer [`publish_with_owner`]; for permanent
+    /// config-based records use [`publish`].
+    pub fn publish_with_ttl(&self, record: ServiceRecord, ttl_ms: u64) {
+        let ts = current_timestamp_ms();
+        let expires_at = std::time::Instant::now() + Duration::from_millis(ttl_ms);
+        let mut records = self.local_records.lock().unwrap();
+        let existing = records.iter().position(|e| {
+            e.record.announced_prefix == record.announced_prefix
+                && e.record.node_name == record.node_name
+        });
+        info!(
+            prefix       = %record.announced_prefix,
+            node         = %record.node_name,
+            freshness_ms = record.freshness_ms,
+            ttl_ms,
+            "service record published (TTL)",
+        );
+        let entry = RecordEntry {
+            record,
+            published_at_ms: ts,
+            expires_at: Some(expires_at),
+            owner_face: None,
+        };
         if let Some(idx) = existing {
             records[idx] = entry;
         } else {
@@ -201,7 +239,7 @@ impl ServiceDiscoveryProtocol {
             owner_face   = ?owner_face,
             "service record published (owned by face)",
         );
-        let entry = RecordEntry { record, published_at_ms: ts, owner_face: Some(owner_face) };
+        let entry = RecordEntry { record, published_at_ms: ts, expires_at: None, owner_face: Some(owner_face) };
         if let Some(idx) = existing {
             records[idx] = entry;
         } else {
@@ -787,6 +825,16 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
                     face   = ?e.face_id,
                     "ServiceDiscovery: expired auto-FIB entry",
                 );
+            }
+        }
+
+        // Expire local records that have a finite TTL (publish_with_ttl).
+        {
+            let mut local = self.local_records.lock().unwrap();
+            let before = local.len();
+            local.retain(|e| e.expires_at.map_or(true, |exp| now < exp));
+            if before != local.len() {
+                debug!(removed = before - local.len(), "ServiceDiscovery: expired TTL local record(s)");
             }
         }
 
