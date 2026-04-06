@@ -41,16 +41,26 @@ struct Cli {
     #[arg(long)]
     bypass: bool,
 
-    /// NDN face socket path (NDN transport).
+    /// IPC socket path for the NDN management transport.
     ///
+    /// On Unix: path to a Unix domain socket (e.g. `/tmp/ndn-faces.sock`).
+    /// On Windows: a Named Pipe path (e.g. `\\.\pipe\ndn-faces`).
     /// May also be set via $NDN_FACE_SOCK.
-    #[arg(long, env = "NDN_FACE_SOCK", default_value = "/tmp/ndn-faces.sock")]
+    #[arg(
+        long,
+        env = "NDN_FACE_SOCK",
+        default_value_t = ndn_config::ManagementConfig::default().face_socket,
+    )]
     face_socket: String,
 
     /// Unix socket path (bypass transport only).
     ///
     /// May also be set via $NDN_MGMT_SOCK.
-    #[arg(long, env = "NDN_MGMT_SOCK", default_value = "/tmp/ndn-router.sock")]
+    #[arg(
+        long,
+        env = "NDN_MGMT_SOCK",
+        default_value_t = ndn_config::ManagementConfig::default().bypass_socket,
+    )]
     socket: String,
 
     #[command(subcommand)]
@@ -261,7 +271,6 @@ async fn main() -> anyhow::Result<()> {
 
 // ─── NFD transport (primary) ────────────────────────────────────────────────
 
-#[cfg(unix)]
 async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
     use anyhow::Context as _;
 
@@ -439,11 +448,6 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-#[cfg(not(unix))]
-async fn run_nfd(_cli: &Cli) -> anyhow::Result<()> {
-    anyhow::bail!("NDN management transport requires Unix domain sockets")
 }
 
 // ─── Bypass transport (legacy) ────────────────────────────────────────────────
