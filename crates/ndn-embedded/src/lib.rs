@@ -38,6 +38,7 @@
 //! // fw.process_packet(&raw_bytes, incoming_face_id, &mut faces);
 //! // fw.run_one_tick();   // purge expired PIT entries
 //! ```
+#![allow(missing_docs)]
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 

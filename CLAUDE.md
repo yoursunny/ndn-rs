@@ -14,9 +14,9 @@ cargo fmt                      # format
 
 ## Project Overview
 
-**ndn-rs** is a Named Data Networking (NDN) forwarder stack written in Rust (edition 2024). NDN is a content-centric networking architecture where packets are named data objects rather than addressed to endpoints. The full architecture is documented in `docs/design-session.md`.
+**ndn-rs** is a Named Data Networking (NDN) forwarder stack written in Rust (edition 2024). NDN is a content-centric networking architecture where packets are named data objects rather than addressed to endpoints.
 
-The codebase is in early bootstrapping phase — `src/main.rs` is currently a stub. The design document is the authoritative reference for all architectural decisions.
+The architecture is documented in `ARCHITECTURE.md` (root) and detailed design docs live in `docs/`.
 
 ## Architecture
 

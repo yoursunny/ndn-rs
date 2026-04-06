@@ -8,6 +8,8 @@
 //! This allows deploying new strategies at runtime without recompiling
 //! or restarting the forwarder.
 
+#![allow(missing_docs)]
+
 mod host;
 mod wasm_strategy;
 
