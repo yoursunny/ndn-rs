@@ -160,12 +160,21 @@ fn prefixes_overlap(a: &Name, b: &Name) -> bool {
 /// NDN packet TLV: Interest (0x05) or Data (0x06), then a Name TLV (0x07)
 /// immediately as the first child.  This does a minimal parse — just enough
 /// to route the packet; full decode happens in the pipeline.
+///
+/// Handles NDNLPv2 framing: if the first byte is `0x64` (LpPacket), the
+/// fragment is extracted first.  This is necessary because `UdpFace` wraps
+/// every outgoing packet in NDNLPv2.
 fn parse_first_name(raw: &Bytes) -> Option<Name> {
     // Require at least a 2-byte TLV header.
     if raw.len() < 4 {
         return None;
     }
     let pkt_type = raw[0];
+    // NDNLPv2 framing: unwrap the fragment and recurse once.
+    if pkt_type == 0x64 {
+        let fragment = crate::wire::unwrap_lp(raw)?;
+        return parse_first_name(&fragment);
+    }
     if pkt_type != 0x05 && pkt_type != 0x06 {
         return None; // Not an Interest or Data
     }
