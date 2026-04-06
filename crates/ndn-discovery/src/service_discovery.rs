@@ -319,10 +319,21 @@ impl ServiceDiscoveryProtocol {
         }
 
         // Auto-populate FIB with TTL tracking.
+        //
+        // Use the producer's unicast face rather than incoming_face.  Browse
+        // responses arrive on the multicast face (because the remote sends
+        // them back via its own multicast face), and routing data traffic over
+        // the multicast face broadcasts every Interest to all peers.  The
+        // correct nexthop is the unicast face we have for the producer.
         if self.config.auto_populate_fib {
+            let fib_face = ctx.neighbors()
+                .get(&record.node_name)
+                .and_then(|e| e.faces.first().map(|(fid, _, _)| *fid))
+                .unwrap_or(incoming_face);
+
             ctx.add_fib_entry(
                 &record.announced_prefix,
-                incoming_face,
+                fib_face,
                 self.config.auto_fib_cost,
                 PROTOCOL,
             );
@@ -331,15 +342,15 @@ impl ServiceDiscoveryProtocol {
             {
                 let mut auto_fib = self.auto_fib.lock().unwrap();
                 // Replace any existing entry for the same prefix+face.
-                auto_fib.retain(|e| !(e.prefix == record.announced_prefix && e.face_id == incoming_face));
+                auto_fib.retain(|e| !(e.prefix == record.announced_prefix && e.face_id == fib_face));
                 auto_fib.push(AutoFibEntry {
                     prefix: record.announced_prefix.clone(),
-                    face_id: incoming_face,
+                    face_id: fib_face,
                     expires_at,
                 });
             }
             debug!(
-                "ServiceDiscovery: auto-FIB {:?} via face {incoming_face:?} (cost {}, ttl {}ms)",
+                "ServiceDiscovery: auto-FIB {:?} via face {fib_face:?} (cost {}, ttl {}ms)",
                 record.announced_prefix, self.config.auto_fib_cost, ttl_ms
             );
         }
