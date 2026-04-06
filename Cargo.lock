@@ -1442,6 +1442,7 @@ dependencies = [
  "dashmap",
  "ndn-face-net",
  "ndn-packet",
+ "ndn-sync",
  "ndn-tlv",
  "ndn-transport",
  "tokio",
