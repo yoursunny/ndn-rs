@@ -31,6 +31,9 @@
 // genuine false positives from macro expansion; the user-written methods
 // are all safe.
 #![allow(unsafe_op_in_unsafe_fn)]
+// PyO3's #[pymethods] macro generates .into() calls on PyErr that
+// clippy flags as useless_conversion — false positive from macro expansion.
+#![allow(clippy::useless_conversion)]
 
 use std::sync::{Arc, Mutex};
 
@@ -43,7 +46,7 @@ use ndn_app::blocking::{BlockingConsumer, BlockingProducer};
 
 // ── Error conversion ──────────────────────────────────────────────────────────
 
-fn to_py_err(e: AppError) -> PyErr {
+fn py_err(e: AppError) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
@@ -133,7 +136,7 @@ impl Consumer {
     fn new(socket: &str) -> PyResult<Self> {
         BlockingConsumer::connect(socket)
             .map(|inner| Self { inner })
-            .map_err(to_py_err)
+            .map_err(py_err)
     }
 
     /// Fetch the content bytes for a name.
@@ -153,7 +156,7 @@ impl Consumer {
     /// RuntimeError
     ///     On timeout, Nack, or connection error.
     fn get(&mut self, name: &str) -> PyResult<Vec<u8>> {
-        self.inner.get(name).map(|b| b.to_vec()).map_err(to_py_err)
+        self.inner.get(name).map(|b| b.to_vec()).map_err(py_err)
     }
 
     /// Fetch a full :class:`Data` packet for a name.
@@ -169,7 +172,7 @@ impl Consumer {
         self.inner
             .fetch(name)
             .map(Data::from_packet)
-            .map_err(to_py_err)
+            .map_err(py_err)
     }
 }
 
@@ -215,7 +218,7 @@ impl Producer {
     fn new(socket: &str, prefix: &str) -> PyResult<Self> {
         BlockingProducer::connect(socket, prefix)
             .map(|inner| Self { inner })
-            .map_err(to_py_err)
+            .map_err(py_err)
     }
 
     /// Run the producer serve loop.
@@ -256,7 +259,7 @@ impl Producer {
                 })
             })
         })
-        .map_err(to_py_err)
+        .map_err(py_err)
     }
 }
 
