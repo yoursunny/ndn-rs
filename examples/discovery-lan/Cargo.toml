@@ -1,0 +1,21 @@
+[package]
+name = "example-discovery-lan"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "discovery-lan"
+path = "src/main.rs"
+
+[dependencies]
+ndn-packet    = { workspace = true }
+ndn-transport = { workspace = true }
+ndn-engine    = { workspace = true }
+ndn-discovery = { workspace = true }
+ndn-face-net  = { workspace = true }
+tokio         = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tokio-util    = { workspace = true, features = ["rt"] }
+tracing       = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow        = { workspace = true }

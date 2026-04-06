@@ -39,6 +39,7 @@ members = [
     "examples/strategy-composed",
     "examples/cross-layer-enricher",
     "examples/wasm-strategy",
+    "examples/discovery-lan",
 ]
 
 [workspace.package]

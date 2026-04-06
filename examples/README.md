@@ -1,6 +1,12 @@
 # Examples
 
-Runnable examples demonstrating the ndn-rs strategy system.
+Runnable examples demonstrating the ndn-rs strategy and discovery systems.
+
+## Discovery Examples
+
+| Example | Description | Run |
+|---------|-------------|-----|
+| [discovery-lan](discovery-lan/) | LAN neighbor + service discovery over UDP multicast | `cargo run -p example-discovery-lan -- --name /ndn/lan/node-a --prefix /ndn/app/a` |
 
 ## Strategy Examples
 
