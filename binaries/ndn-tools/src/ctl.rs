@@ -11,6 +11,8 @@
 /// ndn-ctl cs info
 /// ndn-ctl neighbors list
 /// ndn-ctl service list
+/// ndn-ctl service browse
+/// ndn-ctl service browse /ndn/sensors
 /// ndn-ctl service announce /ndn/app
 /// ndn-ctl service withdraw /ndn/app
 /// ndn-ctl status
@@ -200,6 +202,11 @@ enum NeighborsAction {
 enum ServiceAction {
     /// List locally announced service prefixes.
     List,
+    /// Browse all known service records (local + received from peers).
+    Browse {
+        /// Optional prefix filter — only show records under this prefix.
+        prefix: Option<String>,
+    },
     /// Announce a service prefix at runtime.
     Announce {
         /// NDN name prefix to announce (e.g. /ndn/app/sensor).
@@ -408,6 +415,18 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
             ServiceAction::List => {
                 let resp = mgmt
                     .service_list()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+            ServiceAction::Browse { prefix } => {
+                let parsed = prefix
+                    .as_ref()
+                    .map(|p| p.parse::<ndn_packet::Name>())
+                    .transpose()
+                    .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?;
+                let resp = mgmt
+                    .service_browse(parsed.as_ref())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 print_control_response(&resp);

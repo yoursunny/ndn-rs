@@ -15,7 +15,7 @@
 /// - **strategy-choice**: `set`, `unset`, `list`
 /// - **cs**: `config`, `info`
 /// - **neighbors**: `list`
-/// - **service**: `list`, `announce`, `withdraw`
+/// - **service**: `list`, `browse`, `announce`, `withdraw`
 /// - **status**: `general`, `shutdown`
 ///
 /// # Source face propagation
@@ -1049,7 +1049,8 @@ fn handle_service(
         }
     };
     match verb_name {
-        v if v == verb::LIST => service_list(sd),
+        v if v == verb::LIST    => service_list(sd),
+        v if v == verb::BROWSE  => service_browse(params, sd),
         v if v == verb::ANNOUNCE => {
             service_announce(params, sd, engine, source_face, discovery_claimed)
         }
@@ -1062,6 +1063,27 @@ fn service_list(sd: &ServiceDiscoveryProtocol) -> ControlResponse {
     let records = sd.local_records();
     let mut text = format!("{} services\n", records.len());
     for r in &records {
+        text.push_str(&format!(
+            "  {}  node={}  freshness={}ms\n",
+            r.announced_prefix, r.node_name, r.freshness_ms,
+        ));
+    }
+    ControlResponse::ok_empty(text)
+}
+
+fn service_browse(params: ControlParameters, sd: &ServiceDiscoveryProtocol) -> ControlResponse {
+    let filter = params.name;
+    let records = sd.all_records();
+    let filtered: Vec<_> = records
+        .iter()
+        .filter(|r| {
+            filter
+                .as_ref()
+                .map_or(true, |p| r.announced_prefix.has_prefix(p))
+        })
+        .collect();
+    let mut text = format!("{} services\n", filtered.len());
+    for r in &filtered {
         text.push_str(&format!(
             "  {}  node={}  freshness={}ms\n",
             r.announced_prefix, r.node_name, r.freshness_ms,

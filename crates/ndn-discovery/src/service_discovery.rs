@@ -87,6 +87,11 @@ pub struct ServiceDiscoveryProtocol {
     claimed: Vec<Name>,
     /// Locally published service records.
     local_records: Mutex<Vec<RecordEntry>>,
+    /// Service records received from remote peers.
+    ///
+    /// Populated by [`handle_sd_data`].  Deduplicated on
+    /// `(announced_prefix, node_name)`: re-receiving a record updates it in-place.
+    peer_records: Mutex<Vec<ServiceRecord>>,
     /// Per-producer rate-limit state.
     rate_limits: Mutex<HashMap<String, ProducerRateLimit>>,
     /// Auto-populated FIB entries pending TTL expiry.
@@ -111,6 +116,7 @@ impl ServiceDiscoveryProtocol {
             config,
             claimed,
             local_records: Mutex::new(Vec::new()),
+            peer_records: Mutex::new(Vec::new()),
             rate_limits: Mutex::new(HashMap::new()),
             auto_fib: Mutex::new(Vec::new()),
         }
@@ -167,6 +173,27 @@ impl ServiceDiscoveryProtocol {
             .iter()
             .map(|e| e.record.clone())
             .collect()
+    }
+
+    /// Return a snapshot of all known service records — both local and
+    /// records received from remote peers.
+    ///
+    /// Deduplicated: if the same `(announced_prefix, node_name)` pair appears
+    /// in both tables, the local version takes precedence.
+    pub fn all_records(&self) -> Vec<ServiceRecord> {
+        let local = self.local_records.lock().unwrap();
+        let peers = self.peer_records.lock().unwrap();
+
+        let mut out: Vec<ServiceRecord> = local.iter().map(|e| e.record.clone()).collect();
+        for pr in peers.iter() {
+            let already = out.iter().any(|r| {
+                r.announced_prefix == pr.announced_prefix && r.node_name == pr.node_name
+            });
+            if !already {
+                out.push(pr.clone());
+            }
+        }
+        out
     }
 
     // ── Inbound handlers ──────────────────────────────────────────────────────
@@ -262,6 +289,18 @@ impl ServiceDiscoveryProtocol {
         if !self.check_rate_limit(&record.node_name, ctx.now()) {
             debug!("ServiceDiscovery: rate-limiting producer {:?}", record.node_name);
             return true;
+        }
+
+        // Cache the peer record for browse queries.
+        {
+            let mut peer_recs = self.peer_records.lock().unwrap();
+            if let Some(idx) = peer_recs.iter().position(|r| {
+                r.announced_prefix == record.announced_prefix && r.node_name == record.node_name
+            }) {
+                peer_recs[idx] = record.clone();
+            } else {
+                peer_recs.push(record.clone());
+            }
         }
 
         // Auto-populate FIB with TTL tracking.
