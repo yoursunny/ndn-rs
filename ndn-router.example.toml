@@ -93,8 +93,12 @@ port = 56363
 # Default: (absent — OS picks the default interface)
 # interface = "eth0"
 
-# Raw Ethernet multicast face (requires CAP_NET_RAW / sudo on Linux).
-# Uses EtherType 0x8624 (NDN assigned).
+# Raw Ethernet multicast face (requires CAP_NET_RAW / sudo on Linux,
+# root on macOS).  Uses EtherType 0x8624 (IANA-assigned NDN EtherType).
+# To enable Ethernet neighbor discovery, also set:
+#   [discovery]
+#   discovery_transport = "ether"   # or "both" for UDP + Ethernet
+#   ether_iface = "eth0"
 # [[face]]
 # kind = "ether-multicast"
 # interface = "eth0"    # required
@@ -291,6 +295,21 @@ served_prefixes = ["/ndn/site/sensors", "/ndn/site/video"]
 # Enables multi-hop service discovery across router boundaries.
 # Default: false
 # relay_records = false
+
+# Discovery transport selection — which link-layer(s) to run ND on.
+#   "udp"   — UDP multicast only (224.0.23.170:56363)       (default)
+#   "ether" — raw Ethernet multicast only (EtherType 0x8624)
+#   "both"  — UDP and Ethernet simultaneously
+#
+# "ether" and "both" require at least one [[face]] with kind = "ether-multicast"
+# and CAP_NET_RAW (Linux) or root (macOS).
+# Default: "udp"
+# discovery_transport = "udp"
+
+# Network interface for Ethernet neighbor discovery.
+# Required when discovery_transport is "ether" or "both".
+# Must match the interface name in the [[face]] ether-multicast entry.
+# ether_iface = "eth0"
 
 # PIB path for persistent hello-signing keys.
 # Default: ~/.ndn/pib.db

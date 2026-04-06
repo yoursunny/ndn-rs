@@ -207,14 +207,16 @@ async fn main() -> Result<()> {
     //
     // If [discovery] node_name is set, build CompositeDiscovery(ND + SD) and
     // attach it to the engine.  Multicast face IDs are pre-allocated here so
-    // they can be handed to UdpNeighborDiscovery before build(); the actual
-    // face sockets are created after build() in the face loop below.
+    // they can be handed to UdpNeighborDiscovery / EtherNeighborDiscovery before
+    // build(); the actual face sockets are created after build() in the face loop.
     //
     // `discovery_sd` is kept alive alongside the engine so the management
     // handler can call publish()/withdraw() at runtime (Task 6).
     let discovery_sd: Option<std::sync::Arc<ndn_discovery::ServiceDiscoveryProtocol>>;
     let discovery_claimed: Vec<ndn_packet::Name>;
     let pre_allocated_multicast: Vec<(ndn_transport::FaceId, usize)>; // (face_id, config_index)
+    // Pre-allocated EtherMulticast face IDs: (face_id, config_index).
+    let pre_allocated_ether_mc: Vec<(ndn_transport::FaceId, usize)>;
 
     if fwd_config.discovery.enabled() {
         let node_name_str = fwd_config.discovery.resolved_node_name()
@@ -222,17 +224,38 @@ async fn main() -> Result<()> {
         let node_name: ndn_packet::Name = node_name_str.parse()
             .map_err(|e| anyhow::anyhow!("invalid discovery node_name: {e}"))?;
 
-        // Pre-allocate a FaceId for each multicast face in config.
+        // Determine which transports to run discovery on.
+        let disc_transport = fwd_config.discovery.discovery_transport
+            .as_deref()
+            .unwrap_or("udp");
+        let use_udp = disc_transport == "udp" || disc_transport == "both";
+        let use_ether = disc_transport == "ether" || disc_transport == "both";
+
+        // Pre-allocate a FaceId for each UDP multicast face in config.
         let mut multicast_ids: Vec<ndn_transport::FaceId> = Vec::new();
         let mut mc_map: Vec<(ndn_transport::FaceId, usize)> = Vec::new();
-        for (idx, face_cfg) in fwd_config.faces.iter().enumerate() {
-            if matches!(face_cfg, ndn_config::FaceConfig::Multicast { .. }) {
-                let id = builder.alloc_face_id();
-                multicast_ids.push(id);
-                mc_map.push((id, idx));
+        if use_udp {
+            for (idx, face_cfg) in fwd_config.faces.iter().enumerate() {
+                if matches!(face_cfg, ndn_config::FaceConfig::Multicast { .. }) {
+                    let id = builder.alloc_face_id();
+                    multicast_ids.push(id);
+                    mc_map.push((id, idx));
+                }
             }
         }
         pre_allocated_multicast = mc_map;
+
+        // Pre-allocate a FaceId for each EtherMulticast face in config.
+        let mut ether_mc_map: Vec<(ndn_transport::FaceId, usize)> = Vec::new();
+        if use_ether {
+            for (idx, face_cfg) in fwd_config.faces.iter().enumerate() {
+                if matches!(face_cfg, ndn_config::FaceConfig::EtherMulticast { .. }) {
+                    let id = builder.alloc_face_id();
+                    ether_mc_map.push((id, idx));
+                }
+            }
+        }
+        pre_allocated_ether_mc = ether_mc_map;
 
         // Build DiscoveryConfig from profile + overrides.
         let profile_name = fwd_config.discovery.profile.as_deref().unwrap_or("lan");
@@ -261,26 +284,64 @@ async fn main() -> Result<()> {
             disc_cfg.gossip_fanout = v;
         }
 
-        // Determine the UDP unicast listen port so it can be advertised in
-        // hellos.  Peers use this port to create a true unicast face instead
-        // of pointing at the multicast source port (which would send data as
-        // multicast).  Default to 6363 (the IANA-assigned NDN port).
-        let unicast_port: u16 = fwd_config.faces.iter()
-            .find_map(|f| match f {
-                ndn_config::FaceConfig::Udp { bind, remote: None } => {
-                    bind.as_deref().unwrap_or("0.0.0.0:6363")
-                        .parse::<std::net::SocketAddr>().ok()
-                        .map(|a| a.port())
-                }
-                _ => None,
-            })
-            .unwrap_or(6363);
+        let mut protocols: Vec<std::sync::Arc<dyn ndn_discovery::DiscoveryProtocol>> = Vec::new();
 
-        let nd = ndn_discovery::UdpNeighborDiscovery::new_multi(
-            multicast_ids,
-            node_name.clone(),
-            disc_cfg,
-        ).with_unicast_port(unicast_port);
+        // ── UDP neighbor discovery ─────────────────────────────────────────────
+        if use_udp {
+            // Determine the UDP unicast listen port so it can be advertised in
+            // hellos.  Peers use this port to create a true unicast face instead
+            // of pointing at the multicast source port (which would send data as
+            // multicast).  Default to 6363 (the IANA-assigned NDN port).
+            let unicast_port: u16 = fwd_config.faces.iter()
+                .find_map(|f| match f {
+                    ndn_config::FaceConfig::Udp { bind, remote: None } => {
+                        bind.as_deref().unwrap_or("0.0.0.0:6363")
+                            .parse::<std::net::SocketAddr>().ok()
+                            .map(|a| a.port())
+                    }
+                    _ => None,
+                })
+                .unwrap_or(6363);
+
+            let nd = ndn_discovery::UdpNeighborDiscovery::new_multi(
+                multicast_ids,
+                node_name.clone(),
+                disc_cfg.clone(),
+            ).with_unicast_port(unicast_port);
+            protocols.push(std::sync::Arc::new(nd));
+            tracing::info!(node=%node_name, "UDP neighbor discovery enabled");
+        }
+
+        // ── Ethernet neighbor discovery (Linux only) ───────────────────────────
+        #[cfg(target_os = "linux")]
+        if use_ether {
+            for (ether_id, idx) in &pre_allocated_ether_mc {
+                let iface = match &fwd_config.faces[*idx] {
+                    ndn_config::FaceConfig::EtherMulticast { interface } => interface.as_str(),
+                    _ => unreachable!(),
+                };
+                match ndn_face_l2::get_interface_mac(iface) {
+                    Ok(local_mac) => {
+                        let ether_nd = ndn_face_l2::EtherNeighborDiscovery::new_with_config(
+                            *ether_id,
+                            iface,
+                            node_name.clone(),
+                            local_mac,
+                            disc_cfg.clone(),
+                        );
+                        protocols.push(std::sync::Arc::new(ether_nd));
+                        tracing::info!(iface=%iface, node=%node_name, "Ethernet neighbor discovery enabled");
+                    }
+                    Err(e) => {
+                        tracing::warn!(iface=%iface, error=%e, "failed to get interface MAC, skipping Ethernet ND");
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        if use_ether {
+            tracing::warn!("Ethernet neighbor discovery is only supported on Linux; ignoring discovery_transport=ether/both");
+        }
 
         let mut svc_cfg = ndn_discovery::ServiceDiscoveryConfig::default();
         if let Some(v) = fwd_config.discovery.relay_records {
@@ -308,21 +369,20 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        protocols.push(std::sync::Arc::clone(&sd) as std::sync::Arc<dyn ndn_discovery::DiscoveryProtocol>);
 
-        let composite = ndn_discovery::CompositeDiscovery::new(vec![
-            std::sync::Arc::new(nd) as std::sync::Arc<dyn ndn_discovery::DiscoveryProtocol>,
-            std::sync::Arc::clone(&sd) as std::sync::Arc<dyn ndn_discovery::DiscoveryProtocol>,
-        ])
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let composite = ndn_discovery::CompositeDiscovery::new(protocols)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         // Collect all claimed prefixes from child protocols before the composite
         // is consumed by the builder (needed for management security enforcement).
         let claimed: Vec<ndn_packet::Name> = composite.all_claimed_prefixes();
         builder = builder.discovery(composite);
         discovery_sd = Some(sd);
         discovery_claimed = claimed;
-        tracing::info!(node=%node_name, "discovery enabled");
+        tracing::info!(node=%node_name, transport=%disc_transport, "discovery enabled");
     } else {
         pre_allocated_multicast = Vec::new();
+        pre_allocated_ether_mc = Vec::new();
         discovery_sd = None;
         discovery_claimed = Vec::new();
     }
@@ -476,7 +536,13 @@ async fn main() -> Result<()> {
             ndn_config::FaceConfig::EtherMulticast { interface } => {
                 #[cfg(target_os = "linux")]
                 {
-                    let id = engine.faces().alloc_id();
+                    // Use pre-allocated ID if EtherND reserved one for this
+                    // config index; otherwise allocate a fresh one.
+                    let id = pre_allocated_ether_mc
+                        .iter()
+                        .find(|(_, ci)| *ci == face_idx)
+                        .map(|(id, _)| *id)
+                        .unwrap_or_else(|| engine.faces().alloc_id());
                     match ndn_face_l2::MulticastEtherFace::new(id, interface) {
                         Ok(face) => {
                             let c = cancel.child_token();
