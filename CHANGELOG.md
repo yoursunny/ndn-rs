@@ -12,6 +12,147 @@ bootstrapping phase and all APIs should be considered unstable.
 
 ### Added
 
+#### Gossip module: `EpidemicGossip` and `SvsServiceDiscovery` (`ndn-discovery/src/gossip/`)
+
+Added `crates/ndn-discovery/src/gossip/`, a new module providing two
+`DiscoveryProtocol` implementations for network-wide state dissemination:
+
+**`EpidemicGossip`** (`gossip/epidemic.rs`) — pull-gossip for neighbor state:
+- Claims `/ndn/local/nd/gossip/`
+- Publishes a neighbor snapshot under `/ndn/local/nd/gossip/<node-name>/<seq>`
+  every 5 s; payload is a sequence of `Name TLV`s for each Established or Stale
+  neighbor (no face IDs — those are link-local and meaningless to remote nodes)
+- Subscribes to established peers by expressing `CanBePrefix=true` Interests
+  for `/ndn/local/nd/gossip/<peer-name>/`; respects the `gossip_fanout` config
+  field to cap the number of subscriptions per tick
+- On receiving a gossip Data: inserts unknown neighbor names as
+  `NeighborState::Probing` entries so the normal hello state machine takes over
+  confirmation
+
+**`SvsServiceDiscovery`** (`gossip/svs_gossip.rs`) — SVS-backed push service
+record notifications:
+- Claims `/ndn/local/sd/updates/` (the SVS sync group for service records)
+- Joins the group via `ndn_sync::join_svs_group` at construction time, spawning
+  an async background task; bridge to synchronous `DiscoveryProtocol` hooks is
+  via two `tokio::sync::mpsc` channels
+- `on_inbound`: non-blocking `try_send` of incoming SVS Sync Interests into the
+  background task's receive channel
+- `on_tick`: drains both channels with `try_recv()` — forwards outgoing Sync
+  Interests to all reachable neighbor faces; for each `SyncUpdate` gap expresses
+  fetch Interests for the missing service record sequence numbers
+
+**Supporting changes:**
+- `scope.rs`: added `gossip_prefix()` → `/ndn/local/nd/gossip`
+- `ndn-discovery/Cargo.toml`: added `ndn-sync` dependency
+- `ndn-sync/Cargo.toml`: added `rt` and `macros` Tokio features (needed for
+  `tokio::spawn` and `tokio::select!` in the SVS background task)
+- `lib.rs`: exported `gossip` module, `EpidemicGossip`, `SvsServiceDiscovery`,
+  `gossip_prefix`
+
+#### `NeighborState` variant rename: `Reachable`→`Established`, `Failing`→`Stale`, `Dead`→`Absent`
+
+Renamed the three non-`Probing` states to match the names used throughout
+`docs/discovery.md` and the state-machine diagram:
+
+- `Reachable { last_seen }` → `Established { last_seen }`
+- `Failing { miss_count, last_seen }` → `Stale { miss_count, last_seen }`
+- `Dead` → `Absent`
+
+`NeighborEntry::is_reachable()` updated to match `Established`.
+
+#### `DiscoveryProtocol::tick_interval()` — per-protocol tick cadence
+
+Added a `tick_interval() -> Duration` method (default: 100 ms) to
+`DiscoveryProtocol`.  The engine's discovery tick task now reads this at startup
+and drives `on_tick` at the protocol's preferred cadence instead of a hardcoded
+100 ms.  High-mobility profiles can use 20–50 ms; static deployments can use 1 s.
+
+#### SWIM indirect probing and gossip in `UdpNeighborDiscovery`
+
+Completed the SWIM state machine and gossip piggybacking in `UdpNeighborDiscovery`:
+
+- **`handle_direct_probe_interest`** — responds to
+  `/ndn/local/nd/probe/direct/<target>/<nonce>` with a probe-ack Data if this
+  node is the target
+- **`handle_via_probe_interest`** — responds to
+  `/ndn/local/nd/probe/via/<intermediary>/<target>/<nonce>` by relaying a direct
+  probe Interest on behalf of the requester; records the relay in `relay_probes`
+- **`handle_probe_ack`** — disambiguates direct acks from relay acks by nonce;
+  marks the probed neighbor `Established` or clears `Probing` entry on success
+- **SWIM probe timeouts in `on_tick`** — on direct-probe timeout, dispatches K
+  indirect probes via random established neighbors (K = `swim_indirect_fanout`)
+- **SWIM diff `Add` entries → `NeighborState::Probing`** — previously SWIM diffs
+  only triggered broadcasts; now unknown Add entries immediately create `Probing`
+  state so the hello state machine confirms them
+- **FreshnessPeriod fix** — hello Data `FreshnessPeriod` was hardcoded to 0;
+  now set to `hello_interval_base × 2` (spec-required)
+- **`relay_records` implemented** — when `ServiceDiscoveryConfig::relay_records`
+  is true, incoming service record Data is forwarded to all other established
+  peers (previously the field existed but had no effect)
+
+#### SWIM indirect probing and gossip in `EtherNeighborDiscovery`
+
+Brought `EtherNeighborDiscovery` (`ndn-face-l2`) to full feature parity with
+`UdpNeighborDiscovery`:
+
+- Added `swim_probes` and `relay_probes` hash maps for tracking outstanding
+  direct and relay probe state
+- Implemented `handle_direct_probe_interest`, `handle_via_probe_interest`,
+  `handle_probe_ack` with the same logic as the UDP counterpart
+- `on_tick` now schedules SWIM direct probes for stale neighbors and dispatches
+  indirect probes on timeout, in addition to the K-gossip unicast sweep
+- Probe prefixes added to `claimed` at construction when SWIM is enabled
+- `FreshnessPeriod` and `InterestLifetime` corrected from hardcoded values to
+  `hello_interval_base × 2`
+- `tick_interval()` now returns `self.config.tick_interval`
+- SWIM diff `Add` entries create `Probing` state (same fix as UDP)
+
+#### Source address propagation: `Face::recv_with_addr()` and dispatcher wiring
+
+Enabled the discovery layer to learn the UDP source address of inbound hello
+packets without embedding addresses in NDN payloads:
+
+- **`Face::recv_with_addr()`** — new default method on `Face` returning
+  `(Bytes, Option<SocketAddr>)`; the base implementation returns `None`
+- **`ErasedFace::recv_bytes_with_addr()`** — object-safe boxed-future version
+  on the erased trait; blanket impl delegates to `Face::recv_with_addr`
+- **`MulticastUdpFace`** — overrides `recv_with_addr()` to return the UDP source
+  address alongside the packet bytes
+- **Dispatcher** — `run_face_reader` now calls `recv_bytes_with_addr()` and
+  passes `InboundMeta::udp(addr)` / `InboundMeta::none()` to `on_inbound`
+
+#### Link-local scope enforcement in `StrategyStage`
+
+`/ndn/local/` packets are now prevented from leaking onto non-local faces:
+
+- In `ForwardingAction::Forward` handling, when the Interest name has prefix
+  `/ndn/local/`, nexthops are filtered to faces whose `FaceKind::scope()`
+  returns `FaceScope::Local`
+- If all nexthops are filtered out, the pipeline returns `Nack(NoRoute)` instead
+  of forwarding
+- Mirrors IPv6 `fe80::/10` link-local address semantics
+
+#### Auto-FIB TTL expiry in `ServiceDiscoveryProtocol`
+
+Auto-populated FIB entries (from incoming service record Data) now expire:
+
+- Each auto-populated entry is tracked with `expires_at = freshness_period ×
+  auto_fib_ttl_multiplier` (config field, default 2.0)
+- `on_tick` removes expired entries via `ctx.remove_fib_entry`
+
+#### Single-peer query for `/ndn/local/nd/peers/<node-name>`
+
+`ServiceDiscoveryProtocol` now handles single-peer Interest queries in addition
+to the full peer-list query:
+
+- Interest for `/ndn/local/nd/peers/<node-name>` responds with a single-entry
+  peer list if the named neighbor is known; Nacks with `NoRoute` otherwise
+- Existing full-list response for `/ndn/local/nd/peers` is unchanged
+
+---
+
+### Added
+
 #### Spec-compliant NDN neighbor discovery hello format
 
 Migrated `EtherNeighborDiscovery` and `UdpNeighborDiscovery` from a custom
