@@ -119,12 +119,12 @@ impl Data {
 ///
 /// Examples
 /// --------
-/// ::
-///
-///     c = ndn_rs.Consumer("/tmp/ndn-faces.sock")
-///     raw   = c.get("/ndn/sensor/temperature")   # bytes
-///     data  = c.fetch("/ndn/sensor/temperature")  # Data object
-///     print(data.name, data.content)
+/// ```python
+/// c = ndn_rs.Consumer("/tmp/ndn-faces.sock")
+/// raw   = c.get("/ndn/sensor/temperature")   # bytes
+/// data  = c.fetch("/ndn/sensor/temperature")  # Data object
+/// print(data.name, data.content)
+/// ```
 #[pyclass]
 struct Consumer {
     inner: BlockingConsumer,
@@ -197,16 +197,16 @@ impl Consumer {
 ///
 /// Examples
 /// --------
-/// ::
+/// ```python
+/// p = ndn_rs.Producer("/tmp/ndn-faces.sock", "/ndn/sensor")
 ///
-///     p = ndn_rs.Producer("/tmp/ndn-faces.sock", "/ndn/sensor")
+/// def handler(name: str) -> bytes | None:
+///     if name.endswith("/temperature"):
+///         return b"23.5"
+///     return None   # drop the Interest
 ///
-///     def handler(name: str) -> bytes | None:
-///         if name.endswith("/temperature"):
-///             return b"23.5"
-///         return None   # drop the Interest
-///
-///     p.serve(handler)  # blocks until connection closes
+/// p.serve(handler)  # blocks until connection closes
+/// ```
 #[pyclass]
 struct Producer {
     inner: BlockingProducer,
