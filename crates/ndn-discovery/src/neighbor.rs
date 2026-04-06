@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use ndn_packet::Name;
 use ndn_transport::FaceId;
+use tracing::{debug, info};
 
 use crate::MacAddr;
 
@@ -109,6 +110,15 @@ pub enum NeighborUpdate {
     Remove(Name),
 }
 
+fn state_label(s: &NeighborState) -> &'static str {
+    match s {
+        NeighborState::Probing { .. }    => "Probing",
+        NeighborState::Established { .. } => "Established",
+        NeighborState::Stale { .. }      => "Stale",
+        NeighborState::Absent            => "Absent",
+    }
+}
+
 /// Engine-owned, lock-protected neighbor table.
 ///
 /// Wrapped in `Arc<NeighborTable>` so both the engine and the
@@ -129,10 +139,29 @@ impl NeighborTable {
         let mut map = self.inner.lock().unwrap();
         match update {
             NeighborUpdate::Upsert(entry) => {
-                map.insert(entry.node_name.clone(), entry);
+                let is_new = !map.contains_key(&entry.node_name);
+                let label = state_label(&entry.state);
+                let name = entry.node_name.clone();
+                map.insert(name.clone(), entry);
+                if is_new {
+                    debug!(peer = %name, state = label, "neighbor added to table");
+                }
             }
             NeighborUpdate::SetState { name, state } => {
                 if let Some(entry) = map.get_mut(&name) {
+                    let from = state_label(&entry.state);
+                    let to = state_label(&state);
+                    if from != to {
+                        // State-variant transitions are meaningful lifecycle events;
+                        // same-variant updates (e.g. refreshing last_seen) are silent.
+                        if matches!(state, NeighborState::Established { .. }) {
+                            info!(peer = %name, %from, %to, "neighbor established");
+                        } else if matches!(state, NeighborState::Stale { .. }) {
+                            info!(peer = %name, %from, %to, "neighbor went stale");
+                        } else {
+                            debug!(peer = %name, %from, %to, "neighbor state →");
+                        }
+                    }
                     entry.state = state;
                 }
             }
@@ -164,7 +193,9 @@ impl NeighborTable {
                 }
             }
             NeighborUpdate::Remove(name) => {
-                map.remove(&name);
+                if map.remove(&name).is_some() {
+                    info!(peer = %name, "neighbor removed from table");
+                }
             }
         }
     }

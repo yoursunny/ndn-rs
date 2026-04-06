@@ -34,7 +34,7 @@ use bytes::Bytes;
 use ndn_packet::{Name, tlv_type};
 use ndn_tlv::TlvWriter;
 use ndn_transport::FaceId;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::{DiscoveryScope, ServiceDiscoveryConfig, ServiceValidationPolicy};
 use crate::context::DiscoveryContext;
@@ -133,6 +133,12 @@ impl ServiceDiscoveryProtocol {
             e.record.announced_prefix == record.announced_prefix
                 && e.record.node_name == record.node_name
         });
+        info!(
+            prefix = %record.announced_prefix,
+            node   = %record.node_name,
+            freshness_ms = record.freshness_ms,
+            "service record published",
+        );
         let entry = RecordEntry { record, published_at_ms: ts };
         if let Some(idx) = existing {
             records[idx] = entry;
@@ -144,7 +150,13 @@ impl ServiceDiscoveryProtocol {
     /// Withdraw a service record.
     pub fn withdraw(&self, announced_prefix: &Name) {
         let mut records = self.local_records.lock().unwrap();
+        let before = records.len();
         records.retain(|e| &e.record.announced_prefix != announced_prefix);
+        if records.len() < before {
+            info!(prefix = %announced_prefix, "service record withdrawn");
+        } else {
+            debug!(prefix = %announced_prefix, "service record withdraw: prefix not found (no-op)");
+        }
     }
 
     /// Return a snapshot of locally published service records.

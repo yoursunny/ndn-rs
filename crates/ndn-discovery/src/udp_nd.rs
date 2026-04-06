@@ -51,7 +51,7 @@ use ndn_packet::encode::DataBuilder;
 use ndn_security::{Ed25519Signer, Ed25519Verifier, Signer, VerifyOutcome};
 use ndn_tlv::TlvWriter;
 use ndn_transport::FaceId;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     DiffEntry, DiscoveryContext, DiscoveryProtocol, HelloPayload, InboundMeta,
@@ -314,8 +314,12 @@ impl UdpNeighborDiscovery {
         });
         if let Some(sent) = send_time {
             let rtt = sent.elapsed();
-            ctx.update_neighbor(NeighborUpdate::UpdateRtt { name: responder_name.clone(), rtt_us: rtt.as_micros().min(u32::MAX as u128) as u32 });
+            let rtt_us = rtt.as_micros().min(u32::MAX as u128) as u32;
+            debug!(peer = %responder_name, addr = %responder_addr, rtt_us, "UdpND: hello response accepted");
+            ctx.update_neighbor(NeighborUpdate::UpdateRtt { name: responder_name.clone(), rtt_us });
             self.strategy.lock().unwrap().on_probe_success(rtt);
+        } else {
+            debug!(peer = %responder_name, addr = %responder_addr, "UdpND: hello response accepted (no RTT — unsolicited)");
         }
         if self.config.prefix_announcement == PrefixAnnouncementMode::InHello {
             if let Some(face_id) = peer_face_id {
@@ -486,7 +490,13 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
 
     fn on_face_down(&self, face_id: FaceId, _ctx: &dyn DiscoveryContext) {
         let mut st = self.state.lock().unwrap();
+        let removed = st.peer_faces.iter().filter(|(_, fid)| **fid == face_id).count();
         st.peer_faces.retain(|_, fid| *fid != face_id);
+        if removed > 0 {
+            debug!(face = ?face_id, peers_removed = removed, "UdpND: face down, removed peer bindings");
+        } else {
+            debug!(face = ?face_id, "UdpND: face down");
+        }
     }
 
     fn on_inbound(&self, raw: &Bytes, incoming_face: FaceId, meta: &InboundMeta, ctx: &dyn DiscoveryContext) -> bool {
@@ -548,6 +558,8 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
             match &entry.state {
                 NeighborState::Established { last_seen } => {
                     if now.duration_since(*last_seen) > liveness_timeout {
+                        let idle_ms = now.duration_since(*last_seen).as_millis();
+                        debug!(peer = %entry.node_name, idle_ms, "UdpND: liveness timeout, sending probe");
                         ctx.update_neighbor(NeighborUpdate::SetState {
                             name: entry.node_name.clone(),
                             state: NeighborState::Stale { miss_count: 1, last_seen: *last_seen },
@@ -577,7 +589,7 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
                 }
                 NeighborState::Stale { miss_count, last_seen } => {
                     if u32::from(*miss_count) >= miss_limit {
-                        debug!("UdpND: peer {} is Absent", entry.node_name);
+                        info!(peer = %entry.node_name, miss_count, "UdpND: peer unreachable, removing");
                         {
                             let mut st = self.state.lock().unwrap();
                             st.peer_faces.retain(|_, fid| !entry.faces.iter().any(|(f, _, _)| f == fid));
@@ -590,9 +602,11 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
                         }
                         ctx.update_neighbor(NeighborUpdate::Remove(entry.node_name.clone()));
                     } else if now.duration_since(*last_seen) > liveness_timeout {
+                        let new_miss = miss_count + 1;
+                        debug!(peer = %entry.node_name, miss_count = new_miss, limit = miss_limit, "UdpND: missed hello, incrementing miss count");
                         ctx.update_neighbor(NeighborUpdate::SetState {
                             name: entry.node_name.clone(),
-                            state: NeighborState::Stale { miss_count: miss_count + 1, last_seen: *last_seen },
+                            state: NeighborState::Stale { miss_count: new_miss, last_seen: *last_seen },
                         });
                     }
                 }
@@ -605,6 +619,7 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
             for entry in all.iter().filter(|e| e.is_reachable()) {
                 if let Some((face_id, _, _)) = entry.faces.first() {
                     let nonce = self.nonce_counter.fetch_add(1, Ordering::Relaxed);
+                    trace!(peer = %entry.node_name, face = ?face_id, nonce, "UdpND: SWIM direct probe →");
                     ctx.send_on(*face_id, build_direct_probe(&entry.node_name, nonce));
                     self.state.lock().unwrap().swim_probes.insert(nonce, (now, entry.node_name.clone()));
                 }
@@ -641,11 +656,12 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
                     .filter(|e| e.is_reachable() && e.node_name != target)
                     .take(k)
                     .collect();
+                debug!(peer = %target, via_count = intermediaries.len(), "UdpND: SWIM direct probe timed out, dispatching indirect probes");
                 for via in intermediaries {
                     let nonce = self.nonce_counter.fetch_add(1, Ordering::Relaxed);
                     if let Some((face_id, _, _)) = via.faces.first() {
                         ctx.send_on(*face_id, build_indirect_probe(&via.node_name, &target, nonce));
-                        debug!("UdpND: SWIM indirect probe -> {:?} via {:?}", target, via.node_name);
+                        trace!(peer = %target, via = %via.node_name, nonce, "UdpND: SWIM indirect probe →");
                     }
                 }
                 self.strategy.lock().unwrap().on_probe_timeout();
