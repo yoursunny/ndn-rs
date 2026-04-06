@@ -26,7 +26,7 @@
 //! PEER-ENTRY  ::= 0xE0 length Name
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -96,11 +96,18 @@ pub struct ServiceDiscoveryProtocol {
     rate_limits: Mutex<HashMap<String, ProducerRateLimit>>,
     /// Auto-populated FIB entries pending TTL expiry.
     auto_fib: Mutex<Vec<AutoFibEntry>>,
-    /// Timestamp of the last proactive browse broadcast to established neighbors.
+    /// Neighbors whose faces have already received an initial browse Interest.
     ///
-    /// Used by `on_tick()` to throttle periodic re-browse so that runtime
-    /// service announcements (e.g. ndn-iperf starting after neighbor
-    /// establishment) propagate to peers within one browse interval.
+    /// When `on_tick()` first sees a neighbor in `Established` state its name
+    /// is added here and a browse Interest is sent immediately (no interval
+    /// wait).  Periodic re-browse is then throttled by `last_browse`.
+    ///
+    /// Using the neighbor table (not raw face IDs) means management and app
+    /// faces — which are not NDN neighbors — are never browsed, avoiding the
+    /// "malformed management response" error when ndn-ctl connects.
+    browsed_neighbors: Mutex<HashSet<Name>>,
+    /// Timestamp of the last periodic browse broadcast to all established
+    /// neighbors.  Used to throttle re-browse in `on_tick()`.
     last_browse: Mutex<Option<Instant>>,
 }
 
@@ -125,6 +132,7 @@ impl ServiceDiscoveryProtocol {
             peer_records: Mutex::new(Vec::new()),
             rate_limits: Mutex::new(HashMap::new()),
             auto_fib: Mutex::new(Vec::new()),
+            browsed_neighbors: Mutex::new(HashSet::new()),
             last_browse: Mutex::new(None),
         }
     }
@@ -455,24 +463,61 @@ impl ServiceDiscoveryProtocol {
         trace!(face = ?face_id, "ServiceDiscovery: sent browse Interest");
     }
 
-    /// Send browse Interests to every face of every established neighbor.
-    /// Records `now` as the last-browse timestamp to throttle calls from
-    /// `on_tick()`.
-    fn browse_all_neighbors(&self, now: Instant, ctx: &dyn DiscoveryContext) {
+    /// Browse established neighbors, distinguishing two cases:
+    ///
+    /// - **Newly established** (not yet in `browsed_neighbors`): browse
+    ///   immediately regardless of the periodic interval.
+    /// - **Already browsed**: re-browse only if `browse_interval` has elapsed
+    ///   since `last_browse`.
+    ///
+    /// Using the neighbor table (not raw face IDs) ensures that management
+    /// and app faces are never sent unsolicited browse Interests.
+    fn browse_neighbors(&self, now: Instant, browse_interval: Duration, ctx: &dyn DiscoveryContext) {
         let neighbors = ctx.neighbors().all();
-        let mut count = 0usize;
+        let mut seen = self.browsed_neighbors.lock().unwrap();
+        let periodic_due = self.last_browse.lock().unwrap()
+            .map_or(true, |t| now.duration_since(t) >= browse_interval);
+
+        let mut new_count = 0usize;
+        let mut refresh_count = 0usize;
+
         for entry in &neighbors {
-            if entry.is_reachable() {
+            if !entry.is_reachable() {
+                continue;
+            }
+            let is_new = seen.insert(entry.node_name.clone());
+            if is_new {
+                // First time we see this neighbor as Established — browse now.
                 for (face_id, _, _) in &entry.faces {
                     self.send_browse_interest(*face_id, ctx);
-                    count += 1;
                 }
+                new_count += 1;
+            } else if periodic_due {
+                // Periodic refresh for already-known neighbors.
+                for (face_id, _, _) in &entry.faces {
+                    self.send_browse_interest(*face_id, ctx);
+                }
+                refresh_count += 1;
             }
         }
-        *self.last_browse.lock().unwrap() = Some(now);
-        if count > 0 {
-            debug!(peers = count, "ServiceDiscovery: browse refresh sent to established neighbors");
+
+        if periodic_due {
+            *self.last_browse.lock().unwrap() = Some(now);
         }
+        if new_count > 0 {
+            debug!(peers = new_count, "ServiceDiscovery: initial browse sent to new neighbors");
+        }
+        if refresh_count > 0 {
+            debug!(peers = refresh_count, "ServiceDiscovery: periodic browse refresh sent");
+        }
+
+        // Prune departed neighbors from the seen set so they get a fresh
+        // initial browse if they reconnect later.
+        let active: HashSet<Name> = neighbors.iter()
+            .filter(|e| e.is_reachable())
+            .map(|e| e.node_name.clone())
+            .collect();
+        seen.retain(|n| active.contains(n));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -539,11 +584,11 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
 
     fn claimed_prefixes(&self) -> &[Name] { &self.claimed }
 
-    fn on_face_up(&self, face_id: FaceId, ctx: &dyn DiscoveryContext) {
-        // Immediately probe the peer for its service records.  The peer's SD
-        // protocol will respond with its local records as Data packets, which
-        // handle_sd_data() will pick up to auto-populate our FIB.
-        self.send_browse_interest(face_id, ctx);
+    fn on_face_up(&self, _face_id: FaceId, _ctx: &dyn DiscoveryContext) {
+        // Browse is driven by on_tick() against the neighbor table, not here.
+        // on_face_up fires for ALL faces including management/app IPC faces;
+        // sending a browse Interest to those faces corrupts the management
+        // request/response serialisation at the client.
     }
 
     fn on_face_down(&self, _face_id: FaceId, _ctx: &dyn DiscoveryContext) {
@@ -599,12 +644,12 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
             debug!("ServiceDiscovery: expired auto-FIB {:?} via {face_id:?}", prefix);
         }
 
-        // Periodically re-browse all established neighbors so that runtime
-        // service announcements (e.g. ndn-iperf starting after neighbor
-        // establishment) are discovered without waiting for a face event.
-        // The interval is derived from the auto-FIB TTL: half the minimum
-        // freshness period guarantees records are refreshed before they expire.
-        // Floor: 10 s (avoid hammering on fast-tick profiles).
+        // Browse neighbor faces to exchange service records.
+        //
+        // Interval: half the shortest remaining auto-FIB TTL (guarantees
+        // refresh before expiry), floored at 10 s to avoid hammering on
+        // fast-tick profiles.  Newly-Established neighbors always get an
+        // immediate initial browse regardless of the interval.
         const BROWSE_FLOOR: Duration = Duration::from_secs(10);
         let browse_interval = {
             let auto_fib = self.auto_fib.lock().unwrap();
@@ -615,12 +660,7 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
                 .max(BROWSE_FLOOR)
         };
 
-        let due = self.last_browse.lock().unwrap()
-            .map_or(true, |t| now.duration_since(t) >= browse_interval);
-
-        if due {
-            self.browse_all_neighbors(now, ctx);
-        }
+        self.browse_neighbors(now, browse_interval, ctx);
     }
 }
 
