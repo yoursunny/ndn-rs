@@ -9,6 +9,10 @@
 /// ndn-ctl face list
 /// ndn-ctl strategy set /ndn --strategy /localhost/nfd/strategy/best-route
 /// ndn-ctl cs info
+/// ndn-ctl neighbors list
+/// ndn-ctl service list
+/// ndn-ctl service announce /ndn/app
+/// ndn-ctl service withdraw /ndn/app
 /// ndn-ctl status
 /// ndn-ctl shutdown
 /// ```
@@ -74,6 +78,16 @@ enum Command {
     Cs {
         #[command(subcommand)]
         action: CsAction,
+    },
+    /// List discovered neighbors.
+    Neighbors {
+        #[command(subcommand)]
+        action: NeighborsAction,
+    },
+    /// Manage service discovery announcements.
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
     },
     /// Manage security identities and trust anchors (local, no router needed).
     Security {
@@ -163,6 +177,28 @@ enum CsAction {
         /// Maximum number of entries to erase (default: all).
         #[arg(long)]
         count: Option<u64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum NeighborsAction {
+    /// List all discovered neighbors.
+    List,
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// List locally announced service prefixes.
+    List,
+    /// Announce a service prefix at runtime.
+    Announce {
+        /// NDN name prefix to announce (e.g. /ndn/app/sensor).
+        prefix: String,
+    },
+    /// Withdraw a previously announced service prefix.
+    Withdraw {
+        /// NDN name prefix to withdraw.
+        prefix: String,
     },
 }
 
@@ -350,6 +386,46 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
                 print_params(&resp);
             }
         },
+        Command::Neighbors { action } => match action {
+            NeighborsAction::List => {
+                let resp = mgmt
+                    .neighbors_list()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+        },
+        Command::Service { action } => match action {
+            ServiceAction::List => {
+                let resp = mgmt
+                    .service_list()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_control_response(&resp);
+            }
+            ServiceAction::Announce { prefix } => {
+                let resp = mgmt
+                    .service_announce(
+                        &prefix
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+            ServiceAction::Withdraw { prefix } => {
+                let resp = mgmt
+                    .service_withdraw(
+                        &prefix
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("bad prefix: {e}"))?,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_params(&resp);
+            }
+        },
         Command::Status => {
             let resp = mgmt.status().await.map_err(|e| anyhow::anyhow!("{e}"))?;
             print_control_response(&resp);
@@ -437,7 +513,7 @@ fn build_legacy_request(cmd: &Command) -> ManagementRequest {
         },
         Command::Status => ManagementRequest::GetStats,
         Command::Shutdown => ManagementRequest::Shutdown,
-        // Commands with no legacy equivalent.
+        // Commands with no legacy equivalent (neighbors, service, strategy, cs, security).
         _ => ManagementRequest::GetStats,
     }
 }
