@@ -64,7 +64,7 @@ use crate::probe::{
 };
 use crate::scope::{probe_direct, probe_via};
 use crate::strategy::{NeighborProbeStrategy, ProbeRequest, TriggerEvent, build_strategy};
-use crate::wire::{parse_raw_data, parse_raw_interest, unwrap_lp, write_name_tlv, write_nni};
+use crate::wire::{parse_raw_data, parse_raw_interest, write_name_tlv, write_nni};
 
 const HELLO_PREFIX_STR: &str = "/ndn/local/nd/hello";
 const HELLO_PREFIX_DEPTH: usize = 4;
@@ -536,27 +536,28 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
     }
 
     fn on_inbound(&self, raw: &Bytes, incoming_face: FaceId, meta: &InboundMeta, ctx: &dyn DiscoveryContext) -> bool {
-        let inner = match unwrap_lp(raw) { Some(b) => b, None => return false };
-        match inner.first() {
+        // Bytes arrive LP-unwrapped from the pipeline (TlvDecodeStage strips LP
+        // before on_inbound is called).  Dispatch directly on the TLV type byte.
+        match raw.first() {
             Some(&0x05) => {
                 // Interest: check probe prefixes first (fast path when SWIM disabled: prefixes not claimed)
                 if self.config.swim_indirect_fanout > 0 {
-                    if let Some(parsed) = parse_raw_interest(&inner) {
+                    if let Some(parsed) = parse_raw_interest(raw) {
                         if parsed.name.has_prefix(probe_via()) {
-                            return self.handle_via_probe_interest(&inner, incoming_face, ctx);
+                            return self.handle_via_probe_interest(raw, incoming_face, ctx);
                         }
                         if parsed.name.has_prefix(probe_direct()) {
-                            return self.handle_direct_probe_interest(&inner, incoming_face, ctx);
+                            return self.handle_direct_probe_interest(raw, incoming_face, ctx);
                         }
                     }
                 }
-                self.handle_hello_interest(&inner, incoming_face, meta, ctx)
+                self.handle_hello_interest(raw, incoming_face, meta, ctx)
             }
             Some(&0x06) => {
-                if self.config.swim_indirect_fanout > 0 && is_probe_ack(&inner) {
-                    return self.handle_probe_ack(&inner, incoming_face, ctx).unwrap_or(false);
+                if self.config.swim_indirect_fanout > 0 && is_probe_ack(raw) {
+                    return self.handle_probe_ack(raw, incoming_face, ctx).unwrap_or(false);
                 }
-                self.handle_hello_data(&inner, incoming_face, meta, ctx)
+                self.handle_hello_data(raw, incoming_face, meta, ctx)
             }
             _ => false,
         }

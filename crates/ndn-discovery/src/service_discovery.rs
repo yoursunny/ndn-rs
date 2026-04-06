@@ -617,26 +617,18 @@ impl DiscoveryProtocol for ServiceDiscoveryProtocol {
         _meta: &InboundMeta,
         ctx: &dyn DiscoveryContext,
     ) -> bool {
-        // UdpFace wraps every outgoing packet in NDNLPv2 framing.
-        // Unwrap before dispatch so sub-handlers see a bare Interest/Data TLV.
-        let inner = match crate::wire::unwrap_lp(raw) {
-            Some(b) => b,
-            None => return false,
-        };
-        if inner.is_empty() {
-            return false;
-        }
-        match inner.first() {
+        // Bytes arrive LP-unwrapped from the pipeline; dispatch directly.
+        match raw.first() {
             Some(&0x05) => {
                 // Interest
-                if self.handle_sd_interest(&inner, incoming_face, ctx) {
+                if self.handle_sd_interest(raw, incoming_face, ctx) {
                     return true;
                 }
-                self.handle_peers_interest(&inner, incoming_face, ctx)
+                self.handle_peers_interest(raw, incoming_face, ctx)
             }
             Some(&0x06) => {
                 // Data
-                self.handle_sd_data(&inner, incoming_face, ctx)
+                self.handle_sd_data(raw, incoming_face, ctx)
             }
             _ => false,
         }
