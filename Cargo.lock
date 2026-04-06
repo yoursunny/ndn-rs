@@ -733,6 +733,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-discovery-lan"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "ndn-discovery",
+ "ndn-engine",
+ "ndn-face-net",
+ "ndn-packet",
+ "ndn-transport",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "example-strategy-composed"
 version = "0.0.0"
 dependencies = [
@@ -1442,9 +1458,11 @@ dependencies = [
  "dashmap",
  "ndn-face-net",
  "ndn-packet",
+ "ndn-security",
  "ndn-sync",
  "ndn-tlv",
  "ndn-transport",
+ "ring",
  "tokio",
  "tracing",
 ]
@@ -1620,6 +1638,7 @@ dependencies = [
  "libc",
  "ndn-app",
  "ndn-config",
+ "ndn-discovery",
  "ndn-engine",
  "ndn-face-l2",
  "ndn-face-local",

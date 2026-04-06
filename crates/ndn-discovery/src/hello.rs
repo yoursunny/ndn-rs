@@ -54,6 +54,8 @@ pub const T_NEIGHBOR_DIFF: u64 = 0xC4;
 pub const T_ADD_ENTRY: u64 = 0xC5;
 /// `REMOVE-ENTRY` within a `NEIGHBOR-DIFF`: a departed neighbor.
 pub const T_REMOVE_ENTRY: u64 = 0xC6;
+/// `PUBLIC-KEY` TLV type: raw 32-byte Ed25519 public key for self-attesting signed hellos.
+pub const T_PUBLIC_KEY: u64 = 0xC8;
 
 // ─── Capability flags ─────────────────────────────────────────────────────────
 
@@ -99,6 +101,10 @@ pub struct HelloPayload {
     pub capabilities: u8,
     /// SWIM gossip diffs piggybacked on this hello.
     pub neighbor_diffs: Vec<NeighborDiff>,
+    /// Raw 32-byte Ed25519 public key (self-attesting signed hellos).
+    /// When present, the hello Data is signed by the corresponding private key
+    /// and receivers can verify without any certificate infrastructure.
+    pub public_key: Option<Bytes>,
 }
 
 impl HelloPayload {
@@ -109,6 +115,7 @@ impl HelloPayload {
             served_prefixes: Vec::new(),
             capabilities: 0,
             neighbor_diffs: Vec::new(),
+            public_key: None,
         }
     }
 
@@ -150,6 +157,10 @@ impl HelloPayload {
                 }
             });
         }
+        // PUBLIC-KEY (omit if not present)
+        if let Some(ref pk) = self.public_key {
+            w.write_tlv(T_PUBLIC_KEY, pk);
+        }
         w.finish()
     }
 
@@ -165,6 +176,7 @@ impl HelloPayload {
         let mut served_prefixes = Vec::new();
         let mut capabilities: u8 = 0;
         let mut neighbor_diffs = Vec::new();
+        let mut public_key: Option<Bytes> = None;
 
         while !r.is_empty() {
             let (t, v) = r.read_tlv().ok()?;
@@ -185,6 +197,11 @@ impl HelloPayload {
                         neighbor_diffs.push(diff);
                     }
                 }
+                T_PUBLIC_KEY => {
+                    if v.len() == 32 {
+                        public_key = Some(v);
+                    }
+                }
                 _ => {} // forward-compatible: skip unknown types
             }
         }
@@ -194,6 +211,7 @@ impl HelloPayload {
             served_prefixes,
             capabilities,
             neighbor_diffs,
+            public_key,
         })
     }
 }

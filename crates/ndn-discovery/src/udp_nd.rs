@@ -40,16 +40,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use ndn_face_net::UdpFace;
-use ndn_packet::{Name, tlv_type};
+use ndn_packet::{Name, SignatureType, tlv_type};
+use ndn_packet::encode::DataBuilder;
+use ndn_security::{Ed25519Signer, Ed25519Verifier, Signer, VerifyOutcome};
 use ndn_tlv::TlvWriter;
 use ndn_transport::FaceId;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::{
     DiffEntry, DiscoveryContext, DiscoveryProtocol, HelloPayload, InboundMeta,
@@ -83,7 +85,8 @@ struct UdpNdState {
 }
 
 pub struct UdpNeighborDiscovery {
-    multicast_face_id: FaceId,
+    /// All multicast face IDs (one per interface) to broadcast hellos on.
+    multicast_face_ids: Vec<FaceId>,
     node_name: Name,
     hello_prefix: Name,
     /// All prefixes claimed (hello + probe when SWIM enabled).
@@ -93,19 +96,43 @@ pub struct UdpNeighborDiscovery {
     strategy: Mutex<Box<dyn NeighborProbeStrategy>>,
     served_prefixes: Mutex<Vec<Name>>,
     state: Mutex<UdpNdState>,
+    /// Ed25519 signer for hello Data packets.  Also provides the public key
+    /// embedded in `HelloPayload::public_key` for self-attesting verification.
+    signer: Arc<dyn Signer>,
 }
 
 impl UdpNeighborDiscovery {
     /// Create a new `UdpNeighborDiscovery` with the default LAN profile.
     pub fn new(multicast_face_id: FaceId, node_name: Name) -> Self {
-        Self::new_with_config(
-            multicast_face_id,
+        Self::new_multi(
+            vec![multicast_face_id],
             node_name,
             DiscoveryConfig::for_profile(&DiscoveryProfile::Lan),
         )
     }
 
     pub fn new_with_config(multicast_face_id: FaceId, node_name: Name, config: DiscoveryConfig) -> Self {
+        Self::new_multi(vec![multicast_face_id], node_name, config)
+    }
+
+    /// Create a `UdpNeighborDiscovery` listening on multiple multicast faces
+    /// (one per network interface).  Hello broadcasts are sent on all faces.
+    ///
+    /// A transient Ed25519 key is derived deterministically from the node name
+    /// via SHA-256.  Callers that need a persistent key should use
+    /// [`new_multi_with_signer`].
+    pub fn new_multi(face_ids: Vec<FaceId>, node_name: Name, config: DiscoveryConfig) -> Self {
+        let signer = Self::make_transient_signer(&node_name);
+        Self::new_multi_with_signer(face_ids, node_name, config, signer)
+    }
+
+    /// Create with an explicit signer (e.g. from the router's PIB).
+    pub fn new_multi_with_signer(
+        face_ids: Vec<FaceId>,
+        node_name: Name,
+        config: DiscoveryConfig,
+        signer: Arc<dyn Signer>,
+    ) -> Self {
         let hello_prefix = Name::from_str(HELLO_PREFIX_STR).expect("static prefix is valid");
         let mut claimed = vec![hello_prefix.clone()];
         if config.swim_indirect_fanout > 0 {
@@ -114,7 +141,7 @@ impl UdpNeighborDiscovery {
         }
         let strategy = build_strategy(&config);
         Self {
-            multicast_face_id,
+            multicast_face_ids: face_ids,
             node_name,
             hello_prefix,
             claimed,
@@ -129,7 +156,24 @@ impl UdpNeighborDiscovery {
                 swim_probes: HashMap::new(),
                 relay_probes: HashMap::new(),
             }),
+            signer,
         }
+    }
+
+    /// Derive a deterministic transient Ed25519 key from the node name.
+    ///
+    /// Uses SHA-256 of the node name's canonical URI as a 32-byte seed.
+    /// This is sufficient for link-local bootstrapping; production deployments
+    /// should supply a persistent signer via `new_multi_with_signer`.
+    fn make_transient_signer(node_name: &Name) -> Arc<dyn Signer> {
+        let name_str = node_name.to_string();
+        let digest = ring::digest::digest(&ring::digest::SHA256, name_str.as_bytes());
+        let seed: &[u8; 32] = digest.as_ref().try_into().expect("SHA-256 is 32 bytes");
+        // Key name: <node_name>/KEY/discovery-transient
+        let key_name = format!("{node_name}/KEY/discovery-transient")
+            .parse::<Name>()
+            .unwrap_or_else(|_| node_name.clone());
+        Arc::new(Ed25519Signer::from_seed(seed, key_name))
     }
 
     pub fn from_profile(multicast_face_id: FaceId, node_name: Name, profile: &DiscoveryProfile) -> Self {
@@ -173,23 +217,20 @@ impl UdpNeighborDiscovery {
                 });
             }
         }
+        // Include the public key for self-attesting signature verification.
+        payload.public_key = self.signer.public_key();
         let content = payload.encode();
         // FreshnessPeriod = hello_interval_base * 2 (doc §Hello Packet Format)
         let freshness_ms = self.config.hello_interval_base.as_millis().min(u32::MAX as u128) as u64 * 2;
 
-        let mut w = TlvWriter::new();
-        w.write_nested(tlv_type::DATA, |w: &mut TlvWriter| {
-            write_name_tlv(w, interest_name);
-            w.write_nested(tlv_type::META_INFO, |w: &mut TlvWriter| {
-                write_nni(w, tlv_type::FRESHNESS_PERIOD, freshness_ms);
-            });
-            w.write_tlv(tlv_type::CONTENT, &content);
-            w.write_nested(tlv_type::SIGNATURE_INFO, |w: &mut TlvWriter| {
-                w.write_tlv(tlv_type::SIGNATURE_TYPE, &[0u8]);
-            });
-            w.write_tlv(tlv_type::SIGNATURE_VALUE, &[0u8; 32]);
-        });
-        w.finish()
+        let signer = &self.signer;
+        DataBuilder::new(interest_name.clone(), &content)
+            .freshness(Duration::from_millis(freshness_ms))
+            .sign_sync(
+                signer.sig_type(),
+                signer.cert_name(),
+                |region| signer.sign_sync(region).unwrap_or_default(),
+            )
     }
 
     // ── Inbound handlers ──────────────────────────────────────────────────────
@@ -204,7 +245,9 @@ impl UdpNeighborDiscovery {
             _ => { debug!("UdpND: hello Interest has no source addr"); return true; }
         };
         let reply = self.build_hello_data(name);
-        ctx.send_on(self.multicast_face_id, reply);
+        for &fid in &self.multicast_face_ids {
+            ctx.send_on(fid, reply.clone());
+        }
         debug!("UdpND: hello Interest from {sender_addr}, sent reply");
         true
     }
@@ -220,7 +263,46 @@ impl UdpNeighborDiscovery {
         let send_time = { let mut st = self.state.lock().unwrap(); st.pending_probes.remove(&nonce) };
         let content = match parsed.content { Some(c) => c, None => { debug!("UdpND: hello Data no content"); return true; } };
         let payload = match HelloPayload::decode(&content) { Some(p) => p, None => { debug!("UdpND: HelloPayload decode failed"); return true; } };
+
+        // ── Signature verification ────────────────────────────────────────────
+        if let Some(ref peer_pk) = payload.public_key {
+            // Decode the full Data packet to access the signed region + sig value.
+            if let Ok(data_pkt) = ndn_packet::Data::decode(inner.clone()) {
+                let region = data_pkt.signed_region();
+                let sig_val = data_pkt.sig_value();
+                let verifier = Ed25519Verifier;
+                let outcome = verifier.verify_sync(region, sig_val, peer_pk);
+                if outcome != VerifyOutcome::Valid {
+                    warn!(name=%payload.node_name, "UdpND: hello Data signature invalid, discarding");
+                    return true;
+                }
+            } else {
+                warn!("UdpND: hello Data has public_key but failed full decode; discarding");
+                return true;
+            }
+        }
+
+        // ── Node name uniqueness check ────────────────────────────────────────
         let responder_name = payload.node_name.clone();
+        if responder_name == self.node_name {
+            // This could be our own echo or a genuine name conflict.
+            let our_pk = self.signer.public_key();
+            match (our_pk, payload.public_key.as_ref()) {
+                (Some(ref ours), Some(ref theirs)) if ours == theirs => {
+                    // Own echo — silently discard.
+                    debug!(name=%responder_name, "UdpND: hello echo (own packet), discarding");
+                }
+                _ => {
+                    // Different key or unsigned — real conflict.
+                    error!(
+                        name = %responder_name,
+                        "UdpND: DUPLICATE NODE NAME detected — another node is using our name!"
+                    );
+                }
+            }
+            return true;
+        }
+
         let responder_addr = match &meta.source {
             Some(LinkAddr::Udp(addr)) => *addr,
             _ => { debug!("UdpND: hello Data no source addr"); return true; }
@@ -390,10 +472,13 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
     fn tick_interval(&self) -> Duration { self.config.tick_interval }
 
     fn on_face_up(&self, face_id: FaceId, ctx: &dyn DiscoveryContext) {
-        if face_id == self.multicast_face_id {
+        if self.multicast_face_ids.contains(&face_id) {
             let nonce = self.nonce_counter.fetch_add(1, Ordering::Relaxed);
             { let mut st = self.state.lock().unwrap(); st.pending_probes.insert(nonce, Instant::now()); }
-            ctx.send_on(self.multicast_face_id, self.build_hello_interest(nonce));
+            let hello = self.build_hello_interest(nonce);
+            for &fid in &self.multicast_face_ids {
+                ctx.send_on(fid, hello.clone());
+            }
             self.strategy.lock().unwrap().trigger(TriggerEvent::FaceUp);
             debug!("UdpND: sent initial hello on face {face_id:?}");
         }
@@ -438,7 +523,10 @@ impl DiscoveryProtocol for UdpNeighborDiscovery {
             match probe {
                 ProbeRequest::Broadcast => {
                     let nonce = self.nonce_counter.fetch_add(1, Ordering::Relaxed);
-                    ctx.send_on(self.multicast_face_id, self.build_hello_interest(nonce));
+                    let hello = self.build_hello_interest(nonce);
+                    for &fid in &self.multicast_face_ids {
+                        ctx.send_on(fid, hello.clone());
+                    }
                     self.state.lock().unwrap().pending_probes.insert(nonce, now);
                     debug!("UdpND: broadcast hello (nonce={nonce:#010x})");
                 }
@@ -697,7 +785,9 @@ mod tests {
             fn add_fib_entry(&self, _: &Name, _: FaceId, _: u32, _: ProtocolId) {}
             fn remove_fib_entry(&self, _: &Name, _: FaceId, _: ProtocolId) {}
             fn remove_fib_entries_by_owner(&self, _: ProtocolId) {}
-            fn neighbors(&self) -> &dyn crate::NeighborTableView { unimplemented!() }
+            fn neighbors(&self) -> std::sync::Arc<dyn crate::NeighborTableView> {
+                crate::NeighborTable::new()
+            }
             fn update_neighbor(&self, _: crate::NeighborUpdate) {}
             fn send_on(&self, _: FaceId, _: Bytes) {}
             fn now(&self) -> Instant { Instant::now() }
@@ -727,7 +817,7 @@ mod tests {
             fn add_fib_entry(&self, _: &Name, _: FaceId, _: u32, _: ProtocolId) {}
             fn remove_fib_entry(&self, _: &Name, _: FaceId, _: ProtocolId) {}
             fn remove_fib_entries_by_owner(&self, _: ProtocolId) {}
-            fn neighbors(&self) -> &dyn NeighborTableView { &*self.neighbors }
+            fn neighbors(&self) -> Arc<dyn NeighborTableView> { Arc::clone(&self.neighbors) as Arc<dyn NeighborTableView> }
             fn update_neighbor(&self, u: NeighborUpdate) { self.neighbors.apply(u); }
             fn send_on(&self, _: FaceId, _: Bytes) {}
             fn now(&self) -> Instant { Instant::now() }
