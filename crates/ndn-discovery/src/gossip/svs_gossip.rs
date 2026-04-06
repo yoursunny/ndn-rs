@@ -76,6 +76,8 @@ struct Inner {
 /// [`ServiceDiscoveryProtocol`]: crate::service_discovery::ServiceDiscoveryProtocol
 /// [`CompositeDiscovery`]: crate::CompositeDiscovery
 pub struct SvsServiceDiscovery {
+    /// Static claimed prefixes — set at construction, never mutated.
+    claimed: Vec<Name>,
     inner: Mutex<Inner>,
 }
 
@@ -102,6 +104,7 @@ impl SvsServiceDiscovery {
         );
 
         Self {
+            claimed: vec![sd_updates().clone()],
             inner: Mutex::new(Inner {
                 incoming_tx,
                 outgoing_rx,
@@ -190,24 +193,7 @@ impl DiscoveryProtocol for SvsServiceDiscovery {
     fn protocol_id(&self) -> ProtocolId { PROTOCOL }
 
     fn claimed_prefixes(&self) -> &[Name] {
-        // SAFETY: we hold the mutex only briefly to clone the Vec, then return a
-        // reference to the stable storage inside `Inner`.  Because `Inner` is
-        // behind a `Mutex` inside `self` (which is `'static`), the vec is stable.
-        // We cannot return `&[Name]` directly from locked data without unsafe,
-        // so we store claimed separately as a field.
-        //
-        // Workaround: the Mutex<Inner> contains `claimed: Vec<Name>`.  We
-        // can't return a reference into it without holding the lock.  Instead,
-        // keep a separate `claimed` field at the top level.
-        //
-        // NOTE: This is a design limitation of `DiscoveryProtocol::claimed_prefixes`
-        // returning `&[Name]`.  We use a dedicated top-level field.
-        //
-        // We solve this by locking and leaking only the pointer — but the
-        // simplest correct solution is to keep `claimed` outside the mutex.
-        // Since we can't restructure now, we return a static slice directly.
-        static CLAIMED: std::sync::OnceLock<Vec<Name>> = std::sync::OnceLock::new();
-        CLAIMED.get_or_init(|| vec![sd_updates().clone()])
+        &self.claimed
     }
 
     fn on_face_up(&self, _face_id: FaceId, _ctx: &dyn DiscoveryContext) {}

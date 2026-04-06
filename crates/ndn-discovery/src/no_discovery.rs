@@ -77,8 +77,8 @@ mod tests {
             fn add_fib_entry(&self, _: &Name, _: FaceId, _: u32, _: ProtocolId) {}
             fn remove_fib_entry(&self, _: &Name, _: FaceId, _: ProtocolId) {}
             fn remove_fib_entries_by_owner(&self, _: ProtocolId) {}
-            fn neighbors(&self) -> &dyn crate::NeighborTableView {
-                unimplemented!()
+            fn neighbors(&self) -> std::sync::Arc<dyn crate::NeighborTableView> {
+                crate::NeighborTable::new()
             }
             fn update_neighbor(&self, _: crate::NeighborUpdate) {}
             fn send_on(&self, _: FaceId, _: bytes::Bytes) {}

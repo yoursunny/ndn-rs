@@ -65,7 +65,7 @@ pub trait DiscoveryContext: Send + Sync {
     // ── Neighbor table ───────────────────────────────────────────────────────
 
     /// Read access to the engine-owned neighbor table.
-    fn neighbors(&self) -> &dyn NeighborTableView;
+    fn neighbors(&self) -> Arc<dyn NeighborTableView>;
 
     /// Apply a mutation to the engine-owned neighbor table.
     fn update_neighbor(&self, update: NeighborUpdate);
