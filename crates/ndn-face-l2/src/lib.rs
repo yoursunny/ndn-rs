@@ -1,3 +1,24 @@
+//! # ndn-face-l2 — Layer-2 (Ethernet and radio) faces for NDN
+//!
+//! Provides link-layer face implementations for NDN over raw Ethernet
+//! (Ethertype `0x8624`), Wifibroadcast, and Bluetooth RFCOMM.
+//!
+//! ## Key types
+//!
+//! - [`NamedEtherFace`] / [`MulticastEtherFace`] — unicast and multicast raw Ethernet faces
+//! - [`WfbFace`] — Wifibroadcast NG face for 802.11 monitor-mode injection (Linux only)
+//! - [`BluetoothFace`] — BlueZ RFCOMM face (Linux only)
+//! - [`RadioTable`] — metadata registry for radio-based faces
+//! - [`EtherNeighborDiscovery`] — link-layer neighbor discovery (Linux only)
+//!
+//! ## Platform support
+//!
+//! - **Linux** — `AF_PACKET` raw sockets (full feature set)
+//! - **macOS** — `PF_NDRV` for Ethernet faces
+//! - **Windows** — Npcap/WinPcap for Ethernet faces
+
+#![allow(missing_docs)]
+
 // AF_PACKET raw sockets, WfbFace (802.11 monitor-mode injection), and
 // BluetoothFace (BlueZ RFCOMM) all require Linux kernel APIs that do not
 // exist on macOS, Windows, Android, or embedded targets.

@@ -33,12 +33,16 @@
 //! | [`probe`]           | SWIM direct/indirect probe packet builders and parsers |
 //! | [`prefix_announce`] | Service record publisher and browser (`/ndn/local/sd/services/`) |
 
+#![allow(missing_docs)]
+
 pub mod backoff;
 pub mod composite;
 pub mod config;
 pub mod context;
 pub mod gossip;
 pub mod hello;
+pub mod hello_protocol;
+pub mod link_medium;
 pub mod mac_addr;
 pub mod neighbor;
 pub mod no_discovery;
@@ -85,4 +89,6 @@ pub use strategy::{
 };
 pub use strategy::composite::CompositeStrategy;
 pub use service_discovery::{ServiceDiscoveryProtocol, decode_peer_list};
+pub use hello_protocol::HelloProtocol;
+pub use link_medium::{HelloCore, HelloState, LinkMedium};
 pub use udp_nd::UdpNeighborDiscovery;
