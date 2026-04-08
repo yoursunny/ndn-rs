@@ -1,0 +1,23 @@
+[package]
+name = "ndn-dashboard"
+description = "NDN router management dashboard (Dioxus desktop)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ndn-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+ndn-ipc    = { workspace = true }
+ndn-config = { workspace = true }
+ndn-packet = { workspace = true, features = ["std"] }
+tokio      = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
+tray-icon  = "0.21"
+futures    = { workspace = true }
+tracing    = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow     = { workspace = true }
+dioxus     = { version = "0.7", features = ["desktop"] }
+getrandom  = "0.2"
