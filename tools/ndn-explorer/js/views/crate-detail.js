@@ -26,6 +26,14 @@ const WIKI_PAGES = {
   'ndn-embedded':      'guides/embedded-targets.html',
   'ndn-app':           'deep-dive/pipeline-walkthrough.html',
   'ndn-config':        'getting-started/running-router.html',
+  'ndn-did':           'deep-dive/identity-and-did.html',
+  'ndn-cert':          'deep-dive/ndncert.html',
+  'ndn-identity':      'guides/ndncert-setup.html',
+  'ndn-mobile':        'guides/mobile-apps.html',
+  'ndn-router':        'getting-started/running-router.html',
+  'ndn-dashboard':     'getting-started/running-router.html',
+  'ndn-wasm':          'deep-dive/wasm-browser-simulation.html',
+  'ndn-tools':         'guides/cli-tools.html',
 };
 
 function wikiUrl(crateName) {

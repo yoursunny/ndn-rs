@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-07",
+  "generated": "2026-04-08",
   "layers": [
     { "num": 4,   "id": "foundation", "label": "Foundation" },
     { "num": 3,   "id": "faces",      "label": "Face Implementations" },
@@ -150,10 +150,13 @@
       "name": "ndn-security",
       "layer": "pipeline",
       "layer_num": 2,
-      "description": "Packet signing, verification, trust schema, certificate management, and SafeData enforcement",
-      "key_types": ["Signer", "Verifier", "Ed25519Signer", "Ed25519Verifier", "HmacSha256Signer", "Validator", "ValidationResult", "VerifyOutcome", "TrustSchema", "NamePattern", "PatternComponent", "SafeData", "CertCache", "Certificate", "CertFetcher", "KeyStore", "MemKeyStore", "KeyAlgorithm", "SecurityManager", "SecurityProfile", "FilePib", "TrustError"],
+      "description": "Packet signing, verification, trust schema, certificate management, and SafeData enforcement; optional YubiKey PIV hardware key store",
+      "key_types": ["Signer", "Verifier", "Ed25519Signer", "Ed25519Verifier", "HmacSha256Signer", "Validator", "ValidationResult", "VerifyOutcome", "TrustSchema", "NamePattern", "PatternComponent", "SafeData", "CertCache", "Certificate", "CertFetcher", "KeyStore", "MemKeyStore", "KeyAlgorithm", "YubikeyKeyStore", "YubikeySlot", "SecurityManager", "SecurityProfile", "FilePib", "TrustError"],
       "workspace_deps": ["ndn-packet", "ndn-tlv"],
-      "features": {},
+      "features": {
+        "default": [],
+        "yubikey-piv": ["dep:yubikey"]
+      },
       "no_std": false,
       "path": "crates/ndn-security"
     },
@@ -161,8 +164,8 @@
       "name": "ndn-engine",
       "layer": "engine",
       "layer_num": 1,
-      "description": "Forwarder engine and pipeline wiring -- EngineBuilder, ForwarderEngine, task topology, composed strategies",
-      "key_types": ["ForwarderEngine", "EngineBuilder", "EngineConfig", "ShutdownHandle", "ComposedStrategy", "ContextEnricher", "EngineDiscoveryContext", "Fib", "FibEntry", "FibNexthop"],
+      "description": "Forwarder engine and pipeline wiring -- EngineBuilder, ForwarderEngine, task topology, composed strategies, and per-face traffic counters",
+      "key_types": ["ForwarderEngine", "EngineBuilder", "EngineConfig", "ShutdownHandle", "FaceState", "FaceCounters", "ComposedStrategy", "ContextEnricher", "EngineDiscoveryContext", "Fib", "FibEntry", "FibNexthop"],
       "workspace_deps": ["ndn-packet", "ndn-transport", "ndn-face-net", "ndn-discovery", "ndn-store", "ndn-pipeline", "ndn-strategy", "ndn-security"],
       "features": {},
       "no_std": false,
@@ -293,17 +296,29 @@
       "name": "ndn-router",
       "layer": "binaries",
       "layer_num": 0,
-      "description": "Standalone NDN forwarder binary with TOML config, management socket, and full face/strategy support",
+      "description": "Standalone NDN forwarder binary with TOML config, NDN management protocol handlers, in-memory log ring buffer, NDNCERT CA, and full face/strategy support",
       "key_types": [],
-      "workspace_deps": ["ndn-engine", "ndn-discovery", "ndn-app", "ndn-face-net", "ndn-face-local", "ndn-face-serial", "ndn-face-l2", "ndn-strategy", "ndn-store", "ndn-security", "ndn-config", "ndn-packet", "ndn-transport"],
+      "workspace_deps": ["ndn-engine", "ndn-discovery", "ndn-app", "ndn-face-net", "ndn-face-local", "ndn-face-serial", "ndn-face-l2", "ndn-strategy", "ndn-store", "ndn-security", "ndn-cert", "ndn-config", "ndn-packet", "ndn-transport"],
       "features": {
         "default": ["spsc-shm", "websocket", "serial"],
         "spsc-shm": ["ndn-face-local/spsc-shm"],
         "websocket": ["ndn-face-net/websocket", "dep:tokio-tungstenite"],
-        "serial": ["ndn-face-serial/serial"]
+        "serial": ["ndn-face-serial/serial"],
+        "yubikey-piv": ["ndn-security/yubikey-piv"]
       },
       "no_std": false,
       "path": "binaries/ndn-router"
+    },
+    {
+      "name": "ndn-dashboard",
+      "layer": "binaries",
+      "layer_num": 0,
+      "description": "Dioxus desktop management dashboard for ndn-router — real-time panels for faces, FIB, CS, strategy, security, log streaming, and config; all communication over the NDN management protocol",
+      "key_types": [],
+      "workspace_deps": ["ndn-ipc", "ndn-config", "ndn-packet"],
+      "features": {},
+      "no_std": false,
+      "path": "tools/ndn-dashboard"
     },
     {
       "name": "ndn-tools",
@@ -411,8 +426,8 @@
       "name": "ndn-cert",
       "layer": "identity",
       "layer_num": 1.5,
-      "description": "NDNCERT: NDN certificate management protocol — issuance, challenge handling (email, token, possession), CA logic, and enrollment sessions",
-      "key_types": ["CertRequest", "EnrollmentSession", "CaConfig", "CaProfile", "CaState", "ChallengeRequest", "ChallengeResponse", "ChallengeState", "ChallengeOutcome", "ChallengeStatus", "PolicyDecision", "DelegationPolicy", "HierarchicalPolicy", "NamespacePolicy", "ChallengeHandler", "TokenChallenge", "PossessionChallenge", "TokenStore", "NewResponse", "CertError"],
+      "description": "NDNCERT 0.3: automated NDN certificate issuance with ECDH session encryption, multi-round challenges (PIN, email, token, possession, YubiKey HOTP), CA state machine, and TLV wire format",
+      "key_types": ["CertRequest", "EnrollmentSession", "EcdhKeypair", "SessionKey", "CaConfig", "CaProfile", "CaState", "ChallengeRequest", "ChallengeResponse", "ChallengeState", "ChallengeOutcome", "ChallengeStatus", "ChallengeHandler", "PinChallenge", "EmailChallenge", "EmailSender", "YubikeyHotpChallenge", "TokenChallenge", "PossessionChallenge", "TokenStore", "ProbeResponse", "NewResponse", "RevokeRequest", "RevokeResponse", "RevokeStatus", "ErrorCode", "PolicyDecision", "DelegationPolicy", "HierarchicalPolicy", "NamespacePolicy", "CertError"],
       "workspace_deps": ["ndn-packet", "ndn-security", "ndn-did"],
       "features": {},
       "no_std": false,
