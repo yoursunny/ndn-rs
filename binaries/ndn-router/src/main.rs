@@ -1,5 +1,8 @@
+use std::collections::VecDeque;
+use std::io::Write as IoWrite;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
@@ -24,6 +27,58 @@ use tokio::net::UnixListener;
 
 // NDN-native management: face listener + Interest/Data handler.
 mod mgmt_ndn;
+
+// ─── Runtime filter reload ────────────────────────────────────────────────────
+
+type FilterFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
+
+/// Callback to apply a new filter string to the running tracing subscriber.
+/// Set once during `init_tracing` and used by the management handler.
+pub(crate) static APPLY_FILTER: OnceLock<FilterFn> = OnceLock::new();
+
+/// Current active filter string (kept in sync with `APPLY_FILTER` calls).
+pub(crate) static LOG_FILTER: OnceLock<Mutex<String>> = OnceLock::new();
+
+/// Monotonic sequence counter — each log line gets a unique, ever-increasing id.
+/// The dashboard uses this to request only *new* lines each poll cycle.
+pub(crate) static LOG_SEQ: AtomicU64 = AtomicU64::new(0);
+
+type LogRingInner = VecDeque<(u64, String)>;
+
+/// In-memory ring buffer of the last 500 log lines.
+/// Each entry is `(seq, line)` where `seq` is from `LOG_SEQ`.
+/// The dashboard calls `log/get-recent` with the last seq it saw and receives
+/// only newer entries, eliminating the duplication problem.
+pub(crate) static LOG_RING: OnceLock<Arc<Mutex<LogRingInner>>> = OnceLock::new();
+
+/// `tracing_subscriber::fmt` writer that appends to `LOG_RING`.
+struct RingWriter {
+    ring: Arc<Mutex<LogRingInner>>,
+}
+
+impl IoWrite for RingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let line = String::from_utf8_lossy(buf).trim_end_matches('\n').to_string();
+        if !line.is_empty() && let Ok(mut r) = self.ring.lock() {
+            let seq = LOG_SEQ.fetch_add(1, Ordering::Relaxed);
+            r.push_back((seq, line));
+            if r.len() > 500 { r.pop_front(); }
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
+struct RingMakeWriter {
+    ring: Arc<Mutex<LogRingInner>>,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RingMakeWriter {
+    type Writer = RingWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        RingWriter { ring: Arc::clone(&self.ring) }
+    }
+}
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
@@ -91,9 +146,35 @@ fn init_tracing(
         config.level.clone()
     };
 
+    // Store the initial filter string for runtime querying.
+    let _ = LOG_FILTER.set(Mutex::new(filter_str.clone()));
+
+    // Initialise the ring buffer (safe to call multiple times — OnceLock).
+    // Initialise the ring buffer (safe to call multiple times — OnceLock).
+    let _ = LOG_RING.get_or_init(|| Arc::new(Mutex::new(VecDeque::<(u64, String)>::new())));
+
+    // Wrap the EnvFilter in a reload layer so it can be changed at runtime.
+    let (filter_layer, filter_handle) =
+        tracing_subscriber::reload::Layer::new(EnvFilter::new(&filter_str));
+
+    // Register the reload callback used by the management handler.
+    let _ = APPLY_FILTER.set(Box::new(move |s: &str| {
+        let new_filter = EnvFilter::new(s);
+        if let Err(e) = filter_handle.reload(new_filter) {
+            tracing::warn!(error = %e, "failed to reload log filter");
+        }
+        if let Some(m) = LOG_FILTER.get()
+            && let Ok(mut guard) = m.lock()
+        {
+            *guard = s.to_owned();
+        }
+    }));
+
     let stderr_layer = tracing_subscriber::fmt::layer()
+        .compact()
         .with_target(true)
-        .with_thread_ids(true);
+        .with_thread_ids(false)
+        .with_ansi(false);
 
     // If a log file is configured, set up a non-blocking file appender.
     if let Some(ref path) = config.file {
@@ -113,22 +194,41 @@ fn init_tracing(
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
         let file_layer = tracing_subscriber::fmt::layer()
+            .compact()
             .with_target(true)
-            .with_thread_ids(true)
+            .with_thread_ids(false)
             .with_ansi(false)
             .with_writer(non_blocking);
 
+        let ring_layer = LOG_RING.get().map(|ring| {
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_ansi(false)
+                .with_writer(RingMakeWriter { ring: Arc::clone(ring) })
+        });
         tracing_subscriber::registry()
-            .with(EnvFilter::new(&filter_str))
+            .with(filter_layer)
             .with(stderr_layer)
             .with(file_layer)
+            .with(ring_layer)
             .init();
 
         Some(guard)
     } else {
+        let ring_layer = LOG_RING.get().map(|ring| {
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_ansi(false)
+                .with_writer(RingMakeWriter { ring: Arc::clone(ring) })
+        });
         tracing_subscriber::registry()
-            .with(EnvFilter::new(&filter_str))
+            .with(filter_layer)
             .with(stderr_layer)
+            .with(ring_layer)
             .init();
 
         None
@@ -181,7 +281,10 @@ async fn main() -> Result<()> {
     const MGMT_FACE_ID: u32 = 0xFFFF_0001;
     let (mgmt_app_face, mgmt_handle) = AppFace::new(ndn_transport::FaceId(MGMT_FACE_ID), 64);
 
-    let security_mgr = load_security(&fwd_config);
+    let security_result = load_security(&fwd_config);
+    let pib: Option<Arc<FilePib>> = security_result.as_ref().and_then(|(_, path)| {
+        FilePib::open(path).ok().map(Arc::new)
+    });
 
     let cs = build_cs(&fwd_config.cs);
     let admission: Arc<dyn ndn_store::CsAdmissionPolicy> =
@@ -201,7 +304,7 @@ async fn main() -> Result<()> {
         .content_store(cs)
         .admission_policy(admission)
         .security_profile(security_profile);
-    if let Some(mgr) = security_mgr {
+    if let Some((mgr, _)) = security_result {
         builder = builder.security(mgr);
     }
 
@@ -619,6 +722,8 @@ async fn main() -> Result<()> {
             cancel.clone(),
             mgmt_discovery_sd.clone(),
             mgmt_discovery_claimed.clone(),
+            Arc::new(fwd_config.clone()),
+            pib.clone(),
         ));
         let listener_engine = engine.clone();
         let listener_cancel = cancel.clone();
@@ -877,7 +982,7 @@ async fn run_ws_listener(
 /// success; `None` on failure or when no identity is configured.  Failures
 /// are non-fatal: the router starts without a security identity and logs a
 /// warning instead.
-fn load_security(cfg: &ForwarderConfig) -> Option<SecurityManager> {
+fn load_security(cfg: &ForwarderConfig) -> Option<(SecurityManager, PathBuf)> {
     let identity_uri = cfg.security.identity.as_ref()?;
 
     let pib_path = cfg
@@ -905,7 +1010,7 @@ fn load_security(cfg: &ForwarderConfig) -> Option<SecurityManager> {
                         "loaded existing security identity from PIB"
                     );
                 }
-                return Some(mgr);
+                return Some((mgr, pib_path));
             }
             Err(e) => {
                 tracing::warn!(
@@ -937,7 +1042,7 @@ fn load_security(cfg: &ForwarderConfig) -> Option<SecurityManager> {
                 pib = %pib_path.display(),
                 "loaded security identity from PIB"
             );
-            Some(mgr)
+            Some((mgr, pib_path))
         }
         Err(e) => {
             tracing::warn!(

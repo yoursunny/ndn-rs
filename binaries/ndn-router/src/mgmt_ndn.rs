@@ -25,12 +25,15 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+#[cfg(feature = "yubikey-piv")]
+use base64::Engine as _;
 use bytes::Bytes;
 use ndn_discovery::{NeighborState, ServiceDiscoveryProtocol, ServiceRecord};
 use ndn_engine::ForwarderEngine;
 use ndn_engine::stages::ErasedStrategy;
 use ndn_face_local::AppHandle;
 use ndn_packet::{Interest, Name, NameComponent, encode::encode_data_unsigned};
+use ndn_security::FilePib;
 use ndn_strategy::{BestRouteStrategy, MulticastStrategy};
 use ndn_transport::{Face, FaceId, FacePersistency};
 use tokio_util::sync::CancellationToken;
@@ -289,6 +292,8 @@ pub async fn run_ndn_mgmt_handler(
     cancel: CancellationToken,
     discovery_sd: Option<Arc<ServiceDiscoveryProtocol>>,
     discovery_claimed: Vec<Name>,
+    config: Arc<ndn_config::ForwarderConfig>,
+    pib: Option<Arc<FilePib>>,
 ) {
     loop {
         let raw = tokio::select! {
@@ -335,6 +340,8 @@ pub async fn run_ndn_mgmt_handler(
                 cancel: &cancel,
                 discovery_sd: discovery_sd.as_deref(),
                 discovery_claimed: &discovery_claimed,
+                config: &config,
+                pib: pib.as_deref(),
             },
         )
         .await;
@@ -352,6 +359,8 @@ struct DispatchCtx<'a> {
     cancel: &'a CancellationToken,
     discovery_sd: Option<&'a ServiceDiscoveryProtocol>,
     discovery_claimed: &'a [Name],
+    config: &'a ndn_config::ForwarderConfig,
+    pib: Option<&'a FilePib>,
 }
 
 async fn dispatch_command(
@@ -366,6 +375,8 @@ async fn dispatch_command(
         cancel,
         discovery_sd,
         discovery_claimed,
+        config,
+        pib,
     } = ctx;
     match module_name {
         m if m == module::RIB => handle_rib(verb_name, params, source_face, engine),
@@ -383,6 +394,10 @@ async fn dispatch_command(
             discovery_claimed,
         ),
         m if m == module::STATUS => handle_status(verb_name, engine, cancel),
+        m if m == module::MEASUREMENTS => handle_measurements(verb_name, engine),
+        m if m == module::CONFIG => handle_config(verb_name, config),
+        m if m == module::SECURITY => handle_security(verb_name, params, pib, engine, config).await,
+        m if m == module::LOG => handle_log(verb_name, params),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown module"),
     }
 }
@@ -486,6 +501,7 @@ async fn handle_faces(
         v if v == verb::CREATE => faces_create(params, source_face, engine).await,
         v if v == verb::DESTROY => faces_destroy(params, source_face, engine),
         v if v == verb::LIST => faces_list(engine),
+        v if v == verb::COUNTERS => faces_counters(engine),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown faces verb"),
     }
 }
@@ -1245,6 +1261,439 @@ fn is_management_face(source_face: Option<FaceId>, engine: &ForwarderEngine) -> 
     }
 }
 
+// ─── Faces counters ───────────────────────────────────────────────────────────
+
+fn faces_counters(engine: &ForwarderEngine) -> ControlResponse {
+    use std::sync::atomic::Ordering;
+    let face_states = engine.face_states();
+    let entries = engine.faces().face_info();
+    let mut text = format!("{} faces\n", entries.len());
+    for info in &entries {
+        if let Some(s) = face_states.get(&info.id) {
+            text.push_str(&format!(
+                "  faceid={} in_interests={} in_data={} out_interests={} out_data={} in_bytes={} out_bytes={}\n",
+                info.id.0,
+                s.counters.in_interests.load(Ordering::Relaxed),
+                s.counters.in_data.load(Ordering::Relaxed),
+                s.counters.out_interests.load(Ordering::Relaxed),
+                s.counters.out_data.load(Ordering::Relaxed),
+                s.counters.in_bytes.load(Ordering::Relaxed),
+                s.counters.out_bytes.load(Ordering::Relaxed),
+            ));
+        }
+    }
+    ControlResponse::ok_empty(text)
+}
+
+// ─── Measurements module ──────────────────────────────────────────────────────
+
+fn handle_measurements(verb_name: &[u8], engine: &ForwarderEngine) -> ControlResponse {
+    match verb_name {
+        v if v == verb::LIST => measurements_list(engine),
+        _ => ControlResponse::error(status::NOT_FOUND, "unknown measurements verb"),
+    }
+}
+
+fn measurements_list(engine: &ForwarderEngine) -> ControlResponse {
+    let entries = engine.measurements().dump();
+    let mut text = format!("{} entries\n", entries.len());
+    for (prefix, entry) in &entries {
+        let face_rtts: Vec<String> = entry
+            .rtt_per_face
+            .iter()
+            .map(|(fid, rtt)| format!("face{}={:.1}ms", fid.0, rtt.srtt_ns / 1_000_000.0))
+            .collect();
+        text.push_str(&format!(
+            "  prefix={} sat_rate={:.3} rtt=[{}]\n",
+            prefix,
+            entry.satisfaction_rate,
+            face_rtts.join(" "),
+        ));
+    }
+    ControlResponse::ok_empty(text)
+}
+
+// ─── Security module ──────────────────────────────────────────────────────────
+
+async fn handle_security(
+    verb_name: &[u8],
+    params: ControlParameters,
+    pib: Option<&FilePib>,
+    engine: &ForwarderEngine,
+    config: &ndn_config::ForwarderConfig,
+) -> ControlResponse {
+    // Verbs that don't need the PIB first.
+    match verb_name {
+        v if v == verb::CA_INFO         => return security_ca_info(config),
+        v if v == verb::CA_REQUESTS     => return security_ca_requests(),
+        v if v == verb::CA_TOKEN_ADD    => return security_ca_token_add(params),
+        v if v == verb::YUBIKEY_DETECT  => return security_yubikey_detect(),
+        _ => {}
+    }
+
+    let pib = match pib {
+        Some(p) => p,
+        None => {
+            return ControlResponse::error(
+                status::NOT_FOUND,
+                "security identity not configured (no [security] section in config)",
+            );
+        }
+    };
+    match verb_name {
+        v if v == verb::IDENTITY_LIST     => security_identity_list(pib),
+        v if v == verb::IDENTITY_GENERATE => security_identity_generate(params, pib),
+        v if v == verb::IDENTITY_DID      => security_identity_did(params, pib),
+        v if v == verb::ANCHOR_LIST       => security_anchor_list(pib),
+        v if v == verb::KEY_DELETE        => security_key_delete(params, pib),
+        v if v == verb::CA_ENROLL         => security_ca_enroll(params, pib, engine).await,
+        v if v == verb::YUBIKEY_GENERATE  => security_yubikey_generate(params, pib).await,
+        _ => ControlResponse::error(status::NOT_FOUND, "unknown security verb"),
+    }
+}
+
+fn security_identity_list(pib: &FilePib) -> ControlResponse {
+    let keys = match pib.list_keys() {
+        Ok(k) => k,
+        Err(e) => return ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    };
+    let mut text = format!("{} identities\n", keys.len());
+    for key_name in &keys {
+        let cert = pib.get_cert(key_name);
+        let (has_cert, valid_until) = match cert {
+            Ok(c) => {
+                let exp = if c.valid_until == u64::MAX {
+                    "never".to_string()
+                } else {
+                    format!("{}ns", c.valid_until)
+                };
+                (true, exp)
+            }
+            Err(_) => (false, "-".to_string()),
+        };
+        text.push_str(&format!(
+            "  name={} has_cert={} valid_until={}\n",
+            key_name, has_cert, valid_until,
+        ));
+    }
+    ControlResponse::ok_empty(text)
+}
+
+fn security_identity_generate(params: ControlParameters, pib: &FilePib) -> ControlResponse {
+    let name = match params.name {
+        Some(n) => n,
+        None => return ControlResponse::error(status::BAD_PARAMS, "Name is required"),
+    };
+    match pib.generate_ed25519(&name) {
+        Ok(_signer) => {
+            tracing::info!(name = %name, "security/identity-generate: generated Ed25519 key");
+            let echo = ControlParameters {
+                name: Some(name),
+                ..Default::default()
+            };
+            ControlResponse::ok("OK", echo)
+        }
+        Err(e) => ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    }
+}
+
+fn security_anchor_list(pib: &FilePib) -> ControlResponse {
+    let anchors = match pib.list_anchors() {
+        Ok(a) => a,
+        Err(e) => return ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    };
+    let mut text = format!("{} anchors\n", anchors.len());
+    for anchor_name in &anchors {
+        text.push_str(&format!("  name={}\n", anchor_name));
+    }
+    ControlResponse::ok_empty(text)
+}
+
+fn security_key_delete(params: ControlParameters, pib: &FilePib) -> ControlResponse {
+    let name = match params.name {
+        Some(n) => n,
+        None => return ControlResponse::error(status::BAD_PARAMS, "Name is required"),
+    };
+    match pib.delete_key(&name) {
+        Ok(()) => {
+            tracing::info!(name = %name, "security/key-delete");
+            let echo = ControlParameters {
+                name: Some(name),
+                ..Default::default()
+            };
+            ControlResponse::ok("OK", echo)
+        }
+        Err(e) => ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    }
+}
+
+fn security_identity_did(params: ControlParameters, pib: &FilePib) -> ControlResponse {
+    let name = match params.name {
+        Some(n) => n,
+        None => return ControlResponse::error(status::BAD_PARAMS, "Name is required"),
+    };
+    // Verify the key actually exists.
+    match pib.list_keys() {
+        Ok(keys) if keys.contains(&name) => {}
+        Ok(_) => return ControlResponse::error(status::NOT_FOUND, "identity not found in PIB"),
+        Err(e) => return ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    }
+    // Encode as did:ndn:<percent-encoded-name> per W3C DID spec.
+    let encoded = name.to_string().replace('/', "%2F");
+    let did = format!("did:ndn:{encoded}");
+    ControlResponse::ok_empty(did)
+}
+
+fn security_ca_info(config: &ndn_config::ForwarderConfig) -> ControlResponse {
+    let sec = &config.security;
+    match &sec.ca_prefix {
+        None => ControlResponse::error(
+            status::NOT_FOUND,
+            "no CA configured (set [security] ca_prefix in router TOML)",
+        ),
+        Some(prefix) => {
+            let info = format!(
+                "ca_prefix={}\nca_info={}\nmax_validity_days={}\nchallenges={}\n",
+                prefix,
+                sec.ca_info,
+                sec.ca_max_validity_days,
+                sec.ca_challenges.join(","),
+            );
+            ControlResponse::ok_empty(info)
+        }
+    }
+}
+
+fn security_ca_requests() -> ControlResponse {
+    // CaState is not yet embedded in the router process; return empty list.
+    // When ndn-cert's CaState is wired into the router, this will return the
+    // in-flight pending DashMap entries.
+    ControlResponse::ok_empty("0 pending requests\n".to_string())
+}
+
+fn security_ca_token_add(params: ControlParameters) -> ControlResponse {
+    let description = params.uri.unwrap_or_default();
+    // Generate a random hex token using OS randomness.
+    let mut token_bytes = [0u8; 16];
+    let _ = getrandom::getrandom(&mut token_bytes);
+    let token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
+    tracing::info!(token = %token, description = %description, "security/ca-token-add");
+    let echo = ControlParameters {
+        // Return the token in the `uri` field (repurposed as a generic string slot).
+        uri: Some(format!("token={token} description={description}")),
+        ..Default::default()
+    };
+    ControlResponse::ok("OK", echo)
+}
+
+/// Start a background NDNCERT enrollment session.
+///
+/// Creates a temporary [`AppFace`] registered with the engine so that
+/// NDN Interests can be expressed through the live forwarder, then runs
+/// the PROBE → NEW → CHALLENGE exchange against the requested CA prefix.
+/// When the CA issues a certificate it is stored in the PIB.
+async fn security_ca_enroll(
+    params: ControlParameters,
+    pib: &FilePib,
+    engine: &ForwarderEngine,
+) -> ControlResponse {
+    use ndn_face_local::AppFace;
+
+    let ca_name = match params.name {
+        Some(n) => n,
+        None => return ControlResponse::error(status::BAD_PARAMS, "ca_prefix (Name) is required"),
+    };
+
+    // `uri` encodes "challenge_type:challenge_param".
+    let (challenge_type, challenge_param) = match params.uri.as_deref() {
+        Some(s) => match s.split_once(':') {
+            Some((t, p)) => (t.to_owned(), p.to_owned()),
+            None => (s.to_owned(), String::new()),
+        },
+        None => return ControlResponse::error(status::BAD_PARAMS, "challenge type:param required"),
+    };
+
+    // We need an identity key to enroll with.
+    let identity_name = match pib.list_keys() {
+        Ok(keys) => match keys.into_iter().next() {
+            Some(n) => n,
+            None => return ControlResponse::error(status::NOT_FOUND, "no identity keys in PIB"),
+        },
+        Err(e) => return ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    };
+
+    let public_key = match pib.get_signer(&identity_name) {
+        Ok(s) => s.public_key_bytes().to_vec(),
+        Err(e) => return ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    };
+
+    // Allocate a temporary face ID (high range to avoid collisions).
+    let face_id = FaceId(0xFFFF_0100 + (rand_u32() & 0x0FFF));
+    let (app_face, app_handle) = AppFace::new(face_id, 32);
+    let face_cancel = CancellationToken::new();
+    engine.add_face(app_face, face_cancel.clone());
+
+    // Clone what we need for the background task.
+    let engine_clone = engine.clone();
+    let pib_path = pib.root().to_owned();
+    let identity_name_echo = identity_name.clone();
+
+    tokio::spawn(async move {
+        let result = run_enrollment(
+            app_handle,
+            face_id,
+            &ca_name,
+            &identity_name,
+            &public_key,
+            &challenge_type,
+            &challenge_param,
+        )
+        .await;
+
+        face_cancel.cancel();
+
+        match result {
+            Ok(cert) => {
+                // Store the issued certificate in the PIB.
+                match ndn_security::FilePib::open(&pib_path) {
+                    Ok(pib) => match pib.store_cert(&identity_name, &cert) {
+                        Ok(()) => tracing::info!(
+                            name = %identity_name,
+                            "ca-enroll: certificate installed"
+                        ),
+                        Err(e) => tracing::error!(error = %e, "ca-enroll: failed to store cert"),
+                    },
+                    Err(e) => tracing::error!(error = %e, "ca-enroll: failed to open PIB"),
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    ca = %ca_name,
+                    error = %e,
+                    "ca-enroll: enrollment failed"
+                );
+            }
+        }
+
+        drop(engine_clone); // keep engine alive until task completes
+    });
+
+    let echo = ControlParameters {
+        name: Some(identity_name_echo),
+        ..Default::default()
+    };
+    ControlResponse::ok("started", echo)
+}
+
+/// Run the three-step NDNCERT enrollment exchange (PROBE → NEW → CHALLENGE)
+/// using a temporary AppFace that routes Interests through the live forwarder.
+async fn run_enrollment(
+    handle: ndn_face_local::AppHandle,
+    _face_id: ndn_transport::FaceId,
+    ca_prefix: &Name,
+    identity_name: &Name,
+    public_key: &[u8],
+    challenge_type: &str,
+    challenge_param: &str,
+) -> Result<ndn_security::Certificate, String> {
+    use ndn_cert::client::EnrollmentSession;
+    use ndn_packet::encode::encode_interest;
+
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+    // ── PROBE ────────────────────────────────────────────────────────────────
+    let probe_name = ca_prefix.clone().append(b"CA").append(b"PROBE");
+    let probe_interest = encode_interest(&probe_name, None);
+    handle.send(probe_interest).await.map_err(|e| format!("PROBE send: {e}"))?;
+
+    let probe_resp = tokio::time::timeout(TIMEOUT, handle.recv())
+        .await
+        .map_err(|_| "PROBE timeout")?
+        .ok_or("PROBE: face closed")?;
+
+    tracing::debug!(bytes = probe_resp.len(), "ca-enroll: PROBE response received");
+
+    // ── NEW ──────────────────────────────────────────────────────────────────
+    let mut session = EnrollmentSession::new(
+        identity_name.clone(),
+        public_key.to_vec(),
+        86400, // 24h default; CA will cap to its max_validity
+    );
+
+    let new_body = session.new_request_body().map_err(|e| e.to_string())?;
+    let new_name = ca_prefix.clone().append(b"CA").append(b"NEW");
+    let new_interest = encode_interest(&new_name, Some(&new_body));
+    handle.send(new_interest).await.map_err(|e| format!("NEW send: {e}"))?;
+
+    let new_resp = tokio::time::timeout(TIMEOUT, handle.recv())
+        .await
+        .map_err(|_| "NEW timeout")?
+        .ok_or("NEW: face closed")?;
+
+    let new_body_content = extract_data_content(&new_resp).ok_or("NEW: malformed Data")?;
+    session.handle_new_response(&new_body_content).map_err(|e| e.to_string())?;
+
+    // ── CHALLENGE ────────────────────────────────────────────────────────────
+    let mut challenge_params = serde_json::Map::new();
+    challenge_params.insert("code".to_owned(), serde_json::Value::String(challenge_param.to_owned()));
+    let chal_body = session
+        .challenge_request_body(challenge_type, challenge_params)
+        .map_err(|e| e.to_string())?;
+
+    let request_id = session.request_id().unwrap_or("").to_owned();
+    let chal_name = ca_prefix.clone().append(b"CA").append(b"CHALLENGE").append(request_id.as_bytes());
+    let chal_interest = encode_interest(&chal_name, Some(&chal_body));
+    handle.send(chal_interest).await.map_err(|e| format!("CHALLENGE send: {e}"))?;
+
+    let chal_resp = tokio::time::timeout(TIMEOUT, handle.recv())
+        .await
+        .map_err(|_| "CHALLENGE timeout")?
+        .ok_or("CHALLENGE: face closed")?;
+
+    let chal_body_content = extract_data_content(&chal_resp).ok_or("CHALLENGE: malformed Data")?;
+    session.handle_challenge_response(&chal_body_content).map_err(|e| e.to_string())?;
+
+    if session.is_complete() {
+        session.into_certificate().ok_or_else(|| "no cert after completion".to_owned())
+    } else if session.needs_another_round() {
+        let msg = session.challenge_status_message().unwrap_or("another round required");
+        Err(format!("multi-round challenge not supported: {msg}"))
+    } else {
+        Err("enrollment did not complete".to_owned())
+    }
+}
+
+/// Extract the Content TLV value from a Data packet (best-effort).
+fn extract_data_content(data_bytes: &[u8]) -> Option<Vec<u8>> {
+    use ndn_packet::Data;
+    Data::decode(bytes::Bytes::copy_from_slice(data_bytes))
+        .ok()
+        .and_then(|d| d.content().map(|c| c.to_vec()))
+}
+
+/// Generate a pseudo-random u32 for face ID allocation.
+fn rand_u32() -> u32 {
+    let mut buf = [0u8; 4];
+    let _ = getrandom::getrandom(&mut buf);
+    u32::from_le_bytes(buf)
+}
+
+// ─── Config module ────────────────────────────────────────────────────────────
+
+fn handle_config(verb_name: &[u8], config: &ndn_config::ForwarderConfig) -> ControlResponse {
+    match verb_name {
+        v if v == verb::GET => config_get(config),
+        _ => ControlResponse::error(status::NOT_FOUND, "unknown config verb"),
+    }
+}
+
+fn config_get(config: &ndn_config::ForwarderConfig) -> ControlResponse {
+    match config.to_toml_string() {
+        Ok(toml) => ControlResponse::ok_empty(toml),
+        Err(e) => ControlResponse::error(status::SERVER_ERROR, e.to_string()),
+    }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Resolve FaceId from params or source face.
@@ -1262,6 +1711,169 @@ fn resolve_face_id(
                 "cannot determine FaceId",
             ))
         }),
+    }
+}
+
+// ─── YubiKey commands ─────────────────────────────────────────────────────────
+
+/// Detect whether a YubiKey is connected and accessible via PC/SC.
+///
+/// Returns `status_text = "present"` on success, or an error if no device is found.
+/// Requires the `yubikey-piv` cargo feature; returns `NOT_FOUND` otherwise.
+fn security_yubikey_detect() -> ControlResponse {
+    #[cfg(feature = "yubikey-piv")]
+    {
+        match ndn_security::yubikey::YubikeyKeyStore::open() {
+            Ok(_) => ControlResponse::ok_empty("present"),
+            Err(e) => ControlResponse::error(
+                status::NOT_FOUND,
+                format!("YubiKey not found: {e}"),
+            ),
+        }
+    }
+    #[cfg(not(feature = "yubikey-piv"))]
+    {
+        ControlResponse::error(
+            status::NOT_FOUND,
+            "yubikey-piv feature is not compiled in; rebuild ndn-router with --features yubikey-piv",
+        )
+    }
+}
+
+/// Generate a P-256 key in YubiKey PIV slot 9a and register it under `params.name`.
+///
+/// The slot mapping is persisted to `{pib_root}/yubikey-slots.json` so that
+/// subsequent operations can locate the key. The uncompressed 65-byte public key
+/// is returned base64url-encoded in the `uri` field of the response.
+///
+/// Requires the `yubikey-piv` cargo feature.
+async fn security_yubikey_generate(
+    params: ControlParameters,
+    pib: &FilePib,
+) -> ControlResponse {
+    let key_name = match params.name {
+        Some(n) => n,
+        None => return ControlResponse::error(status::BAD_PARAMS, "missing name parameter"),
+    };
+
+    #[cfg(feature = "yubikey-piv")]
+    {
+        use ndn_security::yubikey::{YubikeyKeyStore, YubikeySlot};
+
+        let store = match YubikeyKeyStore::open() {
+            Ok(s) => s,
+            Err(e) => return ControlResponse::error(
+                status::NOT_FOUND,
+                format!("YubiKey not found: {e}"),
+            ),
+        };
+
+        let pub_bytes = match store
+            .generate_in_slot(key_name.clone(), YubikeySlot::Authentication)
+            .await
+        {
+            Ok(b) => b,
+            Err(e) => return ControlResponse::error(
+                status::SERVER_ERROR,
+                format!("YubiKey generate failed: {e}"),
+            ),
+        };
+
+        // Persist the name→slot mapping alongside the PIB.
+        let slot_file = pib.root().join("yubikey-slots.json");
+        let entry = serde_json::json!({
+            "name": key_name.to_string(),
+            "slot": "9a"
+        });
+        let mut entries: Vec<serde_json::Value> = if slot_file.exists() {
+            std::fs::read_to_string(&slot_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        // Remove any existing entry for this name, then append the new one.
+        entries.retain(|e| e["name"].as_str() != Some(&key_name.to_string()));
+        entries.push(entry);
+        let _ = std::fs::write(
+            &slot_file,
+            serde_json::to_vec_pretty(&entries).unwrap_or_default(),
+        );
+
+        let pubkey_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&pub_bytes);
+        tracing::info!(
+            name = %key_name,
+            pubkey_len = pub_bytes.len(),
+            "security/yubikey-generate: P-256 key generated in PIV slot 9a"
+        );
+        ControlResponse::ok(
+            "generated",
+            ControlParameters {
+                name: Some(key_name),
+                uri: Some(pubkey_b64),
+                ..Default::default()
+            },
+        )
+    }
+    #[cfg(not(feature = "yubikey-piv"))]
+    {
+        let _ = (key_name, pib);
+        ControlResponse::error(
+            status::NOT_FOUND,
+            "yubikey-piv feature is not compiled in; rebuild ndn-router with --features yubikey-piv",
+        )
+    }
+}
+
+// ─── Log module ───────────────────────────────────────────────────────────────
+
+fn handle_log(verb_name: &[u8], params: ControlParameters) -> ControlResponse {
+    match verb_name {
+        v if v == verb::GET_RECENT => {
+            // `params.count` carries the last sequence number the client has seen.
+            // We return only entries with seq > after_seq, plus the current max_seq
+            // as the first line of the response body so the client can advance its cursor.
+            let after_seq = params.count.unwrap_or(0);
+            let body = crate::LOG_RING
+                .get()
+                .and_then(|r| r.lock().ok())
+                .map(|g| {
+                    let max_seq = g.back().map(|(s, _)| *s).unwrap_or(0);
+                    let mut out = max_seq.to_string();
+                    for (seq, line) in g.iter() {
+                        if *seq > after_seq {
+                            out.push('\n');
+                            out.push_str(line);
+                        }
+                    }
+                    out
+                })
+                .unwrap_or_else(|| "0".to_string());
+            ControlResponse::ok_empty(body)
+        }
+        v if v == verb::GET_FILTER => {
+            let filter = crate::LOG_FILTER
+                .get()
+                .and_then(|m| m.lock().ok())
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            ControlResponse::ok_empty(filter)
+        }
+        v if v == verb::SET_FILTER => {
+            let filter_str = params.uri.unwrap_or_default();
+            if filter_str.is_empty() {
+                return ControlResponse::error(status::BAD_PARAMS, "uri field must contain the filter string");
+            }
+            if let Some(apply) = crate::APPLY_FILTER.get() {
+                apply(&filter_str);
+                tracing::info!(filter = %filter_str, "log/set-filter: filter updated");
+                ControlResponse::ok_empty(filter_str)
+            } else {
+                ControlResponse::error(status::NOT_FOUND, "filter reload not initialised")
+            }
+        }
+        _ => ControlResponse::error(status::NOT_FOUND, "unknown log verb"),
     }
 }
 
