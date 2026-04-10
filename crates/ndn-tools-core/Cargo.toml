@@ -1,0 +1,29 @@
+[package]
+name = "ndn-tools-core"
+description = "Core library for NDN tools — embeddable in applications and dashboards"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+ping    = []
+iperf   = []
+peek    = []
+put     = []
+send    = ["dep:ndn-filestore"]
+recv    = ["dep:ndn-filestore"]
+
+[dependencies]
+ndn-app        = { workspace = true }
+ndn-ipc        = { workspace = true }
+ndn-packet     = { workspace = true, features = ["std"] }
+ndn-security   = { workspace = true }
+ndn-transport  = { workspace = true }
+ndn-filestore  = { workspace = true, optional = true }
+tokio          = { workspace = true, features = ["rt", "sync", "time"] }
+anyhow         = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+bytes          = { workspace = true, features = ["std"] }
+tracing        = { workspace = true }
