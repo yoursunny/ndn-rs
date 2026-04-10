@@ -1,0 +1,32 @@
+[package]
+name = "ndn-boltffi"
+description = "BoltFFI bindings for ndn-rs — Android (Kotlin/JVM) and iOS/iPadOS (Swift)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ndn_boltffi"
+# staticlib → XCFramework for iOS
+# cdylib   → .so for Android (JNI)
+crate-type = ["cdylib", "staticlib"]
+
+[features]
+## Enable the persistent on-disk content store (backed by fjall).
+## Required to use `NdnEngineConfig.persistent_cs_path`.
+fjall = ["ndn-mobile/fjall"]
+
+[dependencies]
+ndn-mobile      = { workspace = true }
+ndn-app         = { workspace = true }
+ndn-packet      = { workspace = true }
+ndn-security    = { workspace = true }
+ndn-face-local  = { workspace = true }
+tokio           = { workspace = true, features = ["rt-multi-thread"] }
+bytes           = { workspace = true, features = ["std"] }
+thiserror       = { workspace = true }
+tracing         = { workspace = true }
+boltffi         = "0.1"
+
+[build-dependencies]
+boltffi = "0.1"
