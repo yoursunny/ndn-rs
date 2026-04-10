@@ -300,6 +300,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "boltffi"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "566f6f6a1f039c7360e489ef2543d9df82f19af08c3e2c96cae203b911b63ea5"
+dependencies = [
+ "boltffi_core",
+ "boltffi_macros",
+]
+
+[[package]]
+name = "boltffi_core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46e44738e1351af4ce884a569da0928144594ce4fd598c22ef2aeb68f6768bc"
+dependencies = [
+ "boltffi_macros",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "boltffi_ffi_rules"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cedeaa3afa513ef733faf58d5870ffb959f7f9acbe118d43694bb475c6603a2"
+
+[[package]]
+name = "boltffi_macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b673014b1698241690518424227fbd10c054960b7a478b2db95adbf1d4937904"
+dependencies = [
+ "boltffi_ffi_rules",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1556,6 +1595,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1563,8 +1612,19 @@ checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users",
+ "redox_users 0.5.2",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users 0.4.6",
+ "winapi",
 ]
 
 [[package]]
@@ -2604,6 +2664,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "home"
+version = "0.5.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3388,6 +3457,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
+
+[[package]]
 name = "minicov"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3549,6 +3628,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndn-boltffi"
+version = "0.1.0"
+dependencies = [
+ "boltffi",
+ "bytes",
+ "ndn-app",
+ "ndn-face-local",
+ "ndn-mobile",
+ "ndn-packet",
+ "ndn-security",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ndn-cert"
 version = "0.1.0"
 dependencies = [
@@ -3606,16 +3701,22 @@ name = "ndn-dashboard"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "dioxus",
+ "dirs-next",
  "futures",
  "getrandom 0.2.17",
  "ndn-config",
  "ndn-ipc",
  "ndn-packet",
+ "ndn-tools-core",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "which",
 ]
 
 [[package]]
@@ -3747,6 +3848,26 @@ dependencies = [
  "tokio",
  "tokio-serial",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "ndn-filestore"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "dirs-next",
+ "mime_guess",
+ "ndn-app",
+ "ndn-config",
+ "ndn-ipc",
+ "ndn-packet",
+ "ndn-security",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
  "tracing",
 ]
 
@@ -3991,19 +4112,41 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap",
+ "mime_guess",
  "ndn-app",
  "ndn-config",
  "ndn-engine",
  "ndn-face-local",
+ "ndn-filestore",
  "ndn-ipc",
  "ndn-packet",
  "ndn-security",
+ "ndn-tools-core",
  "ndn-transport",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "ndn-tools-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "ndn-app",
+ "ndn-filestore",
+ "ndn-ipc",
+ "ndn-packet",
+ "ndn-security",
+ "ndn-transport",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5156,6 +5299,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags 2.11.0",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6521,6 +6675,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7181,6 +7341,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "which"
+version = "6.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ee928febd44d98f2f459a4a79bd4d928591333a494a10a868418ac1b39cf1f"
+dependencies = [
+ "either",
+ "home",
+ "rustix 0.38.44",
+ "winsafe",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7637,6 +7809,12 @@ checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "wit-bindgen"

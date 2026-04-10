@@ -38,12 +38,18 @@ members = [
     "binaries/ndn-router",
     "binaries/ndn-tools",
     "binaries/ndn-bench",
+    # File transfer library
+    "crates/ndn-filestore",
+    # Embeddable tool logic (used by dashboard and standalone binaries)
+    "crates/ndn-tools-core",
     # Embedded
     "crates/ndn-embedded",
     # Mobile (Android / iOS)
     "crates/ndn-mobile",
     # Python bindings
     "bindings/ndn-python",
+    # BoltFFI bindings (Android/Kotlin + iOS/Swift)
+    "bindings/ndn-boltffi",
     # Dashboard
     "tools/ndn-dashboard",
     # Examples
@@ -92,6 +98,8 @@ ndn-sim       = { path = "crates/ndn-sim" }
 ndn-did      = { path = "crates/ndn-did" }
 ndn-cert     = { path = "crates/ndn-cert" }
 ndn-identity = { path = "crates/ndn-identity" }
+ndn-filestore  = { path = "crates/ndn-filestore" }
+ndn-tools-core = { path = "crates/ndn-tools-core" }
 
 # Core async runtime — individual crates enable only the features they need
 tokio      = { version = "1", default-features = false }
