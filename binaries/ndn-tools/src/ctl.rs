@@ -18,17 +18,10 @@
 /// ndn-ctl status
 /// ndn-ctl shutdown
 /// ```
-///
-/// An optional `--bypass` flag falls back to the legacy transport: raw JSON
-/// over a Unix socket.
 use clap::{Parser, Subcommand};
 
 use ndn_config::ControlResponse;
 use ndn_ipc::MgmtClient;
-
-// Legacy JSON types (bypass path only).
-#[cfg(unix)]
-use ndn_config::{ManagementRequest, ManagementResponse};
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
@@ -39,29 +32,15 @@ use ndn_config::{ManagementRequest, ManagementResponse};
     version
 )]
 struct Cli {
-    /// Use the legacy bypass transport (raw JSON over Unix socket).
-    #[arg(long)]
-    bypass: bool,
-
-    /// IPC socket path for the NDN management transport.
+    /// Router socket path.
     ///
-    /// On Unix: path to a Unix domain socket (e.g. `/tmp/ndn-faces.sock`).
-    /// On Windows: a Named Pipe path (e.g. `\\.\pipe\ndn-faces`).
-    /// May also be set via $NDN_FACE_SOCK.
+    /// On Unix: path to a Unix domain socket (e.g. `/tmp/ndn.sock`).
+    /// On Windows: a Named Pipe path (e.g. `\\.\pipe\ndn`).
+    /// May also be set via $NDN_SOCK.
     #[arg(
         long,
-        env = "NDN_FACE_SOCK",
+        env = "NDN_SOCK",
         default_value_t = ndn_config::ManagementConfig::default().face_socket,
-    )]
-    face_socket: String,
-
-    /// Unix socket path (bypass transport only).
-    ///
-    /// May also be set via $NDN_MGMT_SOCK.
-    #[arg(
-        long,
-        env = "NDN_MGMT_SOCK",
-        default_value_t = ndn_config::ManagementConfig::default().bypass_socket,
     )]
     socket: String,
 
@@ -269,11 +248,7 @@ async fn main() -> anyhow::Result<()> {
         return run_security(action);
     }
 
-    if cli.bypass {
-        run_bypass(&cli).await
-    } else {
-        run_nfd(&cli).await
-    }
+    run_nfd(&cli).await
 }
 
 // ─── NFD transport (primary) ────────────────────────────────────────────────
@@ -281,12 +256,12 @@ async fn main() -> anyhow::Result<()> {
 async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
     use anyhow::Context as _;
 
-    let mgmt = MgmtClient::connect(&cli.face_socket)
+    let mgmt = MgmtClient::connect(&cli.socket)
         .await
         .with_context(|| {
             format!(
                 "Cannot connect to '{}'. Is ndn-router running?",
-                cli.face_socket
+                cli.socket
             )
         })?;
 
@@ -469,78 +444,6 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ─── Bypass transport (legacy) ────────────────────────────────────────────────
-
-#[cfg(unix)]
-async fn run_bypass(cli: &Cli) -> anyhow::Result<()> {
-    let req = build_legacy_request(&cli.command);
-    let resp = send_unix(&cli.socket, &req).await?;
-    print_legacy_response(resp);
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn run_bypass(_cli: &Cli) -> anyhow::Result<()> {
-    anyhow::bail!("Bypass transport requires Unix domain sockets")
-}
-
-#[cfg(unix)]
-async fn send_unix(
-    socket_path: &str,
-    req: &ManagementRequest,
-) -> anyhow::Result<ManagementResponse> {
-    use anyhow::Context as _;
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixStream;
-
-    let stream = UnixStream::connect(socket_path).await.with_context(|| {
-        format!(
-            "Could not connect to '{socket_path}'. Is ndn-router running with bypass transport?"
-        )
-    })?;
-
-    let (reader, mut writer) = stream.into_split();
-    let mut json = serde_json::to_string(req)?;
-    json.push('\n');
-    writer.write_all(json.as_bytes()).await?;
-
-    let mut lines = BufReader::new(reader).lines();
-    let line = lines
-        .next_line()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Connection closed before a response was received."))?;
-
-    serde_json::from_str::<ManagementResponse>(&line)
-        .with_context(|| format!("Unparseable response: {line}"))
-}
-
-#[cfg(unix)]
-fn build_legacy_request(cmd: &Command) -> ManagementRequest {
-    match cmd {
-        Command::Route { action } => match action {
-            RouteAction::Add { prefix, face, cost } => ManagementRequest::AddRoute {
-                prefix: prefix.clone(),
-                face: *face,
-                cost: *cost,
-            },
-            RouteAction::Remove { prefix, face } => ManagementRequest::RemoveRoute {
-                prefix: prefix.clone(),
-                face: *face,
-            },
-            RouteAction::List => ManagementRequest::ListRoutes,
-        },
-        Command::Face {
-            action: FaceAction::List,
-        } => ManagementRequest::ListFaces,
-        // These commands have no legacy equivalent — fall back to stats.
-        Command::Face { .. } => ManagementRequest::GetStats,
-        Command::Status => ManagementRequest::GetStats,
-        Command::Shutdown => ManagementRequest::Shutdown,
-        // Commands with no legacy equivalent (neighbors, service, strategy, cs, security).
-        _ => ManagementRequest::GetStats,
-    }
-}
-
 // ─── Security subcommands (local PIB, no router) ────────────────────────────
 
 fn run_security(action: &SecurityAction) -> anyhow::Result<()> {
@@ -705,19 +608,4 @@ fn print_control_response(resp: &ControlResponse) {
     }
 }
 
-#[cfg(unix)]
-fn print_legacy_response(resp: ManagementResponse) {
-    match resp {
-        ManagementResponse::Ok => println!("ok"),
-        ManagementResponse::OkData { data } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&data).unwrap_or_else(|_| data.to_string())
-            );
-        }
-        ManagementResponse::Error { message } => {
-            eprintln!("error: {message}");
-            std::process::exit(1);
-        }
-    }
-}
+

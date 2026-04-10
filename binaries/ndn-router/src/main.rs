@@ -11,19 +11,11 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use ndn_config::{CsConfig, ForwarderConfig};
-#[cfg(unix)]
-use ndn_config::{ManagementRequest, ManagementResponse, ManagementServer};
 use ndn_engine::{EngineBuilder, EngineConfig, ForwarderEngine};
 use ndn_face_local::AppFace;
 use ndn_packet::Name;
 use ndn_security::{FilePib, SecurityManager};
 use ndn_store::{ErasedContentStore, LruCs, NullCs, ShardedCs};
-
-// Bypass management I/O (Unix only — legacy emergency path).
-#[cfg(unix)]
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-#[cfg(unix)]
-use tokio::net::UnixListener;
 
 // NDN-native management: face listener + Interest/Data handler.
 mod mgmt_ndn;
@@ -696,66 +688,25 @@ async fn main() -> Result<()> {
 
     tracing::info!("engine running");
 
-    // ── Management transport selection ────────────────────────────────────────
-    //
-    // [management]
-    // transport = "ndn"    (default) — NDN Interest/Data over face socket
-    // transport = "bypass"           — raw JSON over Unix socket
-    //
-    // Bypass transports are kept for emergency access when the pipeline is
-    // broken or during bootstrapping.
-
-    let use_ndn_mgmt = fwd_config.management.transport == "ndn";
-
     // ── NDN management ────────────────────────────────────────────────────────
-    let (ndn_handler_task, ndn_listener_task) = if use_ndn_mgmt {
-        let face_socket = fwd_config.management.face_socket.clone();
-        tracing::info!(
-            socket = %face_socket,
-            prefix = "/localhost/nfd",
-            "NFD management active"
-        );
 
-        let handler = tokio::spawn(mgmt_ndn::run_ndn_mgmt_handler(
-            mgmt_handle,
-            engine.clone(),
-            cancel.clone(),
-            mgmt_discovery_sd.clone(),
-            mgmt_discovery_claimed.clone(),
-            Arc::new(fwd_config.clone()),
-            pib.clone(),
-        ));
-        let listener_engine = engine.clone();
-        let listener_cancel = cancel.clone();
-        let listener = tokio::spawn(async move {
-            mgmt_ndn::run_face_listener(&face_socket, listener_engine, listener_cancel).await;
-        });
-        (Some(handler), Some(listener))
-    } else {
-        (None, None)
-    };
+    let face_socket = fwd_config.management.face_socket.clone();
+    tracing::info!(socket = %face_socket, prefix = "/localhost/nfd", "NDN management active");
 
-    // ── Bypass management ─────────────────────────────────────────────────────
-
-    #[cfg(unix)]
-    let bypass_task = if !use_ndn_mgmt {
-        let bypass_path = PathBuf::from(&fwd_config.management.bypass_socket);
-        let mgmt_engine = engine.clone();
-        let cancel_clone = cancel.clone();
-        tracing::info!(path = %bypass_path.display(), "bypass: Unix socket management");
-        Some(tokio::spawn(run_unix_mgmt_server(
-            bypass_path,
-            mgmt_engine,
-            cancel_clone,
-        )))
-    } else {
-        None
-    };
-
-    #[cfg(not(unix))]
-    if !use_ndn_mgmt {
-        tracing::warn!("bypass management unavailable on non-Unix platforms");
-    }
+    let ndn_handler_task = tokio::spawn(mgmt_ndn::run_ndn_mgmt_handler(
+        mgmt_handle,
+        engine.clone(),
+        cancel.clone(),
+        mgmt_discovery_sd.clone(),
+        mgmt_discovery_claimed.clone(),
+        Arc::new(fwd_config.clone()),
+        pib.clone(),
+    ));
+    let listener_engine = engine.clone();
+    let listener_cancel = cancel.clone();
+    let ndn_listener_task = tokio::spawn(async move {
+        mgmt_ndn::run_face_listener(&face_socket, listener_engine, listener_cancel).await;
+    });
 
     // Wait for Ctrl-C.
     tokio::signal::ctrl_c().await?;
@@ -763,156 +714,11 @@ async fn main() -> Result<()> {
     tracing::info!("shutting down");
     cancel.cancel();
 
-    if let Some(t) = ndn_handler_task {
-        let _ = t.await;
-    }
-    if let Some(t) = ndn_listener_task {
-        let _ = t.await;
-    }
-
-    #[cfg(unix)]
-    if let Some(t) = bypass_task {
-        let _ = t.await;
-    }
+    let _ = ndn_handler_task.await;
+    let _ = ndn_listener_task.await;
 
     shutdown.shutdown().await;
     Ok(())
-}
-
-// ─── Legacy JSON management request dispatch (bypass only) ───────────────────
-
-/// Dispatch a legacy JSON management request against the live engine.
-///
-/// Used only by the bypass Unix socket transport. The primary management
-/// path uses NFD-compatible TLV protocol via `mgmt_ndn`.
-#[cfg(unix)]
-fn handle_request(
-    req: ManagementRequest,
-    engine: &ForwarderEngine,
-    cancel: &CancellationToken,
-) -> ManagementResponse {
-    match req {
-        ManagementRequest::AddRoute { prefix, face, cost } => {
-            let name = parse_name(&prefix);
-            engine
-                .fib()
-                .add_nexthop(&name, ndn_transport::FaceId(face), cost);
-            tracing::info!(%prefix, face, cost, "management: route added");
-            ManagementResponse::Ok
-        }
-        ManagementRequest::RemoveRoute { prefix, face } => {
-            let name = parse_name(&prefix);
-            engine
-                .fib()
-                .remove_nexthop(&name, ndn_transport::FaceId(face));
-            tracing::info!(%prefix, face, "management: route removed");
-            ManagementResponse::Ok
-        }
-        ManagementRequest::ListFaces => {
-            let entries: Vec<serde_json::Value> = engine
-                .faces()
-                .face_entries()
-                .into_iter()
-                .filter(|(_, kind)| {
-                    !matches!(
-                        kind,
-                        ndn_transport::FaceKind::App | ndn_transport::FaceKind::Internal
-                    )
-                })
-                .map(|(id, kind)| {
-                    serde_json::json!({
-                        "id":   id.0,
-                        "kind": kind.to_string(),
-                    })
-                })
-                .collect();
-            ManagementResponse::OkData {
-                data: serde_json::json!({ "faces": entries }),
-            }
-        }
-        ManagementRequest::ListRoutes => {
-            let routes: Vec<serde_json::Value> = engine
-                .fib()
-                .dump()
-                .into_iter()
-                .map(|(name, entry)| {
-                    let nexthops: Vec<serde_json::Value> = entry
-                        .nexthops
-                        .iter()
-                        .map(|n| serde_json::json!({ "face": n.face_id.0, "cost": n.cost }))
-                        .collect();
-                    serde_json::json!({ "prefix": name.to_string(), "nexthops": nexthops })
-                })
-                .collect();
-            ManagementResponse::OkData {
-                data: serde_json::json!({ "routes": routes }),
-            }
-        }
-        ManagementRequest::GetStats => {
-            let pit_size = engine.pit().len();
-            ManagementResponse::OkData {
-                data: serde_json::json!({ "pit_size": pit_size }),
-            }
-        }
-        ManagementRequest::Shutdown => {
-            tracing::info!("management: shutdown requested");
-            cancel.cancel();
-            ManagementResponse::Ok
-        }
-    }
-}
-
-// ─── Unix socket management server ────────────────────────────────────────────
-
-/// Accept bypass management connections on a Unix socket until `cancel` fires.
-///
-/// Uses the raw JSON protocol (newline-delimited).  Only active when
-/// `[management] transport = "bypass"`.
-#[cfg(unix)]
-async fn run_unix_mgmt_server(path: PathBuf, engine: ForwarderEngine, cancel: CancellationToken) {
-    // Remove stale socket file if it exists.
-    let _ = std::fs::remove_file(&path);
-
-    let listener = match UnixListener::bind(&path) {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to bind management socket");
-            return;
-        }
-    };
-
-    let engine = Arc::new(engine);
-
-    loop {
-        let conn = tokio::select! {
-            _ = cancel.cancelled() => break,
-            c = listener.accept() => match c {
-                Ok((stream, _)) => stream,
-                Err(e) => {
-                    tracing::warn!(error = %e, "management accept error");
-                    continue;
-                }
-            },
-        };
-
-        let eng = Arc::clone(&engine);
-        let cancel = cancel.clone();
-        tokio::spawn(async move {
-            let (reader, mut writer) = conn.into_split();
-            let mut lines = BufReader::new(reader).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let resp = match ManagementServer::decode_request(&line) {
-                    Ok(req) => handle_request(req, &eng, &cancel),
-                    Err(msg) => ManagementResponse::Error { message: msg },
-                };
-                let encoded = ManagementServer::encode_response(&resp);
-                let _ = writer.write_all(encoded.as_bytes()).await;
-                let _ = writer.write_all(b"\n").await;
-            }
-        });
-    }
-
-    let _ = std::fs::remove_file(&path);
 }
 
 // ─── WebSocket listener ──────────────────────────────────────────────────────

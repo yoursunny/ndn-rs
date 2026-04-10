@@ -143,26 +143,13 @@ cost = 10
 # ─── Management ───────────────────────────────────────────────────────────────
 
 [management]
-# Primary management transport.
-#   "ndn"    — NFD Interest/Data protocol over the face socket (default)
-#   "bypass" — raw JSON over a Unix socket; use when the NDN pipeline is
-#               not yet initialised or for debugging
-# Default: "ndn"
-transport = "ndn"
-
-# Socket path for NDN face connections.
-# Apps and ndn-ctl connect here to exchange Interest/Data packets.
-# Unix: path to Unix domain socket.
+# Router socket — apps and ndn-ctl connect here to exchange NDN Interest/Data
+# packets and send management commands.
+# Unix: path to a Unix domain socket.
 # Windows: Named Pipe path.
-# Default (Unix):   /tmp/ndn-faces.sock
-# Default (Windows): \\.\pipe\ndn-faces
-face_socket = "/tmp/ndn-faces.sock"
-
-# Socket path for the legacy bypass JSON transport.
-# Only used when transport = "bypass".
-# Default (Unix):   /tmp/ndn-router.sock
-# Default (Windows): \\.\pipe\ndn-router
-bypass_socket = "/tmp/ndn-router.sock"
+# Default (Unix):    /tmp/ndn.sock
+# Default (Windows): \\.\pipe\ndn
+# socket = "/tmp/ndn.sock"
 
 
 # ─── Security ────────────────────────────────────────────────────────────────

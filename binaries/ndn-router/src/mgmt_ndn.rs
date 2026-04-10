@@ -97,8 +97,8 @@ pub fn mgmt_prefix() -> Name {
 
 /// Accept NDN face connections on `path` and register each as a dynamic face.
 ///
-/// `path` is a Unix domain socket path on Unix (e.g. `/tmp/ndn-faces.sock`)
-/// or a Named Pipe path on Windows (e.g. `\\.\pipe\ndn-faces`).
+/// `path` is a Unix domain socket path on Unix (e.g. `/tmp/ndn.sock`)
+/// or a Named Pipe path on Windows (e.g. `\\.\pipe\ndn`).
 pub async fn run_face_listener(path: &str, engine: ForwarderEngine, cancel: CancellationToken) {
     let listener = match ndn_face_local::IpcListener::bind(path) {
         Ok(l) => l,

@@ -18,11 +18,11 @@
 //! from ndn_rs import Consumer, Producer
 //!
 //! # Fetch content
-//! c = Consumer("/tmp/ndn-faces.sock")
+//! c = Consumer("/tmp/ndn.sock")
 //! raw = c.get("/ndn/sensor/temperature")  # bytes
 //!
 //! # Serve data
-//! p = Producer("/tmp/ndn-faces.sock", "/ndn/sensor")
+//! p = Producer("/tmp/ndn.sock", "/ndn/sensor")
 //! p.serve(lambda name: b"23.5" if "temperature" in name else None)
 //! ```
 
@@ -110,7 +110,7 @@ impl Data {
 /// Parameters
 /// ----------
 /// socket : str
-///     Path to the router's face socket, e.g. ``"/tmp/ndn-faces.sock"``.
+///     Path to the router's face socket, e.g. ``"/tmp/ndn.sock"``.
 ///
 /// Raises
 /// ------
@@ -120,7 +120,7 @@ impl Data {
 /// Examples
 /// --------
 /// ```python
-/// c = ndn_rs.Consumer("/tmp/ndn-faces.sock")
+/// c = ndn_rs.Consumer("/tmp/ndn.sock")
 /// raw   = c.get("/ndn/sensor/temperature")   # bytes
 /// data  = c.fetch("/ndn/sensor/temperature")  # Data object
 /// print(data.name, data.content)
@@ -198,7 +198,7 @@ impl Consumer {
 /// Examples
 /// --------
 /// ```python
-/// p = ndn_rs.Producer("/tmp/ndn-faces.sock", "/ndn/sensor")
+/// p = ndn_rs.Producer("/tmp/ndn.sock", "/ndn/sensor")
 ///
 /// def handler(name: str) -> bytes | None:
 ///     if name.endswith("/temperature"):
