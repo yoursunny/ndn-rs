@@ -26,5 +26,5 @@
 
 pub mod protocols;
 
-pub use protocols::dvr::DvrProtocol;
+pub use protocols::dvr::{DvrConfig, DvrProtocol};
 pub use protocols::r#static::{StaticProtocol, StaticRoute};

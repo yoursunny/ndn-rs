@@ -48,7 +48,7 @@
 //! update is received. The RIB's background expiry task removes them.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -63,13 +63,39 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Constants / runtime config ──────────────────────────────────────────────
 
-/// How often to broadcast the routing table to all neighbor faces.
-pub const UPDATE_INTERVAL: Duration = Duration::from_secs(30);
+/// Default broadcast interval (used when no custom config is provided).
+pub const DEFAULT_UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Routes learned from neighbors expire after this long without a refresh.
-pub const ROUTE_TTL: Duration = Duration::from_secs(90);
+/// Default route TTL (should be ≥ 2× update interval).
+pub const DEFAULT_ROUTE_TTL: Duration = Duration::from_secs(90);
+
+// Keep the old names as aliases so external code that references them still compiles.
+pub const UPDATE_INTERVAL: Duration = DEFAULT_UPDATE_INTERVAL;
+pub const ROUTE_TTL: Duration = DEFAULT_ROUTE_TTL;
+
+/// Runtime-mutable configuration for the DVR protocol.
+///
+/// Wrap in `Arc<RwLock<>>` and share between the protocol instance and the
+/// management handler so that parameters can be updated at runtime.
+#[derive(Clone, Debug)]
+pub struct DvrConfig {
+    /// How often to broadcast the routing table to all neighbor faces.
+    pub update_interval: Duration,
+    /// Routes learned from neighbors expire after this long without a refresh.
+    /// Must be ≥ 2× `update_interval` to avoid false expiry between broadcasts.
+    pub route_ttl: Duration,
+}
+
+impl Default for DvrConfig {
+    fn default() -> Self {
+        Self {
+            update_interval: DEFAULT_UPDATE_INTERVAL,
+            route_ttl: DEFAULT_ROUTE_TTL,
+        }
+    }
+}
 
 /// DVR protocol identifier used in `DiscoveryProtocol::protocol_id`.
 pub const DVR_PROTOCOL_ID: ProtocolId = ProtocolId("dvr");
@@ -127,16 +153,19 @@ pub struct DvrInner {
     claimed: Vec<Name>,
     /// Time of last broadcast — used to avoid redundant updates on tick.
     last_update: std::sync::Mutex<Option<Instant>>,
+    /// Runtime-mutable protocol configuration (intervals, TTL).
+    config: Arc<RwLock<DvrConfig>>,
 }
 
 impl DvrInner {
-    fn new(node_name: Name) -> Arc<Self> {
+    fn new(node_name: Name, config: Arc<RwLock<DvrConfig>>) -> Arc<Self> {
         Arc::new(Self {
             node_name,
             table: DashMap::new(),
             routing: OnceLock::new(),
             claimed: vec![dvr_adv_prefix()],
             last_update: std::sync::Mutex::new(None),
+            config,
         })
     }
 
@@ -261,7 +290,8 @@ impl DvrInner {
         };
 
         let now = Instant::now();
-        let expires = now + ROUTE_TTL;
+        let route_ttl = self.config.read().unwrap().route_ttl;
+        let expires = now + route_ttl;
 
         // Build a set of prefixes advertised in this update (for withdrawal detection).
         let advertised: HashMap<Name, u32> = adv.routes.into_iter().collect();
@@ -370,9 +400,18 @@ pub struct DvrProtocol {
 
 impl DvrProtocol {
     pub fn new(node_name: Name) -> Arc<Self> {
+        Self::new_with_config(node_name, Arc::new(RwLock::new(DvrConfig::default())))
+    }
+
+    pub fn new_with_config(node_name: Name, config: Arc<RwLock<DvrConfig>>) -> Arc<Self> {
         Arc::new(Self {
-            inner: DvrInner::new(node_name),
+            inner: DvrInner::new(node_name, config),
         })
+    }
+
+    /// Return a cloneable handle to the shared DVR config for the management handler.
+    pub fn config_handle(&self) -> Arc<RwLock<DvrConfig>> {
+        Arc::clone(&self.inner.config)
     }
 }
 
@@ -438,12 +477,13 @@ impl DiscoveryProtocol for DvrProtocol {
     }
 
     fn on_tick(&self, _now: std::time::Instant, ctx: &dyn DiscoveryContext) {
+        let update_interval = self.inner.config.read().unwrap().update_interval;
         let should_send = self
             .inner
             .last_update
             .lock()
             .unwrap()
-            .map(|t| t.elapsed() >= UPDATE_INTERVAL)
+            .map(|t| t.elapsed() >= update_interval)
             .unwrap_or(true);
 
         if should_send {
@@ -541,7 +581,7 @@ mod tests {
     #[test]
     fn adv_roundtrip_no_routes() {
         let node = make_name("/ndn/test/node");
-        let inner = DvrInner::new(node);
+        let inner = DvrInner::new(node, Arc::new(RwLock::new(DvrConfig::default())));
         let pkt = inner.build_adv(FaceId(1));
         let parsed = parse_dvr_interest(&pkt).expect("should parse as DVR interest");
         let adv = DvrInner::decode_adv(&parsed.app_params).expect("should decode adv");
@@ -551,7 +591,7 @@ mod tests {
     #[test]
     fn adv_roundtrip_with_routes() {
         let node = make_name("/ndn/test/node");
-        let inner = DvrInner::new(node);
+        let inner = DvrInner::new(node, Arc::new(RwLock::new(DvrConfig::default())));
 
         // Inject a route via face 2 to simulate a learned route.
         inner.table.insert(
