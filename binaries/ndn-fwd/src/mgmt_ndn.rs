@@ -33,7 +33,7 @@ use ndn_discovery::{DiscoveryConfig, HelloStrategyKind, NeighborState, PrefixAnn
 use ndn_engine::{ForwarderEngine, RibRoute};
 use ndn_routing::DvrConfig;
 use ndn_engine::stages::ErasedStrategy;
-use ndn_face_local::AppHandle;
+use ndn_faces::local::InProcHandle;
 use ndn_packet::{Interest, Name, NameComponent, encode::encode_data_unsigned};
 use ndn_security::FilePib;
 use ndn_strategy::{BestRouteStrategy, MulticastStrategy};
@@ -102,7 +102,7 @@ pub fn mgmt_prefix() -> Name {
 /// `path` is a Unix domain socket path on Unix (e.g. `/tmp/ndn.sock`)
 /// or a Named Pipe path on Windows (e.g. `\\.\pipe\ndn`).
 pub async fn run_face_listener(path: &str, engine: ForwarderEngine, cancel: CancellationToken) {
-    let listener = match ndn_face_local::IpcListener::bind(path) {
+    let listener = match ndn_faces::local::IpcListener::bind(path) {
         Ok(l) => l,
         Err(e) => {
             tracing::error!(path = %path, error = %e, "face-listener: bind failed");
@@ -214,7 +214,7 @@ pub async fn run_udp_listener(
                     // packets and injects them via `inject_packet`.
                     let canonical_peer = std::net::SocketAddr::new(src_ip, NDN_PORT);
                     let face_id = engine.faces().alloc_id();
-                    let face = ndn_face_net::UdpFace::from_shared_socket(
+                    let face = ndn_faces::net::UdpFace::from_shared_socket(
                         face_id, Arc::clone(&socket), canonical_peer,
                     );
                     let peer_cancel = cancel.child_token();
@@ -275,7 +275,7 @@ pub async fn run_tcp_listener(
         };
 
         let face_id = engine.faces().alloc_id();
-        let face = ndn_face_net::tcp_face_from_stream(face_id, stream);
+        let face = ndn_faces::net::tcp_face_from_stream(face_id, stream);
         let conn_cancel = cancel.child_token();
         engine.add_face(face, conn_cancel);
         tracing::info!(face=%face_id, peer=%peer, "tcp-listener: accepted connection");
@@ -286,7 +286,7 @@ pub async fn run_tcp_listener(
 
 // ─── Management handler ───────────────────────────────────────────────────────
 
-/// Read Interests from the management `AppHandle`, dispatch NFD commands,
+/// Read Interests from the management `InProcHandle`, dispatch NFD commands,
 /// and write Data responses back.
 /// Runtime handles for management of pluggable protocol components.
 pub struct MgmtHandles {
@@ -298,7 +298,7 @@ pub struct MgmtHandles {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_ndn_mgmt_handler(
-    handle: AppHandle,
+    handle: InProcHandle,
     engine: ForwarderEngine,
     cancel: CancellationToken,
     discovery_sd: Option<Arc<ServiceDiscoveryProtocol>>,
@@ -874,7 +874,7 @@ async fn faces_create_udp(addr_str: &str, engine: &ForwarderEngine) -> ControlRe
         "[::]:0".parse().unwrap()
     };
 
-    match ndn_face_net::UdpFace::bind(local, peer, face_id).await {
+    match ndn_faces::net::UdpFace::bind(local, peer, face_id).await {
         Ok(face) => {
             let local_uri = face.local_uri().unwrap_or_default();
             let cancel = CancellationToken::new();
@@ -912,7 +912,7 @@ async fn faces_create_tcp(addr_str: &str, engine: &ForwarderEngine) -> ControlRe
 
     let face_id = engine.faces().alloc_id();
 
-    match ndn_face_net::tcp_face_connect(face_id, peer).await {
+    match ndn_faces::net::tcp_face_connect(face_id, peer).await {
         Ok(face) => {
             let local_uri = face.local_uri().unwrap_or_default();
             let cancel = CancellationToken::new();
@@ -945,7 +945,7 @@ fn faces_create_shm(
 ) -> ControlResponse {
     let face_id = engine.faces().alloc_id();
 
-    match ndn_face_local::ShmFace::create(face_id, shm_name) {
+    match ndn_faces::local::ShmFace::create(face_id, shm_name) {
         Ok(face) => {
             // Use a child of the control face's cancel token so that when the
             // control face disconnects, this SHM face is also cancelled and
@@ -1822,7 +1822,7 @@ async fn security_ca_enroll(
     pib: &FilePib,
     engine: &ForwarderEngine,
 ) -> ControlResponse {
-    use ndn_face_local::AppFace;
+    use ndn_faces::local::InProcFace;
 
     let ca_name = match params.name {
         Some(n) => n,
@@ -1854,7 +1854,7 @@ async fn security_ca_enroll(
 
     // Allocate a temporary face ID (high range to avoid collisions).
     let face_id = FaceId(0xFFFF_0100 + (rand_u32() & 0x0FFF));
-    let (app_face, app_handle) = AppFace::new(face_id, 32);
+    let (app_face, app_handle) = InProcFace::new(face_id, 32);
     let face_cancel = CancellationToken::new();
     engine.add_face(app_face, face_cancel.clone());
 
@@ -1913,7 +1913,7 @@ async fn security_ca_enroll(
 /// Run the three-step NDNCERT enrollment exchange (PROBE → NEW → CHALLENGE)
 /// using a temporary AppFace that routes Interests through the live forwarder.
 async fn run_enrollment(
-    handle: ndn_face_local::AppHandle,
+    handle: ndn_faces::local::InProcHandle,
     _face_id: ndn_transport::FaceId,
     ca_prefix: &Name,
     identity_name: &Name,
@@ -2205,7 +2205,7 @@ fn handle_log(verb_name: &[u8], params: ControlParameters) -> ControlResponse {
     }
 }
 
-async fn send_response(handle: &AppHandle, name: &Name, resp: &ControlResponse) {
+async fn send_response(handle: &InProcHandle, name: &Name, resp: &ControlResponse) {
     let content = resp.encode();
     let data = encode_data_unsigned(name, &content);
     if let Err(e) = handle.send(data).await {

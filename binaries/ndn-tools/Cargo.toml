@@ -49,8 +49,8 @@ ndn-ipc        = { workspace = true }
 ndn-packet     = { workspace = true, features = ["std"] }
 ndn-security   = { workspace = true }
 ndn-config     = { workspace = true }
-ndn-face-local = { workspace = true }
 ndn-transport  = { workspace = true }
+ndn-faces     = { workspace = true }
 ndn-filestore  = { workspace = true }
 bytes          = { workspace = true, features = ["std"] }
 serde          = { workspace = true }

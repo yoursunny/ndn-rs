@@ -13,7 +13,7 @@ use bytes::Bytes;
 use tokio::sync::mpsc;
 
 use ndn_app::KeyChain;
-use ndn_ipc::RouterClient;
+use ndn_ipc::ForwarderClient;
 use ndn_ipc::chunked::{ChunkedProducer, NDN_DEFAULT_SEGMENT_SIZE};
 use ndn_packet::encode::DataBuilder;
 use ndn_packet::{Interest, Name, NameComponent};
@@ -74,9 +74,9 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
     let served_prefix = name.clone().append_component(NameComponent::version(ts_us));
 
     let client = if params.conn.use_shm {
-        RouterClient::connect(&params.conn.face_socket).await?
+        ForwarderClient::connect(&params.conn.face_socket).await?
     } else {
-        RouterClient::connect_unix_only(&params.conn.face_socket).await?
+        ForwarderClient::connect_unix_only(&params.conn.face_socket).await?
     };
     // Register the base name so the router delivers Interests for any version.
     client.register_prefix(&name).await?;

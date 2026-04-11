@@ -43,7 +43,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use ndn_face_net::UdpFace;
+use ndn_faces::net::UdpFace;
 use ndn_packet::Name;
 use ndn_packet::encode::DataBuilder;
 use ndn_security::{Ed25519Signer, Ed25519Verifier, Signer, VerifyOutcome};

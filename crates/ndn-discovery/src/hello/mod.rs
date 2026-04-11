@@ -10,7 +10,7 @@
 //! | [`payload`] | `HelloPayload` TLV codec — the wire format for hello Data Content |
 //! | [`medium`]  | `LinkMedium` trait — link-specific face creation, signing, address extraction |
 //! | [`protocol`]| `HelloProtocol<T>` — generic SWIM/hello/probe state machine |
-//! | [`udp`]     | `UdpNeighborDiscovery` — UDP multicast neighbor discovery |
+//! | [`udp`]     | `UdpNeighborDiscovery` — UDP multicast neighbor discovery (requires `udp-hello` feature) |
 //! | [`probe`]   | SWIM direct/indirect probe packet builders and parsers |
 //!
 //! ## Adding a new link-medium
@@ -31,7 +31,12 @@ pub mod medium;
 pub mod payload;
 pub mod probe;
 pub mod protocol;
+
+#[cfg(feature = "udp-hello")]
 pub mod udp;
+
+#[cfg(all(feature = "ether-nd", target_os = "linux"))]
+pub mod ether;
 
 pub use medium::{HelloCore, HelloState, LinkMedium, HELLO_PREFIX_DEPTH, HELLO_PREFIX_STR};
 pub use payload::{
@@ -45,4 +50,6 @@ pub use probe::{
     parse_indirect_probe,
 };
 pub use protocol::HelloProtocol;
+
+#[cfg(feature = "udp-hello")]
 pub use udp::UdpNeighborDiscovery;

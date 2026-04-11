@@ -5,7 +5,7 @@ use ndn_config::{
 };
 
 use crate::app::{AppCtx, DashCmd, RouterCmd, push_toast, ToastLevel, ROUTER_RUNNING};
-use crate::router_proc;
+use crate::forwarder_proc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConfigSection {
@@ -143,7 +143,7 @@ pub fn Config() -> Element {
                                     } else {
                                         base_toml.clone()
                                     };
-                                    match router_proc::write_temp_config(&toml) {
+                                    match forwarder_proc::write_temp_config(&toml) {
                                         Ok(path) => {
                                             let path_str = path.to_string_lossy().to_string();
                                             ctx.router_cmd.send(RouterCmd::Stop);
@@ -200,8 +200,8 @@ pub fn Config() -> Element {
                                 value: "{export_text}",
                             }
                             div { style: "margin-top:8px;font-size:12px;color:var(--text-muted);",
-                                "Save this TOML to a file and launch ndn-router with: "
-                                code { style: "color:var(--accent);", "ndn-router --config /path/to/config.toml" }
+                                "Save this TOML to a file and launch ndn-fwd with: "
+                                code { style: "color:var(--accent);", "ndn-fwd --config /path/to/config.toml" }
                             }
                         }
                     }

@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::{Result, bail};
 use tokio::task::JoinSet;
 
-use ndn_app::AppFace;
+use ndn_faces::local::InProcFace;
 use ndn_engine::{EngineBuilder, EngineConfig};
 use ndn_packet::Name;
 use ndn_transport::FaceId;
@@ -91,23 +91,27 @@ async fn main() -> Result<()> {
     for worker in 0..concurrency {
         let pfx = prefix.clone();
         set.spawn(async move {
-            let (face, mut rx) = AppFace::new(FaceId(worker as u32), 128);
+            // Measure the overhead of the InProcFace channel send path.
+            // InProcFace::new creates (engine-side face, app-side handle).
+            // The "engine" receives via face.recv(); the "app" sends via handle.
+            let (face, handle) = InProcFace::new(FaceId(worker as u32), 128);
+            use ndn_transport::Face;
+            let _face_id = face.id(); // confirm the face is alive
+
             let mut rtts = Vec::new();
             for seq in 0..batch {
                 let name = pfx.clone().append(format!("{seq}"));
                 use ndn_packet::Interest;
                 let interest = Interest::new(name);
+                let _ = interest; // interests would be sent through the handle in a real bench
 
                 let t0 = Instant::now();
-                // Drain the request from the channel to avoid a send-side block.
-                let task = tokio::spawn({
-                    let face2 = face.face_id(); // just to keep face alive
-                    async move { face2 }
-                });
-                drop(task);
-                let _ = face.express(interest).await; // will fail (no engine)
+                // Encode and send a dummy packet through the handle to the face.
+                let dummy = bytes::Bytes::from_static(b"\x05\x01\x00");
+                let _ = handle.send(dummy).await;
                 rtts.push(t0.elapsed().as_micros() as u64);
-                let _ = rx.recv().await; // consume request if any
+                // Drain the packet to avoid blocking the next iteration.
+                let _ = face.recv().await;
             }
             rtts
         });

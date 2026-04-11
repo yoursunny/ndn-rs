@@ -212,7 +212,7 @@ pub fn LogPane(pane_id: usize) -> Element {
                 (if exact { e.level == thr } else { e.level >= thr })
                     && pfx.as_deref().is_none_or(|p| e.target.starts_with(p))
                     && !(no_mgmt
-                        && e.target.starts_with("ndn_router::mgmt_ndn")
+                        && e.target.starts_with("ndn_fwd::mgmt_ndn")
                         && e.level == LogLevel::Debug)
                     && (srch.is_empty()
                         || e.message.to_lowercase().contains(srch.as_str())
@@ -310,7 +310,7 @@ pub fn LogPane(pane_id: usize) -> Element {
                     }
                     button {
                         class: if *hide_mgmt.read() { "col-toggle on" } else { "col-toggle" },
-                        title: "Hide ndn_router::mgmt_ndn DEBUG (dashboard polling noise)",
+                        title: "Hide ndn_fwd::mgmt_ndn DEBUG (dashboard polling noise)",
                         onclick: move |_| { let v = *hide_mgmt.read(); hide_mgmt.set(!v); },
                         "hide mgmt"
                     }
@@ -852,7 +852,7 @@ fn save_log_to_file(content: &str, ext: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let path = format!("{home}/ndn-router-{ts}.{ext}");
+    let path = format!("{home}/ndn-fwd-{ts}.{ext}");
     if let Err(e) = std::fs::write(&path, content) {
         tracing::error!(path = %path, error = %e, "failed to save log file");
     } else {

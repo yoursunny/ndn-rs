@@ -12,7 +12,7 @@ use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use tokio::sync::mpsc;
 
-use ndn_ipc::RouterClient;
+use ndn_ipc::ForwarderClient;
 use ndn_packet::encode::InterestBuilder;
 use ndn_packet::{Data, Name};
 
@@ -44,7 +44,7 @@ pub struct PeekParams {
 // ── Single fetch ──────────────────────────────────────────────────────────────
 
 async fn fetch_one(
-    client: &RouterClient,
+    client: &ForwarderClient,
     name: &Name,
     lifetime: Duration,
     can_be_prefix: bool,
@@ -66,7 +66,7 @@ async fn fetch_one(
 /// ndnputchunks producers. Sends the initial Interest with CanBePrefix to
 /// discover the versioned name, then fetches all segments.
 async fn fetch_segmented(
-    client: &RouterClient,
+    client: &ForwarderClient,
     prefix: &Name,
     pipeline: usize,
     lifetime: Duration,
@@ -221,9 +221,9 @@ pub async fn run_peek(params: PeekParams, tx: mpsc::Sender<ToolEvent>) -> Result
     let name     = params.name.parse::<Name>().map_err(|e| anyhow::anyhow!("{e}"))?;
     let lifetime = Duration::from_millis(params.lifetime_ms);
     let client   = if params.conn.use_shm {
-        RouterClient::connect(&params.conn.face_socket).await?
+        ForwarderClient::connect(&params.conn.face_socket).await?
     } else {
-        RouterClient::connect_unix_only(&params.conn.face_socket).await?
+        ForwarderClient::connect_unix_only(&params.conn.face_socket).await?
     };
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };

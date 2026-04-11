@@ -6,13 +6,9 @@ members = [
     "crates/ndn-packet",
     "crates/ndn-transport",
     "crates/ndn-store",
-    # Layer 3 — face implementations
-    "crates/ndn-face-net",
-    "crates/ndn-face-local",
-    "crates/ndn-face-serial",
-    "crates/ndn-face-l2",
+    # Layer 3 — face implementations (consolidated)
+    "crates/ndn-faces",
     # Layer 2 — pipeline, strategy, security
-    "crates/ndn-pipeline",
     "crates/ndn-strategy",
     "crates/ndn-security",
     "crates/ndn-did",
@@ -37,7 +33,7 @@ members = [
     "crates/ndn-sync",
     # Binaries
     "binaries/did-ndn-driver",
-    "binaries/ndn-router",
+    "binaries/ndn-fwd",
     "binaries/ndn-tools",
     "binaries/ndn-bench",
     # File transfer library
@@ -77,18 +73,14 @@ ndn-tlv       = { path = "crates/ndn-tlv", default-features = false }
 ndn-packet    = { path = "crates/ndn-packet", default-features = false }
 ndn-transport = { path = "crates/ndn-transport" }
 ndn-store     = { path = "crates/ndn-store" }
-ndn-pipeline  = { path = "crates/ndn-pipeline" }
 ndn-strategy  = { path = "crates/ndn-strategy" }
 ndn-security  = { path = "crates/ndn-security" }
 ndn-engine    = { path = "crates/ndn-engine" }
 ndn-app       = { path = "crates/ndn-app" }
 ndn-ipc       = { path = "crates/ndn-ipc" }
 ndn-config    = { path = "crates/ndn-config" }
-ndn-discovery = { path = "crates/ndn-discovery" }
-ndn-face-net      = { path = "crates/ndn-face-net" }
-ndn-face-local    = { path = "crates/ndn-face-local" }
-ndn-face-serial   = { path = "crates/ndn-face-serial", default-features = false }
-ndn-face-l2 = { path = "crates/ndn-face-l2" }
+ndn-discovery = { path = "crates/ndn-discovery", default-features = false }
+ndn-faces         = { path = "crates/ndn-faces" }
 ndn-strategy-wasm = { path = "crates/ndn-strategy-wasm" }
 ndn-research  = { path = "crates/ndn-research" }
 ndn-compute   = { path = "crates/ndn-compute" }

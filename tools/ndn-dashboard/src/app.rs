@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use ndn_ipc::MgmtClient;
 
 use crate::{
-    router_proc,
+    forwarder_proc,
     settings::DASH_SETTINGS,
     styles::CSS,
     tool_runner::{
@@ -274,7 +274,7 @@ pub fn App() -> Element {
     let router_cmd = use_coroutine(move |mut rx: UnboundedReceiver<RouterCmd>| {
         let srv_cmd_tx = srv_cmd_tx_arc_r.clone();
         async move {
-        let mut proc: Option<router_proc::RouterProc> = None;
+        let mut proc: Option<forwarder_proc::RouterProc> = None;
         let mut check = tokio::time::interval(Duration::from_millis(500));
 
         loop {
@@ -303,9 +303,9 @@ pub fn App() -> Element {
                     match cmd {
                         RouterCmd::Start(config_path) => {
                             if proc.is_none() {
-                                match router_proc::find_binary() {
+                                match forwarder_proc::find_binary() {
                                     Some(bin) => {
-                                        match router_proc::RouterProc::start(&bin, config_path.as_deref()).await {
+                                        match forwarder_proc::RouterProc::start(&bin, config_path.as_deref()).await {
                                             Ok(p) => {
                                                 *ROUTER_RUNNING.write() = true;
                                                 proc = Some(p);
@@ -321,7 +321,7 @@ pub fn App() -> Element {
                                             Err(e) => tracing::error!("start router: {e}"),
                                         }
                                     }
-                                    None => tracing::warn!("ndn-router binary not found in PATH"),
+                                    None => tracing::warn!("ndn-fwd binary not found in PATH"),
                                 }
                             }
                         }
@@ -1050,7 +1050,7 @@ pub fn App() -> Element {
                                             title: if external {
                                                 "Connected to an external forwarder — disconnect or shut it down first"
                                             } else {
-                                                "Start a local ndn-router process"
+                                                "Start a local ndn-fwd process"
                                             },
                                             onclick: move |_| { if !external { show_start_modal.set(true); } },
                                             "▶ Start"

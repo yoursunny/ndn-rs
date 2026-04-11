@@ -11,7 +11,7 @@ use bytes::{Bytes, BytesMut};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 
-use ndn_ipc::RouterClient;
+use ndn_ipc::ForwarderClient;
 use ndn_packet::{Data, Interest, Name};
 use ndn_packet::encode::{DataBuilder, InterestBuilder};
 
@@ -22,14 +22,14 @@ use crate::types::{FileId, FileMetadata, FileOffer, OfferResponse};
 
 /// Discovers and downloads files from remote nodes, and handles incoming offers.
 pub struct FileClient {
-    client: RouterClient,
+    client: ForwarderClient,
     node_prefix: Name,
 }
 
 impl FileClient {
     /// Connect to a running `ndn-router`.
     pub async fn connect(socket: impl AsRef<std::path::Path>, node_prefix: &str) -> Result<Self> {
-        let client = RouterClient::connect(socket).await?;
+        let client = ForwarderClient::connect(socket).await?;
         let node_prefix: Name = node_prefix.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
 
         // Register the node's notify prefix so we can receive offers.
@@ -277,7 +277,7 @@ impl FileClient {
                 let dest = dest_dir.to_path_buf();
 
                 // Download in background.
-                // NOTE: in production use a shared RouterClient or spawn a new connection.
+                // NOTE: in production use a shared ForwarderClient or spawn a new connection.
                 // For now we report progress to stderr.
                 info!("ndn-filestore: accepted {}, starting download…", offer.meta.name);
                 let meta_name = offer.meta.name.clone();

@@ -1865,7 +1865,6 @@ dependencies = [
  "dashmap",
  "ndn-engine",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-strategy",
  "ndn-transport",
  "parking_lot",
@@ -1882,7 +1881,7 @@ dependencies = [
  "anyhow",
  "ndn-discovery",
  "ndn-engine",
- "ndn-face-net",
+ "ndn-faces",
  "ndn-packet",
  "ndn-transport",
  "tokio",
@@ -1898,7 +1897,6 @@ dependencies = [
  "anyhow",
  "ndn-engine",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-strategy",
  "ndn-transport",
  "smallvec",
@@ -1915,9 +1913,8 @@ dependencies = [
  "bytes",
  "ndn-app",
  "ndn-engine",
- "ndn-face-local",
+ "ndn-faces",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-strategy",
  "ndn-transport",
  "smallvec",
@@ -3598,10 +3595,9 @@ dependencies = [
  "anyhow",
  "bytes",
  "ndn-engine",
- "ndn-face-local",
+ "ndn-faces",
  "ndn-ipc",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-security",
  "ndn-sync",
  "ndn-tlv",
@@ -3620,6 +3616,7 @@ dependencies = [
  "bytes",
  "ndn-app",
  "ndn-engine",
+ "ndn-faces",
  "ndn-packet",
  "ndn-transport",
  "tokio",
@@ -3634,7 +3631,7 @@ dependencies = [
  "boltffi",
  "bytes",
  "ndn-app",
- "ndn-face-local",
+ "ndn-faces",
  "ndn-mobile",
  "ndn-packet",
  "ndn-security",
@@ -3731,7 +3728,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "dashmap",
- "ndn-face-net",
+ "ndn-faces",
  "ndn-packet",
  "ndn-security",
  "ndn-sync",
@@ -3763,9 +3760,8 @@ dependencies = [
  "criterion",
  "dashmap",
  "ndn-discovery",
- "ndn-face-net",
+ "ndn-faces",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-security",
  "ndn-store",
  "ndn-strategy",
@@ -3778,68 +3774,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "ndn-face-l2"
+name = "ndn-faces"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "criterion",
  "dashmap",
+ "futures",
  "libc",
- "ndn-discovery",
- "ndn-face-net",
  "ndn-packet",
  "ndn-tlv",
  "ndn-transport",
  "pcap",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "ndn-face-local"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "criterion",
- "libc",
- "ndn-packet",
- "ndn-tlv",
- "ndn-transport",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "ndn-face-net"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures",
- "ndn-packet",
- "ndn-tlv",
- "ndn-transport",
- "thiserror 2.0.18",
- "tokio",
+ "tokio-serial",
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "ndn-face-serial"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "ndn-packet",
- "ndn-transport",
- "thiserror 2.0.18",
- "tokio",
- "tokio-serial",
- "tokio-util",
- "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3860,6 +3813,36 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "ndn-fwd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "getrandom 0.2.17",
+ "libc",
+ "ndn-app",
+ "ndn-cert",
+ "ndn-config",
+ "ndn-discovery",
+ "ndn-engine",
+ "ndn-faces",
+ "ndn-packet",
+ "ndn-routing",
+ "ndn-security",
+ "ndn-store",
+ "ndn-strategy",
+ "ndn-transport",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3886,7 +3869,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "ndn-config",
- "ndn-face-local",
+ "ndn-faces",
  "ndn-packet",
  "ndn-transport",
  "thiserror 2.0.18",
@@ -3903,9 +3886,7 @@ dependencies = [
  "ndn-app",
  "ndn-discovery",
  "ndn-engine",
- "ndn-face-local",
- "ndn-face-net",
- "ndn-face-serial",
+ "ndn-faces",
  "ndn-packet",
  "ndn-security",
  "ndn-store",
@@ -3928,19 +3909,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ndn-pipeline"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "ndn-packet",
- "ndn-store",
- "ndn-transport",
- "smallvec",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "ndn-python"
 version = "0.1.0"
 dependencies = [
@@ -3956,45 +3924,12 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "dashmap",
- "ndn-face-l2",
- "ndn-packet",
- "ndn-pipeline",
- "ndn-transport",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ndn-router"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "getrandom 0.2.17",
- "libc",
- "ndn-app",
- "ndn-cert",
- "ndn-config",
- "ndn-discovery",
  "ndn-engine",
- "ndn-face-l2",
- "ndn-face-local",
- "ndn-face-net",
- "ndn-face-serial",
+ "ndn-faces",
  "ndn-packet",
- "ndn-routing",
- "ndn-security",
- "ndn-store",
- "ndn-strategy",
  "ndn-transport",
- "serde_json",
  "tokio",
- "tokio-tungstenite",
- "tokio-util",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -4075,7 +4010,6 @@ dependencies = [
  "bytes",
  "dashmap",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-store",
  "ndn-transport",
  "smallvec",
@@ -4089,7 +4023,6 @@ dependencies = [
  "anyhow",
  "ndn-engine",
  "ndn-packet",
- "ndn-pipeline",
  "ndn-strategy",
  "ndn-transport",
  "smallvec",
@@ -4128,7 +4061,7 @@ dependencies = [
  "ndn-app",
  "ndn-config",
  "ndn-engine",
- "ndn-face-local",
+ "ndn-faces",
  "ndn-filestore",
  "ndn-ipc",
  "ndn-packet",
@@ -4171,6 +4104,7 @@ dependencies = [
  "ndn-packet",
  "ndn-tlv",
  "serde",
+ "smallvec",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",

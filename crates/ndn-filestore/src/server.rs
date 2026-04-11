@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use ndn_ipc::RouterClient;
+use ndn_ipc::ForwarderClient;
 use ndn_packet::{Interest, Name};
 use ndn_packet::encode::{DataBuilder, InterestBuilder};
 
@@ -70,7 +70,7 @@ impl HostedFile {
 
 /// Hosts files and sends transfer offers to remote nodes.
 pub struct FileServer {
-    client: RouterClient,
+    client: ForwarderClient,
     node_prefix: Name,
     files: Arc<RwLock<HashMap<FileId, HostedFile>>>,
 }
@@ -78,7 +78,7 @@ pub struct FileServer {
 impl FileServer {
     /// Connect to a running `ndn-router` and start hosting.
     pub async fn connect(socket: impl AsRef<std::path::Path>, node_prefix: &str) -> Result<Self> {
-        let client = RouterClient::connect(socket).await?;
+        let client = ForwarderClient::connect(socket).await?;
         let node_prefix: Name = node_prefix.parse().map_err(|e| anyhow::anyhow!("{e}"))?;
 
         // Register the protocol prefix.

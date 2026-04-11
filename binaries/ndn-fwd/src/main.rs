@@ -29,7 +29,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use ndn_config::{CsConfig, ForwarderConfig};
 use ndn_engine::{EngineBuilder, EngineConfig, ForwarderEngine};
-use ndn_face_local::AppFace;
+use ndn_faces::local::InProcFace;
 use ndn_packet::Name;
 use ndn_security::{FilePib, SecurityManager};
 use ndn_store::{ErasedContentStore, LruCs, NullCs, ShardedCs};
@@ -288,7 +288,7 @@ async fn main() -> Result<()> {
     // FIB pointing at this face.  The NDN management handler reads Interests
     // from the AppHandle side and writes Data responses back.
     const MGMT_FACE_ID: u32 = 0xFFFF_0001;
-    let (mgmt_app_face, mgmt_handle) = AppFace::new(ndn_transport::FaceId(MGMT_FACE_ID), 64);
+    let (mgmt_app_face, mgmt_handle) = InProcFace::new(ndn_transport::FaceId(MGMT_FACE_ID), 64);
 
     let security_result = load_security(&fwd_config);
     let pib: Option<Arc<FilePib>> = security_result.as_ref().and_then(|(_, path)| {
@@ -450,9 +450,9 @@ async fn main() -> Result<()> {
                     ndn_config::FaceConfig::EtherMulticast { interface } => interface.as_str(),
                     _ => unreachable!(),
                 };
-                match ndn_face_l2::get_interface_mac(iface) {
+                match ndn_faces::l2::get_interface_mac(iface) {
                     Ok(local_mac) => {
-                        let ether_nd = ndn_face_l2::EtherNeighborDiscovery::new_with_config(
+                        let ether_nd = ndn_faces::l2::EtherNeighborDiscovery::new_with_config(
                             *ether_id,
                             iface,
                             node_name.clone(),
@@ -623,7 +623,7 @@ async fn main() -> Result<()> {
                 let eng = engine.clone();
                 let c = cancel.child_token();
                 tokio::spawn(async move {
-                    match ndn_face_net::MulticastUdpFace::new(iface, port, group_addr, id).await {
+                    match ndn_faces::net::MulticastUdpFace::new(iface, port, group_addr, id).await {
                         Ok(face) => {
                             eng.add_face_with_persistency(
                                 face,
@@ -659,7 +659,7 @@ async fn main() -> Result<()> {
                 #[cfg(feature = "serial")]
                 {
                     let id = engine.faces().alloc_id();
-                    match ndn_face_serial::serial_face_open(id, path, *baud) {
+                    match ndn_faces::serial::serial_face_open(id, path, *baud) {
                         Ok(face) => {
                             let c = cancel.child_token();
                             engine.add_face(face, c);
@@ -686,7 +686,7 @@ async fn main() -> Result<()> {
                         .find(|(_, ci)| *ci == face_idx)
                         .map(|(id, _)| *id)
                         .unwrap_or_else(|| engine.faces().alloc_id());
-                    match ndn_face_l2::MulticastEtherFace::new(id, interface) {
+                    match ndn_faces::l2::MulticastEtherFace::new(id, interface) {
                         Ok(face) => {
                             let c = cancel.child_token();
                             engine.add_face_with_persistency(
@@ -793,7 +793,7 @@ async fn run_ws_listener(
             };
 
         let face_id = engine.faces().alloc_id();
-        let face = ndn_face_net::WebSocketFace::from_stream(
+        let face = ndn_faces::net::WebSocketFace::from_stream(
             face_id,
             ws,
             peer.to_string(),

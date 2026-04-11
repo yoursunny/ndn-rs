@@ -1,6 +1,6 @@
 use smallvec::SmallVec;
 
-use ndn_pipeline::ForwardingAction;
+use ndn_engine::pipeline::ForwardingAction;
 use ndn_strategy::{FibNexthop, StrategyContext};
 use ndn_transport::FaceId;
 
@@ -192,11 +192,11 @@ pub(crate) fn add_host_functions(linker: &mut wasmtime::Linker<HostState>) -> an
         "nack",
         |mut caller: wasmtime::Caller<'_, HostState>, reason: u32| {
             let nr = match reason {
-                0 => ndn_pipeline::NackReason::NoRoute,
-                1 => ndn_pipeline::NackReason::Duplicate,
-                2 => ndn_pipeline::NackReason::Congestion,
-                3 => ndn_pipeline::NackReason::NotYet,
-                _ => ndn_pipeline::NackReason::NoRoute,
+                0 => ndn_engine::pipeline::NackReason::NoRoute,
+                1 => ndn_engine::pipeline::NackReason::Duplicate,
+                2 => ndn_engine::pipeline::NackReason::Congestion,
+                3 => ndn_engine::pipeline::NackReason::NotYet,
+                _ => ndn_engine::pipeline::NackReason::NoRoute,
             };
             caller.data_mut().actions.push(ForwardingAction::Nack(nr));
         },

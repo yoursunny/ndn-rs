@@ -1,0 +1,62 @@
+[package]
+name = "ndn-faces"
+description = "NDN face implementations: network (UDP/TCP/WS), local (in-process/SHM/Unix), serial (UART/COBS), and link-layer (Ethernet/BLE/WFB)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# ── Feature flags ────────────────────────────────────────────────────────────
+#
+# default = ["net", "websocket", "local"]
+#
+# net         – UdpFace, TcpFace, MulticastUdpFace (requires tokio::net)
+# websocket   – WebSocketFace (implies net; requires tokio-tungstenite)
+# local       – InProcFace/InProcHandle, IpcFace, UnixFace
+# spsc-shm    – ShmFace/ShmHandle zero-copy ring (implies local; Unix only,
+#               excluding Android/iOS)
+# serial      – SerialFace with COBS framing (requires tokio-serial)
+# l2          – Ethernet/WFB/BLE faces; platform cfg selects the right impl
+# bluetooth   – BleFace GATT stub (implies l2)
+# wfb         – WfbFace monitor-mode injection (implies l2; Linux only)
+
+[features]
+default = ["net", "websocket", "local"]
+net       = []
+websocket = ["net", "dep:tokio-tungstenite"]
+local     = []
+spsc-shm  = ["local", "dep:libc"]
+serial    = ["dep:tokio-serial"]
+l2        = ["dep:libc"]
+bluetooth = ["l2"]
+wfb       = ["l2"]
+
+[dependencies]
+ndn-tlv       = { workspace = true }
+ndn-packet    = { workspace = true, features = ["std"] }
+ndn-transport = { workspace = true }
+bytes         = { workspace = true, features = ["std"] }
+tokio         = { workspace = true, features = ["sync", "io-util", "net", "rt", "macros", "time"] }
+tokio-util    = { workspace = true, features = ["codec"] }
+futures       = { workspace = true }
+thiserror     = { workspace = true }
+tracing       = { workspace = true }
+dashmap       = { workspace = true }
+
+# Optional deps gated by features
+tokio-tungstenite = { workspace = true, optional = true }
+tokio-serial      = { workspace = true, optional = true }
+libc              = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+pcap        = { workspace = true }
+windows-sys = { workspace = true }
+
+[dev-dependencies]
+ndn-tlv = { workspace = true, features = ["std"] }
+tokio   = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "time"] }
+criterion = { workspace = true }
+
+[[bench]]
+name    = "face_local"
+harness = false
+path    = "benches/face_local.rs"

@@ -6,7 +6,7 @@ use boltffi::export;
 use tokio::runtime::Runtime;
 
 use ndn_app::Consumer;
-use ndn_face_local::AppHandle;
+use ndn_faces::local::InProcHandle;
 
 use crate::engine::NdnEngine;
 use crate::types::{NdnData, NdnError};
@@ -27,7 +27,7 @@ pub struct NdnConsumer {
 }
 
 impl NdnConsumer {
-    pub(crate) fn from_handle(handle: AppHandle, rt: Arc<Runtime>) -> Self {
+    pub(crate) fn from_handle(handle: InProcHandle, rt: Arc<Runtime>) -> Self {
         Self {
             inner: Mutex::new(Consumer::from_handle(handle)),
             rt,

@@ -1,6 +1,6 @@
 //! `ndn-traffic` — NDN traffic generator.
 //!
-//! Embeds a forwarding engine with producer/consumer `AppFace` pairs and
+//! Embeds a forwarding engine with producer/consumer `InProcFace` pairs and
 //! drives configurable Interest/Data traffic through the full pipeline.
 //!
 //! Usage:
@@ -17,7 +17,7 @@ use clap::Parser;
 use tokio::task::JoinSet;
 
 use ndn_engine::{EngineBuilder, EngineConfig};
-use ndn_face_local::{AppFace, AppHandle};
+use ndn_faces::local::{InProcFace, InProcHandle};
 use ndn_packet::encode::{encode_data_unsigned, encode_interest};
 use ndn_packet::lp::is_lp_packet;
 use ndn_packet::{Interest, Name};
@@ -111,7 +111,7 @@ fn print_stats(results: &[FlowResult], elapsed: Duration, size: usize) {
 
 // ─── Producer ────────────────────────────────────────────────────────────────
 
-async fn run_producer(handle: AppHandle, payload: Arc<Vec<u8>>) {
+async fn run_producer(handle: InProcHandle, payload: Arc<Vec<u8>>) {
     loop {
         let raw = match handle.recv().await {
             Some(b) => b,
@@ -131,7 +131,7 @@ async fn run_producer(handle: AppHandle, payload: Arc<Vec<u8>>) {
 // ─── Consumer ────────────────────────────────────────────────────────────────
 
 async fn run_consumer(
-    handle: AppHandle,
+    handle: InProcHandle,
     prefix: Name,
     flow_id: u64,
     count: u64,
@@ -199,23 +199,23 @@ async fn main() -> Result<()> {
     let buf_size = 4096;
 
     // Consumer faces: FaceId(1) .. FaceId(concurrency)
-    let mut consumer_handles: Vec<AppHandle> = Vec::new();
+    let mut consumer_handles: Vec<InProcHandle> = Vec::new();
     let mut builder = EngineBuilder::new(EngineConfig {
         pipeline_channel_cap: buf_size,
         ..Default::default()
     });
 
     for i in 0..concurrency {
-        let (face, handle) = AppFace::new(FaceId((i + 1) as u32), buf_size);
+        let (face, handle) = InProcFace::new(FaceId((i + 1) as u32), buf_size);
         consumer_handles.push(handle);
         builder = builder.face(face);
     }
 
     // Producer face (echo mode only).
     let producer_face_id = FaceId((concurrency + 1) as u32);
-    let mut producer_handle: Option<AppHandle> = None;
+    let mut producer_handle: Option<InProcHandle> = None;
     if echo_mode {
-        let (face, handle) = AppFace::new(producer_face_id, buf_size);
+        let (face, handle) = InProcFace::new(producer_face_id, buf_size);
         producer_handle = Some(handle);
         builder = builder.face(face);
     }

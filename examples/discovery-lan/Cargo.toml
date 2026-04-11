@@ -11,9 +11,9 @@ path = "src/main.rs"
 [dependencies]
 ndn-packet    = { workspace = true, features = ["std"] }
 ndn-transport = { workspace = true }
+ndn-faces     = { workspace = true }
 ndn-engine    = { workspace = true }
 ndn-discovery = { workspace = true }
-ndn-face-net  = { workspace = true }
 tokio         = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tokio-util    = { workspace = true, features = ["rt"] }
 tracing       = { workspace = true }

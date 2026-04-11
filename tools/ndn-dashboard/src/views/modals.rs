@@ -924,7 +924,7 @@ pub fn StartRouterModal(on_close: EventHandler<()>, config_toml: Signal<String>)
                                             };
                                             assemble_config(&sock, &csv, csc, css, &ll, thr, &fcs, &rts, sec, disc)
                                         };
-                                        match crate::router_proc::write_temp_config(&toml) {
+                                        match crate::forwarder_proc::write_temp_config(&toml) {
                                             Ok(path) => {
                                                 ctx.router_cmd.send(RouterCmd::Start(Some(path.to_string_lossy().to_string())));
                                                 on_close.call(());
@@ -1002,7 +1002,7 @@ pub fn StartRouterModal(on_close: EventHandler<()>, config_toml: Signal<String>)
                                                                 button {
                                                                     class: "btn btn-primary btn-sm",
                                                                     onclick: move |_| {
-                                                                        match crate::router_proc::write_temp_config(&toml) {
+                                                                        match crate::forwarder_proc::write_temp_config(&toml) {
                                                                             Ok(path) => {
                                                                                 ctx.router_cmd.send(RouterCmd::Start(Some(path.to_string_lossy().to_string())));
                                                                                 on_close.call(());
@@ -1089,7 +1089,7 @@ pub fn StartRouterModal(on_close: EventHandler<()>, config_toml: Signal<String>)
                                     class: "btn btn-primary",
                                     onclick: move |_| {
                                         let toml = config_toml.read().clone();
-                                        match crate::router_proc::write_temp_config(&toml) {
+                                        match crate::forwarder_proc::write_temp_config(&toml) {
                                             Ok(path) => {
                                                 ctx.router_cmd.send(RouterCmd::Start(Some(path.to_string_lossy().to_string())));
                                                 on_close.call(());

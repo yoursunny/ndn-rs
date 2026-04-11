@@ -15,7 +15,7 @@ use bytes::Bytes;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use ndn_ipc::RouterClient;
+use ndn_ipc::ForwarderClient;
 use ndn_packet::encode::{DataBuilder, InterestBuilder};
 use ndn_packet::{Data, Interest, Name};
 use ndn_security::{Ed25519Signer, HmacSha256Signer, Signer as NdnSigner};
@@ -99,11 +99,11 @@ pub struct IperfClientParams {
 
 // ── Internal connection helper ────────────────────────────────────────────────
 
-async fn connect_client(conn: &ConnectConfig) -> Result<RouterClient> {
+async fn connect_client(conn: &ConnectConfig) -> Result<ForwarderClient> {
     if conn.use_shm {
-        Ok(RouterClient::connect(&conn.face_socket).await?)
+        Ok(ForwarderClient::connect(&conn.face_socket).await?)
     } else {
-        Ok(RouterClient::connect_unix_only(&conn.face_socket).await?)
+        Ok(ForwarderClient::connect_unix_only(&conn.face_socket).await?)
     }
 }
 
@@ -349,7 +349,7 @@ struct ServerDefaults<'a> {
 
 async fn handle_session_negotiation(
     interest: &Interest,
-    client: &RouterClient,
+    client: &ForwarderClient,
     server_prefix: &Name,
     defaults: &ServerDefaults<'_>,
     tx: mpsc::Sender<ToolEvent>,
@@ -629,7 +629,7 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
     // session negotiation.  The server spawns its consumer immediately after
     // sending the session response, so the FIB entry must already exist or the
     // first batch of Interests will be dropped and retried (or given up).
-    let producer_client: Option<RouterClient> = if let Some(ref cb_prefix) = callback_prefix {
+    let producer_client: Option<ForwarderClient> = if let Some(ref cb_prefix) = callback_prefix {
         let pc = connect_client(&params.conn).await?;
         pc.register_prefix(cb_prefix).await?;
         let _ = tx.send(ToolEvent::info(format!(
@@ -873,7 +873,7 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
 /// the server can start sending Interests immediately upon receiving the
 /// session response.
 async fn run_reverse_producer(
-    client: RouterClient,
+    client: ForwarderClient,
     callback_prefix: &Name,
     server_prefix: &Name,
     flow_id: &str,

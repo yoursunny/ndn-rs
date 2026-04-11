@@ -9,7 +9,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 
 use ndn_app::{AppError, Consumer, KeyChain};
-use ndn_ipc::RouterClient;
+use ndn_ipc::ForwarderClient;
 use ndn_packet::encode::{DataBuilder, InterestBuilder};
 use ndn_packet::{Interest, Name};
 use ndn_security::Signer;
@@ -52,9 +52,9 @@ pub struct PingClientParams {
 pub async fn run_server(params: PingServerParams, tx: mpsc::Sender<ToolEvent>) -> Result<()> {
     let prefix: Name = params.prefix.parse()?;
     let client = if params.conn.use_shm {
-        RouterClient::connect(&params.conn.face_socket).await?
+        ForwarderClient::connect(&params.conn.face_socket).await?
     } else {
-        RouterClient::connect_unix_only(&params.conn.face_socket).await?
+        ForwarderClient::connect_unix_only(&params.conn.face_socket).await?
     };
     client.register_prefix(&prefix).await?;
 

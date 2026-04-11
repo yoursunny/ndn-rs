@@ -1,5 +1,5 @@
 //! NDN Dashboard — Dioxus desktop application for managing and monitoring
-//! an ndn-router instance.
+//! an ndn-fwd instance.
 //!
 //! The dashboard communicates with the router exclusively via the NDN
 //! management protocol (TLV Interest/Data on `/localhost/nfd/`), using the
@@ -16,7 +16,7 @@
 #![allow(non_snake_case)]
 
 mod app;
-mod router_proc;
+mod forwarder_proc;
 pub mod settings;
 mod styles;
 pub mod tool_runner;

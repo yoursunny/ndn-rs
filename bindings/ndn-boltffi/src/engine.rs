@@ -7,7 +7,7 @@ use boltffi::export;
 use tokio::runtime::Runtime;
 
 use ndn_app::Producer;
-use ndn_face_local::AppHandle;
+use ndn_faces::local::InProcHandle;
 use ndn_mobile::{MobileEngine, MobileEngineBuilder};
 use ndn_packet::Name;
 
@@ -38,8 +38,8 @@ pub struct NdnEngine {
     pub(crate) inner: Mutex<Option<MobileEngine>>,
     /// Shared Tokio runtime — cloned into all derived consumer/producer objects.
     pub(crate) rt: Arc<Runtime>,
-    /// Primary AppHandle from builder.build(); taken on first consumer::new() call.
-    default_handle: Mutex<Option<AppHandle>>,
+    /// Primary InProcHandle from builder.build(); taken on first consumer::new() call.
+    default_handle: Mutex<Option<InProcHandle>>,
 }
 
 #[export]
@@ -117,8 +117,8 @@ impl NdnEngine {
         &self.rt
     }
 
-    /// Take the primary AppHandle (first call) or allocate a fresh one.
-    pub(crate) fn take_consumer_handle(&self) -> Result<AppHandle, NdnError> {
+    /// Take the primary InProcHandle (first call) or allocate a fresh one.
+    pub(crate) fn take_consumer_handle(&self) -> Result<InProcHandle, NdnError> {
         let mut guard = self.default_handle.lock().unwrap();
         if let Some(h) = guard.take() {
             return Ok(h);
@@ -130,8 +130,8 @@ impl NdnEngine {
         Ok(h)
     }
 
-    /// Allocate a fresh AppHandle for a subscriber or additional consumer.
-    pub(crate) fn alloc_app_handle(&self) -> Result<AppHandle, NdnError> {
+    /// Allocate a fresh InProcHandle for a subscriber or additional consumer.
+    pub(crate) fn alloc_app_handle(&self) -> Result<InProcHandle, NdnError> {
         let engine_guard = self.inner.lock().unwrap();
         let engine = engine_guard.as_ref()
             .ok_or_else(|| NdnError::engine("engine is shut down"))?;
@@ -150,7 +150,7 @@ impl NdnEngine {
 
 // ── Builder helper ────────────────────────────────────────────────────────────
 
-async fn build_engine(config: NdnEngineConfig) -> Result<(MobileEngine, AppHandle), NdnError> {
+async fn build_engine(config: NdnEngineConfig) -> Result<(MobileEngine, InProcHandle), NdnError> {
     let mut builder: MobileEngineBuilder = MobileEngine::builder()
         .cs_capacity_mb(config.cs_capacity_mb as usize)
         .pipeline_threads(config.pipeline_threads as usize)

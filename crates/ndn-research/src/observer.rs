@@ -1,4 +1,4 @@
-use ndn_pipeline::{Action, DropReason, PacketContext, PipelineStage};
+use ndn_engine::pipeline::{Action, DropReason, PacketContext, PipelineStage};
 use tokio::sync::mpsc;
 
 /// A pipeline stage that emits observation events without blocking forwarding.
@@ -53,10 +53,10 @@ impl FlowObserverStage {
 impl PipelineStage for FlowObserverStage {
     async fn process(&self, ctx: PacketContext) -> Result<Action, DropReason> {
         let packet_type = match &ctx.packet {
-            ndn_pipeline::DecodedPacket::Interest(_) => PacketType::Interest,
-            ndn_pipeline::DecodedPacket::Data(_) => PacketType::Data,
-            ndn_pipeline::DecodedPacket::Nack(_) => PacketType::Nack,
-            ndn_pipeline::DecodedPacket::Raw => PacketType::Unknown,
+            ndn_engine::pipeline::DecodedPacket::Interest(_) => PacketType::Interest,
+            ndn_engine::pipeline::DecodedPacket::Data(_) => PacketType::Data,
+            ndn_engine::pipeline::DecodedPacket::Nack(_) => PacketType::Nack,
+            ndn_engine::pipeline::DecodedPacket::Raw => PacketType::Unknown,
         };
 
         let event = FlowEvent {

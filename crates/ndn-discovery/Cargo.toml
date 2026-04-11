@@ -6,15 +6,24 @@ authors.workspace = true
 license.workspace = true
 description = "Pluggable neighbor and service discovery for ndn-rs"
 
+[features]
+# udp-hello enables UdpNeighborDiscovery, which requires UdpFace from ndn-faces.
+# ether-nd enables EtherNeighborDiscovery, which requires NamedEtherFace from ndn-faces::l2.
+# Both features require ndn-faces as an optional dependency.
+# ndn-faces does NOT depend on ndn-discovery, so there is no circular dep.
+default = ["udp-hello"]
+udp-hello = ["dep:ndn-faces"]
+ether-nd  = ["dep:ndn-faces", "ndn-faces/l2"]
+
 [dependencies]
 ndn-tlv       = { workspace = true }
-ndn-packet   = { workspace = true, features = ["std"] }
+ndn-packet    = { workspace = true, features = ["std"] }
 ndn-transport = { workspace = true }
-ndn-face-net  = { workspace = true }
+ndn-faces     = { workspace = true, optional = true }
 ndn-security  = { workspace = true }
-bytes  = { workspace = true, features = ["std"] }
-tokio  = { workspace = true, features = ["sync", "time", "net"] }
-tracing = { workspace = true }
-dashmap = { workspace = true }
-ndn-sync = { workspace = true }
-ring = { workspace = true }
+bytes         = { workspace = true, features = ["std"] }
+tokio         = { workspace = true, features = ["sync", "time", "net"] }
+tracing       = { workspace = true }
+dashmap       = { workspace = true }
+ndn-sync      = { workspace = true }
+ring          = { workspace = true }

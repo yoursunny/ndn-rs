@@ -32,7 +32,7 @@ use ndn_discovery::{
     ServiceDiscoveryConfig, ServiceDiscoveryProtocol, ServiceRecord, UdpNeighborDiscovery,
 };
 use ndn_engine::{EngineBuilder, EngineConfig};
-use ndn_face_net::MulticastUdpFace;
+use ndn_faces::net::MulticastUdpFace;
 use ndn_packet::Name;
 use ndn_transport::FacePersistency;
 use tokio_util::sync::CancellationToken;

@@ -1,4 +1,4 @@
-/// Managed subprocess for the `ndn-router` binary.
+/// Managed subprocess for the `ndn-fwd` binary.
 ///
 /// `RouterProc` owns the child process.  stdout and stderr are captured into
 /// a shared ring-buffer (`log_buf`) by background Tokio tasks.  Since those
@@ -23,7 +23,7 @@ pub struct RouterProc {
 const LOG_BUF_CAP: usize = 2000;
 
 impl RouterProc {
-    /// Spawn `ndn-router` at `binary`, wiring stdout/stderr to the log buffer.
+    /// Spawn `ndn-fwd` at `binary`, wiring stdout/stderr to the log buffer.
     /// If `config_path` is `Some`, passes `--config <path>` to the process.
     pub async fn start(binary: &PathBuf, config_path: Option<&str>) -> anyhow::Result<Self> {
         let log_buf = Arc::new(Mutex::new(VecDeque::with_capacity(LOG_BUF_CAP)));
@@ -98,12 +98,12 @@ pub fn write_temp_config(toml: &str) -> std::io::Result<std::path::PathBuf> {
 
 // ── Binary discovery ──────────────────────────────────────────────────────────
 
-/// Search `$PATH` and the directory containing this executable for `ndn-router`.
+/// Search `$PATH` and the directory containing this executable for `ndn-fwd`.
 pub fn find_binary() -> Option<PathBuf> {
     #[cfg(windows)]
-    const NAME: &str = "ndn-router.exe";
+    const NAME: &str = "ndn-fwd.exe";
     #[cfg(not(windows))]
-    const NAME: &str = "ndn-router";
+    const NAME: &str = "ndn-fwd";
 
     // 1. $PATH
     if let Some(path_var) = std::env::var_os("PATH") {

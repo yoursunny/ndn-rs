@@ -97,4 +97,7 @@ pub use strategy::{
     BackoffScheduler, NeighborProbeStrategy, PassiveScheduler, ProbeRequest, ReactiveScheduler,
     SwimScheduler, TriggerEvent, build_strategy,
 };
+#[cfg(feature = "udp-hello")]
 pub use hello::UdpNeighborDiscovery;
+#[cfg(all(feature = "ether-nd", target_os = "linux"))]
+pub use hello::ether::EtherNeighborDiscovery;
