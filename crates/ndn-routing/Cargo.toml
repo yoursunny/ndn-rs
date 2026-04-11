@@ -1,0 +1,19 @@
+[package]
+name = "ndn-routing"
+description = "NDN routing protocol implementations: static routes and distance-vector routing (DVR)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ndn-packet    = { workspace = true, features = ["std"] }
+ndn-transport = { workspace = true }
+ndn-discovery = { workspace = true }
+ndn-engine    = { workspace = true }
+ndn-config    = { workspace = true }
+bytes         = { workspace = true, features = ["std"] }
+dashmap       = { workspace = true }
+tokio         = { workspace = true, features = ["rt", "time", "macros"] }
+tokio-util    = { workspace = true, features = ["rt"] }
+tracing       = { workspace = true }
+ndn-tlv       = { workspace = true, features = ["std"] }

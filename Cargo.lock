@@ -3997,6 +3997,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndn-routing"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "dashmap",
+ "ndn-config",
+ "ndn-discovery",
+ "ndn-engine",
+ "ndn-packet",
+ "ndn-tlv",
+ "ndn-transport",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "ndn-security"
 version = "0.1.0"
 dependencies = [

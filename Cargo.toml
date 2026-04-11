@@ -24,6 +24,8 @@ members = [
     "crates/ndn-ipc",
     "crates/ndn-config",
     "crates/ndn-discovery",
+    # Routing protocols
+    "crates/ndn-routing",
     # Simulation
     "crates/ndn-sim",
     # WebAssembly bindings for browser simulation
@@ -100,6 +102,7 @@ ndn-cert     = { path = "crates/ndn-cert" }
 ndn-identity = { path = "crates/ndn-identity" }
 ndn-filestore  = { path = "crates/ndn-filestore" }
 ndn-tools-core = { path = "crates/ndn-tools-core" }
+ndn-routing    = { path = "crates/ndn-routing" }
 
 # Core async runtime — individual crates enable only the features they need
 tokio      = { version = "1", default-features = false }
