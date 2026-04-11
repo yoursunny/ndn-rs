@@ -3653,7 +3653,6 @@ dependencies = [
  "dashmap",
  "futures",
  "hkdf",
- "ndn-did",
  "ndn-packet",
  "ndn-security",
  "ndn-tlv",
@@ -3723,15 +3722,7 @@ dependencies = [
 name = "ndn-did"
 version = "0.1.0"
 dependencies = [
- "base64",
- "bytes",
- "futures",
- "ndn-packet",
  "ndn-security",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -3880,7 +3871,6 @@ dependencies = [
  "futures",
  "ndn-app",
  "ndn-cert",
- "ndn-did",
  "ndn-packet",
  "ndn-security",
  "serde",
@@ -4010,13 +4000,17 @@ dependencies = [
 name = "ndn-security"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "criterion",
  "dashmap",
  "ed25519-dalek",
+ "futures",
  "ndn-packet",
  "ndn-tlv",
  "ring",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

@@ -90,8 +90,8 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
     ))).await;
 
     let signer: Option<Arc<dyn Signer>> = if params.sign {
-        let keychain = KeyChain::new();
-        let s = keychain.create_identity(name.clone(), None)?;
+        let keychain = KeyChain::ephemeral(&name.to_string())?;
+        let s = keychain.signer()?;
         let _ = tx.send(ToolEvent::info(format!(
             "ndn-put: signing with {} ({:?})", s.key_name(), s.sig_type()
         ))).await;
