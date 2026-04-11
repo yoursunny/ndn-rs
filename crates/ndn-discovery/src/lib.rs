@@ -18,6 +18,8 @@
 //!
 //! ## Crate layout
 //!
+//! **Framework (crate root):** Core traits and shared infrastructure.
+//!
 //! | Module | Contents |
 //! |--------|----------|
 //! | [`protocol`]        | `DiscoveryProtocol` trait, `ProtocolId` |
@@ -29,9 +31,18 @@
 //! | [`backoff`]         | `BackoffConfig`, `BackoffState` — exponential backoff with jitter |
 //! | [`config`]          | `DiscoveryConfig`, `DiscoveryProfile`, `ServiceDiscoveryConfig` |
 //! | [`scope`]           | Well-known namespace prefixes and link-local scope predicates |
-//! | [`strategy`]        | `NeighborProbeStrategy` trait and scheduler implementations |
-//! | [`probe`]           | SWIM direct/indirect probe packet builders and parsers |
-//! | [`prefix_announce`] | Service record publisher and browser (`/ndn/local/sd/services/`) |
+//! | [`wire`]            | Shared TLV encoding/decoding helpers |
+//!
+//! **Protocol implementations (subdirectories):**
+//!
+//! | Module | Contents |
+//! |--------|----------|
+//! | [`hello`]            | SWIM/Hello protocol family: payload codec, state machine, UDP impl |
+//! | [`hello::probe`]     | SWIM direct/indirect probe packet builders and parsers |
+//! | [`gossip`]           | Epidemic gossip and SVS service-discovery sync |
+//! | [`service_discovery`]| Service record publication and browsing (`/ndn/local/sd/services/`) |
+//! | [`strategy`]         | `NeighborProbeStrategy` trait and scheduler implementations |
+//! | [`prefix_announce`]  | Service record publisher and browser |
 
 #![allow(missing_docs)]
 
@@ -41,18 +52,14 @@ pub mod config;
 pub mod context;
 pub mod gossip;
 pub mod hello;
-pub mod hello_protocol;
-pub mod link_medium;
 pub mod mac_addr;
 pub mod neighbor;
 pub mod no_discovery;
 pub mod prefix_announce;
-pub mod probe;
 pub mod protocol;
 pub mod scope;
 pub mod service_discovery;
 pub mod strategy;
-pub mod udp_nd;
 pub mod wire;
 
 pub use backoff::{BackoffConfig, BackoffState};
@@ -68,13 +75,12 @@ pub use hello::{
     NeighborDiff, T_ADD_ENTRY, T_CAPABILITIES, T_NEIGHBOR_DIFF, T_NODE_NAME, T_REMOVE_ENTRY,
     T_SERVED_PREFIX,
 };
-pub use hello_protocol::HelloProtocol;
-pub use link_medium::{HelloCore, HelloState, LinkMedium};
+pub use hello::{HelloCore, HelloState, HelloProtocol, LinkMedium};
 pub use mac_addr::MacAddr;
 pub use neighbor::{NeighborEntry, NeighborState, NeighborTable, NeighborUpdate};
 pub use no_discovery::NoDiscovery;
 pub use prefix_announce::{ServiceRecord, build_browse_interest, make_record_name};
-pub use probe::{
+pub use hello::{
     DirectProbe, IndirectProbe, build_direct_probe, build_indirect_probe,
     build_indirect_probe_encoded, build_probe_ack, is_probe_ack, parse_direct_probe,
     parse_indirect_probe,
@@ -91,4 +97,4 @@ pub use strategy::{
     BackoffScheduler, NeighborProbeStrategy, PassiveScheduler, ProbeRequest, ReactiveScheduler,
     SwimScheduler, TriggerEvent, build_strategy,
 };
-pub use udp_nd::UdpNeighborDiscovery;
+pub use hello::UdpNeighborDiscovery;

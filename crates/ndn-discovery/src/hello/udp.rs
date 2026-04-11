@@ -51,8 +51,8 @@ use ndn_transport::FaceId;
 use tracing::{debug, error, warn};
 
 use crate::config::{DiscoveryConfig, DiscoveryProfile};
-use crate::hello_protocol::HelloProtocol;
-use crate::link_medium::{HelloCore, HelloState, LinkMedium};
+use super::protocol::HelloProtocol;
+use super::medium::{HelloCore, HelloState, LinkMedium};
 use crate::wire::parse_raw_interest;
 use crate::{
     DiscoveryContext, HelloPayload, InboundMeta, LinkAddr, MacAddr, NeighborEntry, NeighborUpdate,
@@ -267,7 +267,7 @@ impl LinkMedium for UdpMedium {
         core: &HelloCore,
         ctx: &dyn DiscoveryContext,
     ) -> bool {
-        use crate::link_medium::HELLO_PREFIX_DEPTH;
+        use crate::hello::medium::HELLO_PREFIX_DEPTH;
         let parsed = match parse_raw_interest(raw) {
             Some(p) => p,
             None => return false,
@@ -416,9 +416,9 @@ mod tests {
         let pkt = nd.build_hello_interest(nonce);
         let parsed = parse_raw_interest(&pkt).unwrap();
         let comps = parsed.name.components();
-        assert_eq!(comps.len(), crate::link_medium::HELLO_PREFIX_DEPTH + 1);
+        assert_eq!(comps.len(), crate::hello::medium::HELLO_PREFIX_DEPTH + 1);
         let decoded_nonce = u32::from_be_bytes(
-            comps[crate::link_medium::HELLO_PREFIX_DEPTH].value[..4]
+            comps[crate::hello::medium::HELLO_PREFIX_DEPTH].value[..4]
                 .try_into()
                 .unwrap(),
         );
@@ -540,7 +540,7 @@ mod tests {
             nd.core
                 .claimed
                 .iter()
-                .any(|p| p == &Name::from_str(crate::link_medium::HELLO_PREFIX_STR).unwrap())
+                .any(|p| p == &Name::from_str(crate::hello::medium::HELLO_PREFIX_STR).unwrap())
         );
     }
 

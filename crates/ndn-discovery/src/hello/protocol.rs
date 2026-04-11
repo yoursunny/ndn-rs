@@ -17,8 +17,8 @@ use ndn_transport::FaceId;
 use tracing::{debug, info, trace};
 
 use crate::config::PrefixAnnouncementMode;
-use crate::link_medium::{HELLO_PREFIX_DEPTH, HelloCore, LinkMedium, MAX_DIFF_ENTRIES};
-use crate::probe::{
+use super::medium::{HELLO_PREFIX_DEPTH, HelloCore, LinkMedium, MAX_DIFF_ENTRIES};
+use super::probe::{
     build_direct_probe, build_indirect_probe, build_probe_ack, is_probe_ack, parse_direct_probe,
     parse_indirect_probe,
 };

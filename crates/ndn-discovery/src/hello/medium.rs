@@ -3,7 +3,7 @@
 //! UDP and Ethernet neighbor discovery share the same SWIM/hello/probe state
 //! machine but differ in address types, face creation, and packet signing.
 //! Implementing `LinkMedium` provides those customisation points while
-//! [`HelloProtocol<T>`](super::hello_protocol::HelloProtocol) supplies the
+//! [`HelloProtocol<T>`](super::protocol::HelloProtocol) supplies the
 //! common logic.
 
 use std::collections::{HashMap, VecDeque};
