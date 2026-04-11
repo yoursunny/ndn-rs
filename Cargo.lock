@@ -3983,6 +3983,7 @@ dependencies = [
  "ndn-face-net",
  "ndn-face-serial",
  "ndn-packet",
+ "ndn-routing",
  "ndn-security",
  "ndn-store",
  "ndn-strategy",

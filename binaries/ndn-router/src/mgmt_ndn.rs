@@ -23,14 +23,15 @@
 /// When a command omits `FaceId`, the handler resolves the requesting face from
 /// the PIT in-records via [`ForwarderEngine::source_face_id`].
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "yubikey-piv")]
 use base64::Engine as _;
 use bytes::Bytes;
-use ndn_discovery::{NeighborState, ServiceDiscoveryProtocol, ServiceRecord};
+use ndn_discovery::{DiscoveryConfig, HelloStrategyKind, NeighborState, PrefixAnnouncementMode, ServiceDiscoveryProtocol, ServiceRecord};
 use ndn_engine::{ForwarderEngine, RibRoute};
+use ndn_routing::DvrConfig;
 use ndn_engine::stages::ErasedStrategy;
 use ndn_face_local::AppHandle;
 use ndn_packet::{Interest, Name, NameComponent, encode::encode_data_unsigned};
@@ -287,6 +288,15 @@ pub async fn run_tcp_listener(
 
 /// Read Interests from the management `AppHandle`, dispatch NFD commands,
 /// and write Data responses back.
+/// Runtime handles for management of pluggable protocol components.
+pub struct MgmtHandles {
+    /// Shared discovery config — `None` when discovery is disabled.
+    pub discovery_cfg: Option<Arc<RwLock<DiscoveryConfig>>>,
+    /// Shared DVR config — `None` when DVR is not running.
+    pub dvr_cfg: Option<Arc<RwLock<DvrConfig>>>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn run_ndn_mgmt_handler(
     handle: AppHandle,
     engine: ForwarderEngine,
@@ -295,6 +305,7 @@ pub async fn run_ndn_mgmt_handler(
     discovery_claimed: Vec<Name>,
     config: Arc<ndn_config::ForwarderConfig>,
     pib: Option<Arc<FilePib>>,
+    mgmt_handles: MgmtHandles,
 ) {
     loop {
         let raw = tokio::select! {
@@ -343,6 +354,8 @@ pub async fn run_ndn_mgmt_handler(
                 discovery_claimed: &discovery_claimed,
                 config: &config,
                 pib: pib.as_deref(),
+                discovery_cfg: mgmt_handles.discovery_cfg.as_ref(),
+                dvr_cfg: mgmt_handles.dvr_cfg.as_ref(),
             },
         )
         .await;
@@ -362,6 +375,10 @@ struct DispatchCtx<'a> {
     discovery_claimed: &'a [Name],
     config: &'a ndn_config::ForwarderConfig,
     pib: Option<&'a FilePib>,
+    /// Runtime-mutable discovery config (None when discovery is disabled).
+    discovery_cfg: Option<&'a Arc<RwLock<DiscoveryConfig>>>,
+    /// Runtime-mutable DVR config (None when DVR is not running).
+    dvr_cfg: Option<&'a Arc<RwLock<DvrConfig>>>,
 }
 
 async fn dispatch_command(
@@ -378,10 +395,13 @@ async fn dispatch_command(
         discovery_claimed,
         config,
         pib,
+        discovery_cfg,
+        dvr_cfg,
     } = ctx;
     match module_name {
         m if m == module::RIB => handle_rib(verb_name, params, source_face, engine),
-        m if m == module::ROUTING => handle_routing(verb_name, params, engine),
+        m if m == module::ROUTING => handle_routing(verb_name, params, engine, dvr_cfg),
+        m if m == module::DISCOVERY => handle_discovery(verb_name, params, discovery_cfg),
         m if m == module::FACES => handle_faces(verb_name, params, source_face, engine).await,
         m if m == module::FIB => handle_fib(verb_name, params, source_face, engine),
         m if m == module::STRATEGY => handle_strategy(verb_name, params, engine),
@@ -542,10 +562,13 @@ fn handle_routing(
     verb_name: &[u8],
     params: ControlParameters,
     engine: &ForwarderEngine,
+    dvr_cfg: Option<&Arc<RwLock<DvrConfig>>>,
 ) -> ControlResponse {
     match verb_name {
         v if v == verb::LIST => routing_list(engine),
         v if v == b"disable" => routing_disable(params, engine),
+        v if v == verb::DVR_STATUS => routing_dvr_status(dvr_cfg, engine),
+        v if v == verb::DVR_CONFIG => routing_dvr_config(params, dvr_cfg),
         _ => ControlResponse::error(status::NOT_FOUND, "unknown routing verb"),
     }
 }
@@ -557,9 +580,11 @@ fn routing_list(engine: &ForwarderEngine) -> ControlResponse {
     sorted.sort_unstable();
     for origin in &sorted {
         let name = match *origin {
+            ndn_config::control_parameters::origin::DVR => "dvr",
             ndn_config::control_parameters::origin::AUTOCONF => "autoconf",
             ndn_config::control_parameters::origin::NLSR => "nlsr",
             ndn_config::control_parameters::origin::PREFIX_ANN => "prefix-ann",
+            ndn_config::control_parameters::origin::STATIC => "static",
             _ => "custom",
         };
         text.push_str(&format!("  origin={origin} ({name})\n"));
@@ -579,6 +604,214 @@ fn routing_disable(params: ControlParameters, engine: &ForwarderEngine) -> Contr
     } else {
         ControlResponse::error(status::NOT_FOUND, format!("no protocol running with origin {origin}"))
     }
+}
+
+fn routing_dvr_status(
+    dvr_cfg: Option<&Arc<RwLock<DvrConfig>>>,
+    engine: &ForwarderEngine,
+) -> ControlResponse {
+    let Some(cfg_lock) = dvr_cfg else {
+        return ControlResponse::error(status::NOT_FOUND, "DVR not running");
+    };
+    let cfg = cfg_lock.read().unwrap();
+    // Count DVR-learned routes in the RIB.
+    let dvr_route_count: usize = engine
+        .rib()
+        .dump()
+        .iter()
+        .map(|(_, routes)| routes.iter().filter(|r| r.origin == ndn_config::control_parameters::origin::DVR).count())
+        .sum();
+    let text = format!(
+        "dvr: enabled\nupdate_interval_ms: {}\nroute_ttl_ms: {}\nroute_count: {}\n",
+        cfg.update_interval.as_millis(),
+        cfg.route_ttl.as_millis(),
+        dvr_route_count,
+    );
+    ControlResponse::ok_empty(text)
+}
+
+fn routing_dvr_config(
+    params: ControlParameters,
+    dvr_cfg: Option<&Arc<RwLock<DvrConfig>>>,
+) -> ControlResponse {
+    let Some(cfg_lock) = dvr_cfg else {
+        return ControlResponse::error(status::NOT_FOUND, "DVR not running");
+    };
+    // Parse updates from the `uri` field as a URL query string:
+    // "update_interval_ms=30000&route_ttl_ms=90000"
+    let Some(query) = &params.uri else {
+        // No params — return current config.
+        let cfg = cfg_lock.read().unwrap();
+        let echo = ControlParameters {
+            uri: Some(format!(
+                "update_interval_ms={}&route_ttl_ms={}",
+                cfg.update_interval.as_millis(),
+                cfg.route_ttl.as_millis(),
+            )),
+            ..Default::default()
+        };
+        return ControlResponse::ok("OK", echo);
+    };
+    let mut cfg = cfg_lock.write().unwrap();
+    for pair in query.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next().unwrap_or("").trim();
+        let val = parts.next().unwrap_or("").trim();
+        match key {
+            "update_interval_ms" => {
+                if let Ok(ms) = val.parse::<u64>() {
+                    cfg.update_interval = Duration::from_millis(ms);
+                }
+            }
+            "route_ttl_ms" => {
+                if let Ok(ms) = val.parse::<u64>() {
+                    cfg.route_ttl = Duration::from_millis(ms);
+                }
+            }
+            _ => {}
+        }
+    }
+    tracing::info!(
+        update_interval_ms = cfg.update_interval.as_millis(),
+        route_ttl_ms = cfg.route_ttl.as_millis(),
+        "routing/dvr-config updated"
+    );
+    let echo = ControlParameters {
+        uri: Some(format!(
+            "update_interval_ms={}&route_ttl_ms={}",
+            cfg.update_interval.as_millis(),
+            cfg.route_ttl.as_millis(),
+        )),
+        ..Default::default()
+    };
+    ControlResponse::ok("OK", echo)
+}
+
+// ─── Discovery module ─────────────────────────────────────────────────────────
+
+fn handle_discovery(
+    verb_name: &[u8],
+    params: ControlParameters,
+    discovery_cfg: Option<&Arc<RwLock<DiscoveryConfig>>>,
+) -> ControlResponse {
+    match verb_name {
+        v if v == b"status" => discovery_status(discovery_cfg),
+        v if v == verb::CONFIG => discovery_config_set(params, discovery_cfg),
+        _ => ControlResponse::error(status::NOT_FOUND, "unknown discovery verb"),
+    }
+}
+
+fn discovery_status(discovery_cfg: Option<&Arc<RwLock<DiscoveryConfig>>>) -> ControlResponse {
+    let Some(cfg_lock) = discovery_cfg else {
+        return ControlResponse::error(status::NOT_FOUND, "discovery not enabled");
+    };
+    let cfg = cfg_lock.read().unwrap();
+    let strategy_str = match cfg.hello_strategy {
+        HelloStrategyKind::Backoff => "backoff",
+        HelloStrategyKind::Reactive => "reactive",
+        HelloStrategyKind::Passive => "passive",
+        HelloStrategyKind::Swim => "swim",
+    };
+    let prefix_ann_str = match cfg.prefix_announcement {
+        PrefixAnnouncementMode::Static => "static",
+        PrefixAnnouncementMode::InHello => "in-hello",
+        PrefixAnnouncementMode::NlsrLsa => "nlsr-lsa",
+    };
+    let text = format!(
+        "discovery: enabled\n\
+         hello_strategy: {strategy_str}\n\
+         hello_interval_base_ms: {}\n\
+         hello_interval_max_ms: {}\n\
+         hello_jitter: {:.2}\n\
+         liveness_timeout_ms: {}\n\
+         liveness_miss_count: {}\n\
+         probe_timeout_ms: {}\n\
+         swim_indirect_fanout: {}\n\
+         gossip_fanout: {}\n\
+         prefix_announcement: {prefix_ann_str}\n\
+         auto_create_faces: {}\n\
+         tick_interval_ms: {}\n",
+        cfg.hello_interval_base.as_millis(),
+        cfg.hello_interval_max.as_millis(),
+        cfg.hello_jitter,
+        cfg.liveness_timeout.as_millis(),
+        cfg.liveness_miss_count,
+        cfg.probe_timeout.as_millis(),
+        cfg.swim_indirect_fanout,
+        cfg.gossip_fanout,
+        cfg.auto_create_faces,
+        cfg.tick_interval.as_millis(),
+    );
+    ControlResponse::ok_empty(text)
+}
+
+fn discovery_config_set(
+    params: ControlParameters,
+    discovery_cfg: Option<&Arc<RwLock<DiscoveryConfig>>>,
+) -> ControlResponse {
+    let Some(cfg_lock) = discovery_cfg else {
+        return ControlResponse::error(status::NOT_FOUND, "discovery not enabled");
+    };
+    let Some(query) = &params.uri else {
+        // No params — return current config as query string.
+        return discovery_status(discovery_cfg);
+    };
+    {
+        let mut cfg = cfg_lock.write().unwrap();
+        for pair in query.split('&') {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next().unwrap_or("").trim();
+            let val = parts.next().unwrap_or("").trim();
+            match key {
+                "hello_interval_base_ms" => {
+                    if let Ok(ms) = val.parse::<u64>() {
+                        cfg.hello_interval_base = Duration::from_millis(ms);
+                    }
+                }
+                "hello_interval_max_ms" => {
+                    if let Ok(ms) = val.parse::<u64>() {
+                        cfg.hello_interval_max = Duration::from_millis(ms);
+                    }
+                }
+                "hello_jitter" => {
+                    if let Ok(v) = val.parse::<f32>() {
+                        cfg.hello_jitter = v.clamp(0.0, 0.5);
+                    }
+                }
+                "liveness_timeout_ms" => {
+                    if let Ok(ms) = val.parse::<u64>() {
+                        cfg.liveness_timeout = Duration::from_millis(ms);
+                    }
+                }
+                "liveness_miss_count" => {
+                    if let Ok(v) = val.parse::<u32>() {
+                        cfg.liveness_miss_count = v;
+                    }
+                }
+                "probe_timeout_ms" => {
+                    if let Ok(ms) = val.parse::<u64>() {
+                        cfg.probe_timeout = Duration::from_millis(ms);
+                    }
+                }
+                "swim_indirect_fanout" => {
+                    if let Ok(v) = val.parse::<u32>() {
+                        cfg.swim_indirect_fanout = v;
+                    }
+                }
+                "gossip_fanout" => {
+                    if let Ok(v) = val.parse::<u32>() {
+                        cfg.gossip_fanout = v;
+                    }
+                }
+                "auto_create_faces" => {
+                    cfg.auto_create_faces = val == "true" || val == "1";
+                }
+                _ => {}
+            }
+        }
+        tracing::info!(params = %query, "discovery/config updated");
+    }
+    discovery_status(discovery_cfg)
 }
 
 // ─── Faces module ─────────────────────────────────────────────────────────────

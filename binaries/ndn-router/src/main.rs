@@ -1,7 +1,24 @@
+//! Standalone NDN forwarder binary.
+//!
+//! `ndn-router` wraps [`ndn_engine::ForwarderEngine`] with TOML config loading,
+//! face setup (UDP, TCP, Multicast, Ethernet, WebSocket, Serial), neighbor
+//! discovery, routing protocols, and an NDN-native management socket
+//! (NFD-compatible Interest/Data protocol on `/localhost/nfd/`).
+//!
+//! # Usage
+//!
+//! ```text
+//! ndn-router                    # start with built-in defaults
+//! ndn-router -c router.toml    # load config from file
+//! ndn-router --help
+//! ```
+//!
+//! Set `RUST_LOG=info` for status, `RUST_LOG=ndn_engine=trace` for pipeline tracing.
+
 use std::collections::VecDeque;
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
@@ -314,6 +331,11 @@ async fn main() -> Result<()> {
     let pre_allocated_multicast: Vec<(ndn_transport::FaceId, usize)>; // (face_id, config_index)
     // Pre-allocated EtherMulticast face IDs: (face_id, config_index).
     let pre_allocated_ether_mc: Vec<(ndn_transport::FaceId, usize)>;
+    // Runtime-mutable handles shared between protocols and the management handler.
+    // Initialized to None; set in the discovery wiring block when applicable.
+    let mut mgmt_discovery_cfg: Option<Arc<RwLock<ndn_discovery::DiscoveryConfig>>> = None;
+    // DVR is not yet wired in the router binary (future work); always None for now.
+    let mgmt_dvr_cfg: Option<Arc<RwLock<ndn_routing::DvrConfig>>> = None;
 
     if fwd_config.discovery.enabled() {
         let node_name_str = fwd_config
@@ -414,6 +436,8 @@ async fn main() -> Result<()> {
                 disc_cfg.clone(),
             )
             .with_unicast_port(unicast_port);
+            // Capture the shared config handle before moving `nd` into Arc.
+            mgmt_discovery_cfg = Some(nd.core.config_handle());
             protocols.push(std::sync::Arc::new(nd));
             tracing::info!(node=%node_name, "UDP neighbor discovery enabled");
         }
@@ -701,6 +725,10 @@ async fn main() -> Result<()> {
         mgmt_discovery_claimed.clone(),
         Arc::new(fwd_config.clone()),
         pib.clone(),
+        mgmt_ndn::MgmtHandles {
+            discovery_cfg: mgmt_discovery_cfg,
+            dvr_cfg: mgmt_dvr_cfg,
+        },
     ));
     let listener_engine = engine.clone();
     let listener_cancel = cancel.clone();
