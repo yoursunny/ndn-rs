@@ -1,10 +1,119 @@
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use ndn_tlv::TlvWriter;
 
 use super::{write_name, write_nni};
 use crate::{Name, SignatureType, tlv_type};
+
+// ─── Fast-path shared helpers ─────────────────────────────────────────────────
+
+/// Encoded SignatureInfo TLV for DigestSha256 with no KeyLocator (5 bytes, fixed).
+///
+/// `0x16` type SignatureInfo | `0x03` length | `0x1B` type SignatureType | `0x01` length | `0x00` DigestSha256
+///
+/// # Limitations
+/// This encoding is correct only when no KeyLocator is present.  DigestSha256
+/// packets that carry a KeyLocator (rare, used for self-signed certificates) must
+/// be built via `sign_sync` / `sign` instead.
+const SIGINFO_DIGEST_SHA256: [u8; 5] = [0x16, 0x03, 0x1B, 0x01, 0x00];
+
+/// Write a VarNumber (u64) into `buf` using NDN's minimal-byte encoding.
+#[inline(always)]
+fn put_vu(buf: &mut BytesMut, v: u64) {
+    let mut tmp = [0u8; 9];
+    let n = ndn_tlv::write_varu64(&mut tmp, v);
+    buf.put_slice(&tmp[..n]);
+}
+
+/// Pre-computed TLV sizes for Name, MetaInfo, and Content.
+///
+/// Created once and shared between the size-calculation and write phases of
+/// the single-buffer fast paths (`sign_digest_sha256`, `sign_none`).
+struct FastPathSizes {
+    /// Total byte count of all encoded name components (value part of Name TLV).
+    comps_inner:  usize,
+    /// Full encoded size of the Name TLV (type + length + comps_inner).
+    name_tlv:     usize,
+    /// Total byte count of MetaInfo *value* bytes (0 when no freshness/FinalBlockId).
+    mi_inner:     usize,
+    /// Full encoded size of the MetaInfo TLV (0 when `mi_inner == 0`).
+    metainfo_tlv: usize,
+    /// Full encoded size of the Content TLV.
+    content_tlv:  usize,
+}
+
+impl FastPathSizes {
+    fn compute(name: &Name, freshness: Option<Duration>, final_block_id: Option<&Bytes>, content: &[u8]) -> Self {
+        use ndn_tlv::varu64_size;
+
+        let comps_inner: usize = name.components().iter()
+            .map(|c| varu64_size(c.typ) + varu64_size(c.value.len() as u64) + c.value.len())
+            .sum();
+        let name_tlv = varu64_size(tlv_type::NAME) + varu64_size(comps_inner as u64) + comps_inner;
+
+        let mi_inner = {
+            let mut s = 0usize;
+            if let Some(f) = freshness {
+                let (_, nni_len) = super::nni(f.as_millis() as u64);
+                s += varu64_size(tlv_type::FRESHNESS_PERIOD) + varu64_size(nni_len as u64) + nni_len;
+            }
+            if let Some(fb) = final_block_id {
+                s += varu64_size(tlv_type::FINAL_BLOCK_ID) + varu64_size(fb.len() as u64) + fb.len();
+            }
+            s
+        };
+        let metainfo_tlv = if mi_inner > 0 {
+            varu64_size(tlv_type::META_INFO) + varu64_size(mi_inner as u64) + mi_inner
+        } else { 0 };
+
+        let content_tlv = varu64_size(tlv_type::CONTENT)
+            + varu64_size(content.len() as u64)
+            + content.len();
+
+        Self { comps_inner, name_tlv, mi_inner, metainfo_tlv, content_tlv }
+    }
+}
+
+/// Write Name, MetaInfo (if any), and Content TLVs directly into `buf`.
+///
+/// Relies on pre-computed sizes from [`FastPathSizes`] to avoid a second pass.
+/// Must be called with the same `freshness`/`final_block_id`/`content` used
+/// to compute `sz`, otherwise the written bytes will not match the size headers.
+fn write_fields(
+    buf: &mut BytesMut,
+    name: &Name,
+    freshness: Option<Duration>,
+    final_block_id: Option<&Bytes>,
+    content: &[u8],
+    sz: &FastPathSizes,
+) {
+    put_vu(buf, tlv_type::NAME);
+    put_vu(buf, sz.comps_inner as u64);
+    for comp in name.components() {
+        put_vu(buf, comp.typ);
+        put_vu(buf, comp.value.len() as u64);
+        buf.put_slice(&comp.value);
+    }
+    if sz.mi_inner > 0 {
+        put_vu(buf, tlv_type::META_INFO);
+        put_vu(buf, sz.mi_inner as u64);
+        if let Some(f) = freshness {
+            let (nni_buf, nni_len) = super::nni(f.as_millis() as u64);
+            put_vu(buf, tlv_type::FRESHNESS_PERIOD);
+            put_vu(buf, nni_len as u64);
+            buf.put_slice(&nni_buf[..nni_len]);
+        }
+        if let Some(fb) = final_block_id {
+            put_vu(buf, tlv_type::FINAL_BLOCK_ID);
+            put_vu(buf, fb.len() as u64);
+            buf.put_slice(fb);
+        }
+    }
+    put_vu(buf, tlv_type::CONTENT);
+    put_vu(buf, content.len() as u64);
+    buf.put_slice(content);
+}
 
 // ─── DataBuilder ─────────────────────────────────────────────────────────────
 
@@ -82,6 +191,79 @@ impl DataBuilder {
         buf.push(encoded.len() as u8);
         buf.extend_from_slice(&encoded);
         self.final_block_id(Bytes::from(buf))
+    }
+
+    /// Build and sign the Data with `DigestSha256`.
+    ///
+    /// Single-buffer fast path: pre-computes all TLV sizes, allocates one
+    /// `BytesMut`, writes Name + MetaInfo + Content + SignatureInfo directly,
+    /// then hashes in-place — **1 allocation, 0 copies of the signed region**.
+    ///
+    /// **~6× fewer allocations** than `sign_sync` with a lambda; use this for
+    /// all high-throughput DigestSha256 production.
+    ///
+    /// # Limitations
+    /// - Requires the `std` feature (transitively requires `ring`).
+    ///   `no_std` callers must use `build()` + out-of-band signing.
+    /// - The hardcoded `SignatureInfo` contains no KeyLocator.  DigestSha256
+    ///   packets that carry a KeyLocator must be built via `sign_sync`/`sign`.
+    /// - `debug_assert` guards validate the size pre-computation but are elided
+    ///   in release builds.  The math is deterministic once the name/content
+    ///   are fixed; no runtime variability can trigger them in correct code.
+    #[cfg(feature = "std")]
+    pub fn sign_digest_sha256(self) -> Bytes {
+        use ndn_tlv::varu64_size;
+
+        // SignatureValue: type(1) + len(1) + SHA-256(32) = 34 bytes
+        const SIGVALUE: usize = 34;
+
+        let sz = FastPathSizes::compute(
+            &self.name, self.freshness, self.final_block_id.as_ref(), &self.content,
+        );
+        let signed_size = sz.name_tlv + sz.metainfo_tlv + sz.content_tlv + SIGINFO_DIGEST_SHA256.len();
+        let inner_size  = signed_size + SIGVALUE;
+        let header_size = varu64_size(tlv_type::DATA) + varu64_size(inner_size as u64);
+
+        let mut buf = BytesMut::with_capacity(header_size + inner_size);
+        put_vu(&mut buf, tlv_type::DATA);
+        put_vu(&mut buf, inner_size as u64);
+
+        let signed_start = buf.len();
+        write_fields(&mut buf, &self.name, self.freshness, self.final_block_id.as_ref(), &self.content, &sz);
+        buf.put_slice(&SIGINFO_DIGEST_SHA256);
+        debug_assert_eq!(buf.len() - signed_start, signed_size, "signed region size mismatch");
+
+        let hash = ring::digest::digest(&ring::digest::SHA256, &buf[signed_start..]);
+        buf.put_slice(&[0x17u8, 0x20]);
+        buf.put_slice(hash.as_ref());
+        debug_assert_eq!(buf.len(), header_size + inner_size, "total size mismatch");
+
+        buf.freeze()
+    }
+
+    /// Build a Data packet with **no** signature fields (no SignatureInfo, no SignatureValue).
+    ///
+    /// Single-buffer fast path with **1 allocation, 0 crypto overhead**.
+    ///
+    /// # ⚠ Non-conformant NDN
+    /// All conformant NDN Data packets must carry a signature.  Packets produced
+    /// by this method will be **rejected by validators** unless validation is
+    /// explicitly bypassed (e.g., `FlowSignMode::None` in iperf for benchmarking).
+    /// Do not use in production data planes.
+    pub fn sign_none(self) -> Bytes {
+        use ndn_tlv::varu64_size;
+
+        let sz = FastPathSizes::compute(
+            &self.name, self.freshness, self.final_block_id.as_ref(), &self.content,
+        );
+        let inner_size  = sz.name_tlv + sz.metainfo_tlv + sz.content_tlv;
+        let header_size = varu64_size(tlv_type::DATA) + varu64_size(inner_size as u64);
+
+        let mut buf = BytesMut::with_capacity(header_size + inner_size);
+        put_vu(&mut buf, tlv_type::DATA);
+        put_vu(&mut buf, inner_size as u64);
+        write_fields(&mut buf, &self.name, self.freshness, self.final_block_id.as_ref(), &self.content, &sz);
+        buf.freeze()
     }
 
     /// Build unsigned Data with a DigestSha256 placeholder signature.
@@ -217,12 +399,11 @@ impl DataBuilder {
                 });
             }
         });
-        let signed_region = w.snapshot(signed_start);
-
-        // Sign the region.
-        let sig_value = sign_fn(&signed_region);
+        // Sign the region — zero-copy slice, no Vec allocation.
+        let sig_value = sign_fn(w.slice_from(signed_start));
 
         // Wrap everything in the outer Data TLV.
+        let signed_region = w.slice_from(signed_start);
         let inner_len = signed_region.len()
             + ndn_tlv::varu64_size(tlv_type::SIGNATURE_VALUE)
             + ndn_tlv::varu64_size(sig_value.len() as u64)
@@ -230,7 +411,7 @@ impl DataBuilder {
         let mut outer = TlvWriter::with_capacity(inner_len + 10);
         outer.write_varu64(tlv_type::DATA);
         outer.write_varu64(inner_len as u64);
-        outer.write_raw(&signed_region);
+        outer.write_raw(signed_region);
         outer.write_tlv(tlv_type::SIGNATURE_VALUE, &sig_value);
         outer.finish()
     }
@@ -253,7 +434,7 @@ fn encode_nni_be(v: u64) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{assert_bytes_eq, hex, name};
+    use super::super::tests::{assert_bytes_eq, hex};
     use super::*;
     use crate::Data;
     use bytes::Bytes;

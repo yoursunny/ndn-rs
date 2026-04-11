@@ -66,9 +66,18 @@ impl TlvWriter {
         self.buf.put_slice(data);
     }
 
+    /// Return a zero-copy view of the bytes written since `start` offset.
+    ///
+    /// Used to read back a signed region written incrementally — e.g. to pass
+    /// it to a signing function or to copy it into an outer TLV.  No allocation.
+    pub fn slice_from(&self, start: usize) -> &[u8] {
+        &self.buf[start..]
+    }
+
     /// Return a copy of the bytes written since `start` offset.
     ///
-    /// Used to capture a signed region after writing it incrementally.
+    /// Prefer [`slice_from`] when a borrowed slice is sufficient.
+    #[deprecated(note = "use slice_from for a zero-copy &[u8]")]
     pub fn snapshot(&self, start: usize) -> Vec<u8> {
         self.buf[start..].to_vec()
     }

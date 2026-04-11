@@ -25,34 +25,48 @@ use crate::common::{ConnectConfig, ToolData, ToolEvent};
 
 // ── Per-flow signing state ────────────────────────────────────────────────────
 
-type FlowSigners = Arc<std::sync::RwLock<HashMap<String, Arc<dyn NdnSigner>>>>;
+/// Per-flow signing mode, set during session negotiation.
+#[derive(Clone)]
+enum FlowSignMode {
+    /// No signature fields — non-conformant, benchmarking only.
+    None,
+    /// NDN DigestSha256 (fast path, single allocation, in-place hash).
+    DigestSha256,
+    /// HMAC-SHA256 or Ed25519 via a boxed `Signer`.
+    Custom(Arc<dyn NdnSigner>),
+}
 
-/// Build a signer appropriate for the negotiated sign mode.
+type FlowSigners = Arc<std::sync::RwLock<HashMap<String, FlowSignMode>>>;
+
+/// Map a negotiated sign-mode string to a `FlowSignMode`.
 ///
-/// - `"hmac"`:    HMAC-SHA256 keyed by `flow_id` bytes (fast, symmetric)
-/// - `"ed25519"`: Ed25519 using the server-wide ephemeral key
-/// - anything else (including `"none"`): returns `None`
-fn make_signer(
+/// - `"none"`:         no signature (benchmarking only)
+/// - `"digest_sha256"` / `""` / unrecognised: DigestSha256
+/// - `"hmac"`:         HMAC-SHA256 keyed by `flow_id`
+/// - `"ed25519"`:      server-wide ephemeral Ed25519 key
+fn make_sign_mode(
     sign_mode: &str,
     flow_id:   &str,
     ed25519:   &Arc<Ed25519Signer>,
-) -> Option<Arc<dyn NdnSigner>> {
+) -> FlowSignMode {
     match sign_mode {
+        "none" => FlowSignMode::None,
         "hmac" => {
-            let kn = format!("/iperf-key/{flow_id}").parse().ok()?;
-            Some(Arc::new(HmacSha256Signer::new(flow_id.as_bytes(), kn)) as Arc<dyn NdnSigner>)
+            let kn: ndn_packet::Name = format!("/iperf-key/{flow_id}").parse()
+                .unwrap_or_else(|_| "/iperf-key/unknown".parse().unwrap());
+            FlowSignMode::Custom(Arc::new(HmacSha256Signer::new(flow_id.as_bytes(), kn)))
         }
-        "ed25519" => Some(Arc::clone(ed25519) as Arc<dyn NdnSigner>),
-        _ => None,
+        "ed25519" => FlowSignMode::Custom(Arc::clone(ed25519) as Arc<dyn NdnSigner>),
+        _ => FlowSignMode::DigestSha256,
     }
 }
 
-/// Apply per-packet signing to a `DataBuilder`, or fall back to the unsigned
-/// placeholder if `signer` is `None`.
-fn sign_data(builder: DataBuilder, signer: Option<&Arc<dyn NdnSigner>>) -> bytes::Bytes {
-    match signer {
-        None    => builder.build(),
-        Some(s) => {
+/// Apply per-packet signing to a `DataBuilder` according to the negotiated mode.
+fn sign_data(builder: DataBuilder, mode: &FlowSignMode) -> bytes::Bytes {
+    match mode {
+        FlowSignMode::None        => builder.sign_none(),
+        FlowSignMode::DigestSha256 => builder.sign_digest_sha256(),
+        FlowSignMode::Custom(s)   => {
             let sig_type = s.sig_type();
             builder.sign_sync(sig_type, None, |region| {
                 s.sign_sync(region).unwrap_or_else(|_| bytes::Bytes::from_static(&[0u8; 32]))
@@ -310,12 +324,14 @@ pub async fn run_server(params: IperfServerParams, tx: mpsc::Sender<ToolEvent>) 
             .and_then(|c| std::str::from_utf8(&c.value).ok())
             .unwrap_or("")
             .to_string();
-        let signer = flow_signers.read().unwrap().get(&flow_id_str).cloned();
+        let sign_mode = flow_signers.read().unwrap()
+            .get(&flow_id_str).cloned()
+            .unwrap_or(FlowSignMode::DigestSha256);
 
         let payload = vec![0xAAu8; params.payload_size];
         let mut builder = DataBuilder::new((*interest.name).clone(), &payload);
         if let Some(f) = freshness { builder = builder.freshness(f); }
-        let data = sign_data(builder, signer.as_ref());
+        let data = sign_data(builder, &sign_mode);
 
         let data_len = data.len() as u64;
         if let Err(e) = client.send(data).await {
@@ -368,15 +384,16 @@ async fn handle_session_negotiation(
 
     let agreed_size = if req.size > 0 { req.size } else { default_size };
     let agreed_sign = match req.signing.as_str() {
-        "ed25519" => "ed25519",
-        "hmac"    => "hmac",
-        _         => "none",
+        "ed25519"      => "ed25519",
+        "hmac"         => "hmac",
+        "digest_sha256" => "digest_sha256",
+        "none"         => "none",
+        _              => "digest_sha256",
     };
 
-    // Register per-flow signer so the main data loop can sign packets for this flow.
-    if let Some(signer) = make_signer(agreed_sign, &flow_id, defaults.ed25519_signer) {
-        defaults.flow_signers.write().unwrap().insert(flow_id.clone(), signer);
-    }
+    // Register per-flow sign mode so the main data loop can sign packets for this flow.
+    let sign_mode = make_sign_mode(agreed_sign, &flow_id, defaults.ed25519_signer);
+    defaults.flow_signers.write().unwrap().insert(flow_id.clone(), sign_mode);
 
     let _ = tx.send(
         ToolEvent::info(format!(
@@ -887,7 +904,7 @@ async fn run_reverse_producer(
 
     // Build a per-session ephemeral Ed25519 key for the client producer side.
     let ed25519_signer = Arc::new(Ed25519Signer::from_seed(&[0x52u8; 32], "/iperf-client-key".parse().unwrap()));
-    let signer: Option<Arc<dyn NdnSigner>> = make_signer(sign_mode, flow_id, &ed25519_signer);
+    let sign_mode_val = make_sign_mode(sign_mode, flow_id, &ed25519_signer);
 
     let payload  = vec![0xAAu8; 8192];
     let deadline = Instant::now() + Duration::from_secs(duration_secs);
@@ -898,7 +915,7 @@ async fn run_reverse_producer(
             Ok(Some(raw)) => {
                 if let Ok(interest) = Interest::decode(raw) {
                     let builder = DataBuilder::new((*interest.name).clone(), &payload);
-                    let data = sign_data(builder, signer.as_ref());
+                    let data = sign_data(builder, &sign_mode_val);
                     let _ = client.send(data).await;
                 }
             }

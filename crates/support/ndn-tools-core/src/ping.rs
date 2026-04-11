@@ -107,7 +107,7 @@ pub async fn run_server(params: PingServerParams, tx: mpsc::Sender<ToolEvent>) -
                 })
                 .await
         } else {
-            builder.build()
+            builder.sign_digest_sha256()
         };
 
         client.send(data).await?;

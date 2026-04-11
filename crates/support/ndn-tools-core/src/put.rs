@@ -175,7 +175,7 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
             builder.sign_sync(sig_type, Some(&key_name), |region| {
                 signer.sign_sync(region).expect("signing failed")
             })
-        } else { builder.build() };
+        } else { builder.sign_digest_sha256() };
 
         if let Err(e) = client.send(data_wire).await {
             let _ = tx.send(ToolEvent::error(format!("ndn-put: send error: {e}"))).await;
