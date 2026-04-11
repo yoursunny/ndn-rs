@@ -7,6 +7,9 @@ pub enum TrustPath {
     CertChain(Vec<ndn_packet::Name>),
     /// Trusted because it arrived on a local face with known process credentials.
     LocalFace { uid: u32 },
+    /// Validated by verifying `SHA-256(signed_region) == sig_value`.
+    /// No key or trust anchor involved — self-contained integrity check only.
+    DigestSha256,
 }
 
 /// A Data packet whose signature has been verified.

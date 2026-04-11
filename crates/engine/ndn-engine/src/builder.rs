@@ -441,18 +441,18 @@ fn resolve_security_profile(
 
         SecurityProfile::Default => {
             let Some(mgr) = security else {
-                // No SecurityManager — fall back to AcceptSigned: verify that
-                // every Data packet carries a cryptographically valid signature,
-                // but skip namespace enforcement and chain walking.
+                // No SecurityManager configured — fall back to AcceptSigned.
+                // Every Data packet must carry a cryptographically valid signature
+                // (DigestSha256 or stronger), but no trust anchor or namespace
+                // hierarchy is enforced.
                 //
-                // This keeps security on by default even when the operator has
-                // not yet configured a trust anchor. Set SecurityProfile::Disabled
-                // explicitly to disable all validation.
+                // Configure a [security] block with trust anchors for full
+                // hierarchical validation.
                 tracing::info!(
                     "No SecurityManager configured; using AcceptSigned validation \
-                     (signatures verified, hierarchy not enforced). Set a SecurityManager \
-                     with trust anchors for full hierarchical validation, or set \
-                     SecurityProfile::Disabled to opt out."
+                     (DigestSha256 or stronger required, hierarchy not enforced). \
+                     Configure a [security] block with trust anchors for full \
+                     hierarchical validation."
                 );
                 let validator = Arc::new(Validator::new(TrustSchema::accept_all()));
                 return (Some(validator), None);

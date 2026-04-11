@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use ndn_packet::{Data, Name};
+use ndn_packet::{Data, Name, SignatureType};
 
 use crate::cert_cache::Certificate;
 use crate::verifier::Verifier;
 use crate::{SafeData, TrustError, VerifyOutcome};
+use crate::safe_data::TrustPath;
 
 use super::{ValidationResult, Validator, now_ns};
 
@@ -20,6 +21,23 @@ impl Validator {
         let Some(sig_info) = data.sig_info() else {
             return ValidationResult::Invalid(TrustError::InvalidSignature);
         };
+
+        // DigestSha256 is self-contained: verify SHA-256(signed_region) == sig_value.
+        // No key locator or trust chain is involved.
+        if sig_info.sig_type == SignatureType::DigestSha256 {
+            let hash = ring::digest::digest(&ring::digest::SHA256, data.signed_region());
+            if hash.as_ref() == data.sig_value() {
+                let safe = SafeData {
+                    inner: Data::decode(data.raw().clone())
+                        .expect("already decoded, re-decode cannot fail"),
+                    trust_path: TrustPath::DigestSha256,
+                    verified_at: now_ns(),
+                };
+                return ValidationResult::Valid(Box::new(safe));
+            }
+            return ValidationResult::Invalid(TrustError::InvalidSignature);
+        }
+
         let Some(first_key) = &sig_info.key_locator else {
             return ValidationResult::Invalid(TrustError::InvalidSignature);
         };

@@ -11,7 +11,7 @@ use crate::pipeline::{
     Action, DecodedPacket, DropReason, ForwardingAction, NackReason, PacketContext,
 };
 use ndn_store::PitToken;
-use ndn_transport::FaceId;
+use ndn_transport::{FaceId, FaceScope};
 
 use super::{InboundPacket, PacketDispatcher};
 
@@ -315,15 +315,31 @@ impl PacketDispatcher {
         };
 
         // 3. Signature / chain validation (optional).
-        let ctx = match self.validation.process(ctx).await {
-            Action::Satisfy(ctx) => ctx,
-            Action::Drop(r) => {
-                debug!(reason=?r, "data validation failed");
-                return;
-            }
-            other => {
-                self.dispatch_action(other);
-                return;
+        //
+        // Data from local faces (App, Shm, Internal, Management, Unix) is
+        // trusted by OS-level IPC — the OS enforces that only the owning
+        // process can write to the socket or shared-memory region.
+        // Only data from non-local (network) faces needs cryptographic
+        // validation.
+        let is_local = self
+            .face_table
+            .get(ctx.face_id)
+            .map(|f| f.kind().scope() == FaceScope::Local)
+            .unwrap_or(false);
+
+        let ctx = if is_local {
+            ctx
+        } else {
+            match self.validation.process(ctx).await {
+                Action::Satisfy(ctx) => ctx,
+                Action::Drop(r) => {
+                    debug!(reason=?r, "data validation failed");
+                    return;
+                }
+                other => {
+                    self.dispatch_action(other);
+                    return;
+                }
             }
         };
 

@@ -164,6 +164,20 @@ impl ValidationStage {
             _ => return Action::Satisfy(ctx),
         };
 
+        // Skip validation for /localhost/ — these are router-generated management
+        // responses that are always local and can never arrive from the network.
+        // They are unsigned by design and do not participate in trust chain verification.
+        if data
+            .name
+            .components()
+            .first()
+            .map(|c| c.value.as_ref() == b"localhost")
+            .unwrap_or(false)
+        {
+            trace!(name=%data.name, "validation: skipping /localhost/ management data");
+            return Action::Satisfy(ctx);
+        }
+
         match validator.validate_chain(data).await {
             ValidationResult::Valid(_safe) => {
                 trace!(name=%data.name, "validation: valid");

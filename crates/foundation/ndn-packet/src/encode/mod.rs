@@ -18,32 +18,19 @@ use crate::{Name, tlv_type};
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/// Encode a Data TLV with a placeholder `DigestSha256` signature.
+/// Encode a Data TLV signed with `DigestSha256`.
 ///
-/// The signature type is `0` (DigestSha256) and the value is 32 zero bytes.
-/// This is intentionally unsigned — correctness for the management plane is
-/// guaranteed by the transport (local Unix socket / shared-memory IPC), not by
-/// the NDN signature chain.  Full `Ed25519` signing can be layered on later via
-/// `SecurityManager`.
+/// Computes `SHA-256(signed_region)` and embeds it as the signature value.
+/// No key locator is included — DigestSha256 is self-contained integrity
+/// protection that requires no certificate or trust anchor.
 ///
-/// `FreshnessPeriod` is 0 so management responses are never served from cache.
+/// `FreshnessPeriod` is set to 0 so management responses are never served
+/// from cache.
+#[cfg(feature = "std")]
 pub fn encode_data_unsigned(name: &Name, content: &[u8]) -> Bytes {
-    let mut w = TlvWriter::new();
-    w.write_nested(tlv_type::DATA, |w| {
-        write_name(w, name);
-        // MetaInfo: FreshnessPeriod = 0
-        w.write_nested(tlv_type::META_INFO, |w| {
-            write_nni(w, tlv_type::FRESHNESS_PERIOD, 0);
-        });
-        w.write_tlv(tlv_type::CONTENT, content);
-        // SignatureInfo: DigestSha256 (type code 0)
-        w.write_nested(tlv_type::SIGNATURE_INFO, |w| {
-            w.write_tlv(tlv_type::SIGNATURE_TYPE, &[0u8]);
-        });
-        // 32-byte placeholder signature value
-        w.write_tlv(tlv_type::SIGNATURE_VALUE, &[0u8; 32]);
-    });
-    w.finish()
+    DataBuilder::new(name.clone(), content)
+        .freshness(std::time::Duration::ZERO)
+        .sign_digest_sha256()
 }
 
 /// Encode a Nack as an NDNLPv2 LpPacket wrapping the original Interest.
@@ -237,12 +224,12 @@ mod tests {
         // SignatureInfo: 16 03 1B 01 00 (DigestSha256)
         assert_bytes_eq(&wire[15..20], &[0x16, 0x03, 0x1B, 0x01, 0x00], "SigInfo");
 
-        // SignatureValue: 17 20 (32 zero bytes)
+        // SignatureValue: 17 20 (32-byte real SHA-256, not zeros)
         assert_eq!(wire[20], 0x17);
-        assert_eq!(wire[21], 0x20);
+        assert_eq!(wire[21], 0x20, "SigValue length should be 32");
         assert!(
-            wire[22..54].iter().all(|&b| b == 0),
-            "SigValue should be zeros"
+            !wire[22..54].iter().all(|&b| b == 0),
+            "SigValue should be a real SHA-256, not zeros"
         );
 
         assert_eq!(wire.len(), 54, "total Data length");
