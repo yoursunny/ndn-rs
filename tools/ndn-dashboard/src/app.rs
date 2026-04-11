@@ -212,6 +212,106 @@ pub struct AppCtx {
     pub tool_cmd:          Coroutine<ToolCmd>,
 }
 
+// ── Tool event processing ─────────────────────────────────────────────────────
+
+/// Process a single tool event synchronously (no `.await`).
+///
+/// Extracted from the `select!` loop so the loop can drain all pending events
+/// from the channel *without yielding*, coalescing them into one Dioxus render
+/// cycle.  Without this, each event is a separate `await` → re-render → WebView
+/// round-trip, which overflows the edit-notification channel under iperf load
+/// and produces `Error sending edits applied notification` log errors.
+fn process_tool_event(
+    inst_id:      u32,
+    ev_opt:       Option<ndn_tools_core::common::ToolEvent>,
+    handles:      &mut HashMap<u32, tokio::task::AbortHandle>,
+    srv_ping_id:  u32,
+    srv_iperf_id: u32,
+) {
+    use ndn_tools_core::common::ToolData;
+    match ev_opt {
+        None => {
+            // Tool completed — remove its abort handle.
+            handles.remove(&inst_id);
+            if inst_id != srv_ping_id && inst_id != srv_iperf_id {
+                let ts = chrono_now();
+                let max_results = DASH_SETTINGS.peek().results_max_entries.max(1);
+                let mut insts = TOOL_INSTANCES.write();
+                if let Some(inst) = insts.get_mut(&inst_id) {
+                    inst.running = false;
+                    let has_data = inst.iperf_summary.is_some()
+                        || inst.ping_summary.is_some()
+                        || !inst.tp_history.is_empty();
+                    if has_data {
+                        let entry = build_result_entry(inst, &ts);
+                        let mut results = TOOL_RESULTS.write();
+                        results.push_front(entry);
+                        while results.len() > max_results { results.pop_back(); }
+                    }
+                }
+            }
+        }
+        Some(ev) => {
+            if inst_id == srv_iperf_id {
+                if let Some(ToolData::IperfClientConnected {
+                    flow_id, duration_secs, sign_mode, payload_size, reverse,
+                }) = &ev.structured {
+                    let ts = chrono_now();
+                    let mode = if *reverse { "reverse" } else { "forward" };
+                    let entry = ToolResultEntry {
+                        id:             next_result_id(),
+                        ts,
+                        tool:           "iperf-server",
+                        label:          format!("session {flow_id}"),
+                        run_summary:    format!("{mode}  ·  sign={sign_mode}  ·  size={payload_size}B"),
+                        throughput_bps: None,
+                        bytes:          None,
+                        duration_secs:  Some(*duration_secs as f64),
+                        loss_pct:       None,
+                        rtt_avg_us:     None,
+                        summary_lines:  vec![
+                            format!("mode={mode}"),
+                            format!("sign={sign_mode}"),
+                            format!("size={payload_size}B"),
+                        ],
+                        intervals:  vec![],
+                        ping_rtts:  vec![],
+                    };
+                    let max_results = DASH_SETTINGS.peek().results_max_entries;
+                    let mut results = TOOL_RESULTS.write();
+                    results.push_front(entry);
+                    while results.len() > max_results { results.pop_back(); }
+                }
+            } else if inst_id != srv_ping_id {
+                let mut insts = TOOL_INSTANCES.write();
+                if let Some(inst) = insts.get_mut(&inst_id) {
+                    match &ev.structured {
+                        Some(ToolData::IperfInterval { throughput_bps, .. }) => {
+                            inst.tp_history.push(*throughput_bps);
+                            inst.elapsed_secs = inst.start_time.elapsed().as_secs_f64();
+                            if inst.tp_history.len() > 480 { inst.tp_history.remove(0); }
+                        }
+                        Some(ToolData::IperfSummary { .. }) => {
+                            inst.iperf_summary = ev.structured.clone();
+                        }
+                        Some(ToolData::PingResult { rtt_us, .. }) => {
+                            inst.current_rtt_us = Some(*rtt_us);
+                            inst.ping_rtts.push(*rtt_us);
+                            if inst.ping_rtts.len() > 500 { inst.ping_rtts.remove(0); }
+                        }
+                        Some(ToolData::PingSummary { .. }) => {
+                            inst.ping_summary = ev.structured.clone();
+                        }
+                        _ => {}
+                    }
+                    inst.output.push_back(ev);
+                    if inst.output.len() > 200 { inst.output.pop_front(); }
+                }
+            }
+        }
+    }
+}
+
 // ── Root component ───────────────────────────────────────────────────────────
 
 #[component]
@@ -455,7 +555,7 @@ pub fn App() -> Element {
     let tool_cmd = use_coroutine(move |mut rx: UnboundedReceiver<ToolCmd>| {
         let srv_cmd_rx_cell = srv_cmd_rx_cell2.clone();
         async move {
-        use ndn_tools_core::common::{ConnectConfig, ToolData};
+        use ndn_tools_core::common::ConnectConfig;
 
         // Take srv_cmd_rx out of the Mutex (only happens once on coroutine init).
         let mut srv_rx = srv_cmd_rx_cell
@@ -477,91 +577,15 @@ pub fn App() -> Element {
                 Some(cmd) = rx.next() => Some(cmd),
                 Some(cmd) = srv_rx.recv() => Some(cmd),
                 Some((inst_id, ev_opt)) = ev_rx.recv() => {
-                    // ── Tool output / completion events ────────────────────
-                    match ev_opt {
-                        None => {
-                            // Tool completed naturally.
-                            handles.remove(&inst_id);
-                            // Server IDs don't produce result entries.
-                            if inst_id != SRV_PING_ID && inst_id != SRV_IPERF_ID {
-                                let ts = chrono_now();
-                                let max_results = DASH_SETTINGS.peek().results_max_entries
-                                    .max(1); // guard against 0 (corrupt settings)
-                                let mut insts = TOOL_INSTANCES.write();
-                                if let Some(inst) = insts.get_mut(&inst_id) {
-                                    inst.running = false;
-                                    // Only save a result if there is meaningful data.
-                                    let has_data = inst.iperf_summary.is_some()
-                                        || inst.ping_summary.is_some()
-                                        || !inst.tp_history.is_empty();
-                                    if has_data {
-                                        let entry = build_result_entry(inst, &ts);
-                                        let mut results = TOOL_RESULTS.write();
-                                        results.push_front(entry);
-                                        while results.len() > max_results { results.pop_back(); }
-                                    }
-                                }
-                            }
-                        }
-                        Some(ev) => {
-                            if inst_id == SRV_IPERF_ID {
-                                // Server connection notification → create result entry.
-                                if let Some(ToolData::IperfClientConnected {
-                                    flow_id, duration_secs, sign_mode, payload_size, reverse,
-                                }) = &ev.structured {
-                                    let ts = chrono_now();
-                                    let mode = if *reverse { "reverse" } else { "forward" };
-                                    let entry = ToolResultEntry {
-                                        id:             next_result_id(),
-                                        ts,
-                                        tool:           "iperf-server",
-                                        label:          format!("session {flow_id}"),
-                                        run_summary:    format!("{mode}  ·  sign={sign_mode}  ·  size={payload_size}B"),
-                                        throughput_bps: None,
-                                        bytes:          None,
-                                        duration_secs:  Some(*duration_secs as f64),
-                                        loss_pct:       None,
-                                        rtt_avg_us:     None,
-                                        summary_lines:  vec![
-                                            format!("mode={mode}"),
-                                            format!("sign={sign_mode}"),
-                                            format!("size={payload_size}B"),
-                                        ],
-                                        intervals:  vec![],
-                                        ping_rtts:  vec![],
-                                    };
-                                    let max_results = DASH_SETTINGS.peek().results_max_entries;
-                                    let mut results = TOOL_RESULTS.write();
-                                    results.push_front(entry);
-                                    while results.len() > max_results { results.pop_back(); }
-                                }
-                            } else if inst_id != SRV_PING_ID {
-                                let mut insts = TOOL_INSTANCES.write();
-                                if let Some(inst) = insts.get_mut(&inst_id) {
-                                    match &ev.structured {
-                                        Some(ToolData::IperfInterval { throughput_bps, .. }) => {
-                                            inst.tp_history.push(*throughput_bps);
-                                            inst.elapsed_secs = inst.start_time.elapsed().as_secs_f64();
-                                            if inst.tp_history.len() > 480 { inst.tp_history.remove(0); }
-                                        }
-                                        Some(ToolData::IperfSummary { .. }) => {
-                                            inst.iperf_summary = ev.structured.clone();
-                                        }
-                                        Some(ToolData::PingResult { rtt_us, .. }) => {
-                                            inst.current_rtt_us = Some(*rtt_us);
-                                            inst.ping_rtts.push(*rtt_us);
-                                            if inst.ping_rtts.len() > 500 { inst.ping_rtts.remove(0); }
-                                        }
-                                        Some(ToolData::PingSummary { .. }) => {
-                                            inst.ping_summary = ev.structured.clone();
-                                        }
-                                        _ => {}
-                                    }
-                                    inst.output.push_back(ev);
-                                    if inst.output.len() > 200 { inst.output.pop_front(); }
-                                }
-                            }
-                        }
+                    // Process the first event, then drain all immediately
+                    // available events without yielding.  This coalesces a
+                    // burst of tool events into a single Dioxus render cycle
+                    // instead of one re-render (and WebView round-trip) per
+                    // event — preventing the edit-notification overflow that
+                    // logs "Error sending edits applied notification".
+                    process_tool_event(inst_id, ev_opt, &mut handles, SRV_PING_ID, SRV_IPERF_ID);
+                    while let Ok((id, ev)) = ev_rx.try_recv() {
+                        process_tool_event(id, ev, &mut handles, SRV_PING_ID, SRV_IPERF_ID);
                     }
                     None // no command to process
                 }
@@ -786,7 +810,7 @@ pub fn App() -> Element {
                         let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
                         let run_fut = ndn_tools_core::iperf::run_server(
                             ndn_tools_core::iperf::IperfServerParams {
-                                conn: ConnectConfig { face_socket, use_shm: true },
+                                conn: ConnectConfig { face_socket, use_shm: settings.iperf_face_type != "unix" },
                                 prefix: iperf_prefix,
                                 payload_size,
                                 freshness_ms: 0,
