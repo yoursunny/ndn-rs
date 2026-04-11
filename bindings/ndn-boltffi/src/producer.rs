@@ -105,10 +105,14 @@ impl NdnProducer {
         let handler: Arc<dyn NdnInterestHandler> = handler.into();
         let mut inner = self.inner.lock().unwrap();
         self.rt
-            .block_on(inner.serve(move |interest| {
+            .block_on(inner.serve(move |interest, responder| {
                 let name = interest.name.to_string();
                 let result = handler.handle_interest(name).map(Bytes::from);
-                async move { result }
+                async move {
+                    if let Some(wire) = result {
+                        responder.respond_bytes(wire).await.ok();
+                    }
+                }
             }))
             .map_err(NdnError::engine)
     }
