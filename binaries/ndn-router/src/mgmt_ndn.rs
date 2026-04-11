@@ -24,12 +24,13 @@
 /// the PIT in-records via [`ForwarderEngine::source_face_id`].
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "yubikey-piv")]
 use base64::Engine as _;
 use bytes::Bytes;
 use ndn_discovery::{NeighborState, ServiceDiscoveryProtocol, ServiceRecord};
-use ndn_engine::ForwarderEngine;
+use ndn_engine::{ForwarderEngine, RibRoute};
 use ndn_engine::stages::ErasedStrategy;
 use ndn_face_local::AppHandle;
 use ndn_packet::{Interest, Name, NameComponent, encode::encode_data_unsigned};
@@ -380,6 +381,7 @@ async fn dispatch_command(
     } = ctx;
     match module_name {
         m if m == module::RIB => handle_rib(verb_name, params, source_face, engine),
+        m if m == module::ROUTING => handle_routing(verb_name, params, engine),
         m if m == module::FACES => handle_faces(verb_name, params, source_face, engine).await,
         m if m == module::FIB => handle_fib(verb_name, params, source_face, engine),
         m if m == module::STRATEGY => handle_strategy(verb_name, params, engine),
@@ -441,17 +443,33 @@ fn rib_register(
         Err(resp) => return *resp,
     };
     let cost = params.cost.unwrap_or(0) as u32;
+    let orig = params.origin.unwrap_or(origin::APP);
+    let flags = params.flags.unwrap_or(route_flags::CHILD_INHERIT);
+    let expires_at = params
+        .expiration_period
+        .map(|ms| Instant::now() + Duration::from_millis(ms));
 
-    engine.fib().add_nexthop(&name, face_id, cost);
+    engine.rib().add(
+        &name,
+        RibRoute {
+            face_id,
+            origin: orig,
+            cost,
+            flags,
+            expires_at,
+        },
+    );
+    engine.rib().apply_to_fib(&name, &engine.fib());
 
-    tracing::info!(prefix = %name, face = face_id.0, cost, "rib/register");
+    tracing::info!(prefix = %name, face = face_id.0, cost, origin = orig, "rib/register");
 
     let echo = ControlParameters {
         name: Some(name),
         face_id: Some(face_id.0 as u64),
-        origin: Some(params.origin.unwrap_or(origin::APP)),
+        origin: Some(orig),
         cost: Some(cost as u64),
-        flags: Some(params.flags.unwrap_or(route_flags::CHILD_INHERIT)),
+        flags: Some(flags),
+        expiration_period: params.expiration_period,
         ..Default::default()
     };
     ControlResponse::ok("OK", echo)
@@ -472,21 +490,95 @@ fn rib_unregister(
         Err(resp) => return *resp,
     };
 
-    engine.fib().remove_nexthop(&name, face_id);
+    // If origin is specified, remove only that (name, face_id, origin) entry.
+    // If omitted, remove all origins for (name, face_id) — NFD-compatible behaviour.
+    let orig = params.origin;
+    if let Some(o) = orig {
+        engine.rib().remove(&name, face_id, o);
+    } else {
+        engine.rib().remove_nexthop(&name, face_id);
+    }
+    engine.rib().apply_to_fib(&name, &engine.fib());
+
     tracing::info!(prefix = %name, face = face_id.0, "rib/unregister");
 
     let echo = ControlParameters {
         name: Some(name),
         face_id: Some(face_id.0 as u64),
-        origin: Some(params.origin.unwrap_or(origin::APP)),
+        origin: Some(orig.unwrap_or(origin::APP)),
         ..Default::default()
     };
     ControlResponse::ok("OK", echo)
 }
 
 fn rib_list(engine: &ForwarderEngine) -> ControlResponse {
-    // RIB in ndn-rs maps directly to the FIB.
-    fib_list(engine)
+    let entries = engine.rib().dump();
+    let route_count: usize = entries.iter().map(|(_, routes)| routes.len()).sum();
+    let mut text = format!("{} routes\n", route_count);
+    let mut sorted = entries;
+    sorted.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
+    for (name, routes) in &sorted {
+        for r in routes {
+            let exp = match r.expires_at {
+                Some(exp) => {
+                    let rem = exp.saturating_duration_since(std::time::Instant::now());
+                    format!(" expires_in={:.0}s", rem.as_secs_f64())
+                }
+                None => String::new(),
+            };
+            text.push_str(&format!(
+                "  {name} faceid={} origin={} cost={} flags={}{}",
+                r.face_id.0, r.origin, r.cost, r.flags, exp,
+            ));
+            text.push('\n');
+        }
+    }
+    ControlResponse::ok_empty(text)
+}
+
+// ─── Routing module ───────────────────────────────────────────────────────────
+
+fn handle_routing(
+    verb_name: &[u8],
+    params: ControlParameters,
+    engine: &ForwarderEngine,
+) -> ControlResponse {
+    match verb_name {
+        v if v == verb::LIST => routing_list(engine),
+        v if v == b"disable" => routing_disable(params, engine),
+        _ => ControlResponse::error(status::NOT_FOUND, "unknown routing verb"),
+    }
+}
+
+fn routing_list(engine: &ForwarderEngine) -> ControlResponse {
+    let origins = engine.routing().running_origins();
+    let mut text = format!("{} routing protocol(s)\n", origins.len());
+    let mut sorted = origins;
+    sorted.sort_unstable();
+    for origin in &sorted {
+        let name = match *origin {
+            ndn_config::control_parameters::origin::AUTOCONF => "autoconf",
+            ndn_config::control_parameters::origin::NLSR => "nlsr",
+            ndn_config::control_parameters::origin::PREFIX_ANN => "prefix-ann",
+            _ => "custom",
+        };
+        text.push_str(&format!("  origin={origin} ({name})\n"));
+    }
+    ControlResponse::ok_empty(text)
+}
+
+fn routing_disable(params: ControlParameters, engine: &ForwarderEngine) -> ControlResponse {
+    let origin = match params.origin {
+        Some(o) => o,
+        None => return ControlResponse::error(status::BAD_PARAMS, "Origin is required"),
+    };
+    if engine.routing().disable(origin) {
+        tracing::info!(origin, "routing/disable");
+        let echo = ControlParameters { origin: Some(origin), ..Default::default() };
+        ControlResponse::ok("OK", echo)
+    } else {
+        ControlResponse::error(status::NOT_FOUND, format!("no protocol running with origin {origin}"))
+    }
 }
 
 // ─── Faces module ─────────────────────────────────────────────────────────────
