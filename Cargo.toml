@@ -1,60 +1,111 @@
 [workspace]
 resolver = "2"
-members = [
-    # Layer 4 — foundation (no NDN deps)
-    "crates/ndn-tlv",
-    "crates/ndn-packet",
-    "crates/ndn-transport",
-    "crates/ndn-store",
-    # Layer 3 — face implementations (consolidated)
-    "crates/ndn-faces",
-    # Layer 2 — pipeline, strategy, security
-    "crates/ndn-strategy",
-    "crates/ndn-security",
-    "crates/ndn-did",
-    "crates/ndn-cert",
-    "crates/ndn-identity",
-    # Layer 1 — engine and application API
-    "crates/ndn-engine",
-    "crates/ndn-app",
-    "crates/ndn-ipc",
-    "crates/ndn-config",
-    "crates/ndn-discovery",
-    # Routing protocols
-    "crates/ndn-routing",
-    # Simulation
-    "crates/ndn-sim",
-    # WebAssembly bindings for browser simulation
-    "crates/ndn-wasm",
-    # Layer 5 — research extensions
-    "crates/ndn-strategy-wasm",
-    "crates/ndn-research",
-    "crates/ndn-compute",
-    "crates/ndn-sync",
-    # Binaries
+
+# default-members: crates built by `cargo build` / `cargo test` / `cargo clippy`
+# without an explicit -p flag.  Platform-specific crates that require special
+# toolchains are excluded here but remain in `members` so they can be built
+# explicitly (e.g. `cargo build -p ndn-wasm --target wasm32-unknown-unknown`):
+#
+#   ndn-wasm, ndn-strategy-wasm  — require wasm32 target + wasm-bindgen
+#   ndn-embedded                 — bare-metal no_std (ARM Cortex-M, RISC-V, ESP32)
+#   ndn-mobile                   — Android/iOS; requires NDK / Xcode toolchains
+#   ndn-python                   — requires Python dev headers (PyO3)
+#   ndn-boltffi                  — requires Android NDK or Xcode for FFI linkage
+#   examples/wasm-strategy       — wasm32 target required
+default-members = [
+    # foundation — zero-NDN-dep building blocks
+    "crates/foundation/ndn-tlv",
+    "crates/foundation/ndn-packet",
+    "crates/foundation/ndn-transport",
+    "crates/foundation/ndn-store",
+    # faces — all face implementations (one consolidated crate)
+    "crates/faces/ndn-faces",
+    # engine — forwarding pipeline, strategies, security, app API
+    "crates/engine/ndn-strategy",
+    "crates/engine/ndn-security",
+    "crates/engine/ndn-engine",
+    "crates/engine/ndn-app",
+    "crates/engine/ndn-ipc",
+    "crates/engine/ndn-config",
+    "crates/engine/ndn-discovery",
+    # protocols — routing, sync, identity
+    "crates/protocols/ndn-routing",
+    "crates/protocols/ndn-sync",
+    "crates/protocols/ndn-did",
+    "crates/protocols/ndn-cert",
+    "crates/protocols/ndn-identity",
+    # sim — simulation framework (std, no special toolchain)
+    "crates/sim/ndn-sim",
+    # research — experimental extensions
+    "crates/research/ndn-research",
+    "crates/research/ndn-compute",
+    # support — shared tool libraries
+    "crates/support/ndn-filestore",
+    "crates/support/ndn-tools-core",
+    # binaries
     "binaries/did-ndn-driver",
     "binaries/ndn-fwd",
     "binaries/ndn-tools",
     "binaries/ndn-bench",
-    # File transfer library
-    "crates/ndn-filestore",
-    # Embeddable tool logic (used by dashboard and standalone binaries)
-    "crates/ndn-tools-core",
-    # Embedded
-    "crates/ndn-embedded",
-    # Mobile (Android / iOS)
-    "crates/ndn-mobile",
-    # Python bindings
-    "bindings/ndn-python",
-    # BoltFFI bindings (Android/Kotlin + iOS/Swift)
-    "bindings/ndn-boltffi",
-    # Dashboard
+    # dashboard
     "tools/ndn-dashboard",
-    # Examples
+    # examples (host-native)
     "examples/strategy-custom",
     "examples/strategy-composed",
     "examples/cross-layer-enricher",
-    "examples/wasm-strategy",
+    "examples/discovery-lan",
+]
+
+members = [
+    # foundation — zero-NDN-dep building blocks (TLV codec, packet types, transport traits, content store)
+    "crates/foundation/ndn-tlv",
+    "crates/foundation/ndn-packet",
+    "crates/foundation/ndn-transport",
+    "crates/foundation/ndn-store",
+    # faces — all face implementations in one consolidated crate (local, net, serial, l2)
+    "crates/faces/ndn-faces",
+    # engine — forwarding pipeline, strategy trait, security primitives, application API
+    "crates/engine/ndn-strategy",
+    "crates/engine/ndn-security",
+    "crates/engine/ndn-engine",
+    "crates/engine/ndn-app",
+    "crates/engine/ndn-ipc",
+    "crates/engine/ndn-config",
+    "crates/engine/ndn-discovery",
+    # protocols — routing algorithms, sync protocols, DID/certificate identity stack
+    "crates/protocols/ndn-routing",
+    "crates/protocols/ndn-sync",
+    "crates/protocols/ndn-did",
+    "crates/protocols/ndn-cert",
+    "crates/protocols/ndn-identity",
+    # sim — network simulation framework + WebAssembly browser simulation
+    "crates/sim/ndn-sim",
+    "crates/sim/ndn-wasm",          # requires wasm32 target
+    "crates/sim/ndn-strategy-wasm", # requires wasm32 target
+    # research — in-network compute, experimental extensions
+    "crates/research/ndn-research",
+    "crates/research/ndn-compute",
+    # platform — special deployment targets (bare-metal, Android/iOS)
+    "crates/platform/ndn-embedded", # bare-metal no_std
+    "crates/platform/ndn-mobile",   # Android/iOS
+    # support — shared tool libraries used by both binaries and dashboard
+    "crates/support/ndn-filestore",
+    "crates/support/ndn-tools-core",
+    # binaries
+    "binaries/did-ndn-driver",
+    "binaries/ndn-fwd",
+    "binaries/ndn-tools",
+    "binaries/ndn-bench",
+    # bindings — FFI to other languages
+    "bindings/ndn-python",   # requires Python dev headers
+    "bindings/ndn-boltffi",  # requires Android NDK / Xcode
+    # dashboard
+    "tools/ndn-dashboard",
+    # examples
+    "examples/strategy-custom",
+    "examples/strategy-composed",
+    "examples/cross-layer-enricher",
+    "examples/wasm-strategy", # requires wasm32 target
     "examples/discovery-lan",
 ]
 
@@ -68,33 +119,33 @@ license = "MIT OR Apache-2.0"
 name = "ndn-rs"
 
 [workspace.dependencies]
-# NDN workspace crates
-ndn-tlv       = { path = "crates/ndn-tlv", default-features = false }
-ndn-packet    = { path = "crates/ndn-packet", default-features = false }
-ndn-transport = { path = "crates/ndn-transport" }
-ndn-store     = { path = "crates/ndn-store" }
-ndn-strategy  = { path = "crates/ndn-strategy" }
-ndn-security  = { path = "crates/ndn-security" }
-ndn-engine    = { path = "crates/ndn-engine" }
-ndn-app       = { path = "crates/ndn-app" }
-ndn-ipc       = { path = "crates/ndn-ipc" }
-ndn-config    = { path = "crates/ndn-config" }
-ndn-discovery = { path = "crates/ndn-discovery", default-features = false }
-ndn-faces         = { path = "crates/ndn-faces" }
-ndn-strategy-wasm = { path = "crates/ndn-strategy-wasm" }
-ndn-research  = { path = "crates/ndn-research" }
-ndn-compute   = { path = "crates/ndn-compute" }
-ndn-sync      = { path = "crates/ndn-sync" }
-ndn-embedded  = { path = "crates/ndn-embedded" }
-ndn-mobile    = { path = "crates/ndn-mobile" }
-ndn-wasm      = { path = "crates/ndn-wasm" }
-ndn-sim       = { path = "crates/ndn-sim" }
-ndn-did      = { path = "crates/ndn-did" }
-ndn-cert     = { path = "crates/ndn-cert" }
-ndn-identity = { path = "crates/ndn-identity" }
-ndn-filestore  = { path = "crates/ndn-filestore" }
-ndn-tools-core = { path = "crates/ndn-tools-core" }
-ndn-routing    = { path = "crates/ndn-routing" }
+# NDN workspace crates — grouped by subdirectory layer
+ndn-tlv       = { path = "crates/foundation/ndn-tlv",       default-features = false }
+ndn-packet    = { path = "crates/foundation/ndn-packet",    default-features = false }
+ndn-transport = { path = "crates/foundation/ndn-transport" }
+ndn-store     = { path = "crates/foundation/ndn-store" }
+ndn-faces         = { path = "crates/faces/ndn-faces" }
+ndn-strategy  = { path = "crates/engine/ndn-strategy" }
+ndn-security  = { path = "crates/engine/ndn-security" }
+ndn-engine    = { path = "crates/engine/ndn-engine" }
+ndn-app       = { path = "crates/engine/ndn-app" }
+ndn-ipc       = { path = "crates/engine/ndn-ipc" }
+ndn-config    = { path = "crates/engine/ndn-config" }
+ndn-discovery = { path = "crates/engine/ndn-discovery",     default-features = false }
+ndn-routing    = { path = "crates/protocols/ndn-routing" }
+ndn-sync      = { path = "crates/protocols/ndn-sync" }
+ndn-did      = { path = "crates/protocols/ndn-did" }
+ndn-cert     = { path = "crates/protocols/ndn-cert" }
+ndn-identity = { path = "crates/protocols/ndn-identity" }
+ndn-sim       = { path = "crates/sim/ndn-sim" }
+ndn-wasm      = { path = "crates/sim/ndn-wasm" }
+ndn-strategy-wasm = { path = "crates/sim/ndn-strategy-wasm" }
+ndn-research  = { path = "crates/research/ndn-research" }
+ndn-compute   = { path = "crates/research/ndn-compute" }
+ndn-embedded  = { path = "crates/platform/ndn-embedded" }
+ndn-mobile    = { path = "crates/platform/ndn-mobile" }
+ndn-filestore  = { path = "crates/support/ndn-filestore" }
+ndn-tools-core = { path = "crates/support/ndn-tools-core" }
 
 # Core async runtime — individual crates enable only the features they need
 tokio      = { version = "1", default-features = false }
