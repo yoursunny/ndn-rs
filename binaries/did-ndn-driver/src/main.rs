@@ -105,7 +105,7 @@ async fn resolve_did(
 ) -> (StatusCode, Json<DidResolutionResult>) {
     info!(did = %did, "resolving DID");
 
-    match state.resolver.resolve(&did).await {
+    match state.resolver.resolve_document(&did).await {
         Ok(doc) => {
             let doc_value = serde_json::to_value(&doc).unwrap_or(Value::Null);
             (

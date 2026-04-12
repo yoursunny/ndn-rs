@@ -193,10 +193,10 @@ impl KeyChain {
         let v = Validator::new(TrustSchema::hierarchical());
         // Register the self-signed certificate as the trust anchor.
         for anchor_name in kc.mgr.trust_anchor_names() {
-            if anchor_name.to_string().starts_with(&prefix.to_string()) {
-                if let Some(cert) = kc.mgr.trust_anchor(&anchor_name) {
-                    v.cert_cache().insert(cert);
-                }
+            if anchor_name.to_string().starts_with(&prefix.to_string())
+                && let Some(cert) = kc.mgr.trust_anchor(&anchor_name)
+            {
+                v.cert_cache().insert(cert);
             }
         }
         Ok(v)

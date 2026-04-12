@@ -19,12 +19,11 @@ use crate::{
     ecdh::{EcdhKeypair, SessionKey},
     error::CertError,
     policy::{NamespacePolicy, PolicyDecision},
-    protocol::{
-        CaProfile, CertRequest, ProbeResponse, RevokeRequest, RevokeResponse, RevokeStatus,
-    },
+    protocol::CertRequest,
     tlv::{
-        ChallengeResponseTlv, NewRequestTlv, NewResponseTlv, STATUS_FAILURE, STATUS_PENDING,
-        STATUS_SUCCESS,
+        CaProfileTlv, ChallengeResponseTlv, NewRequestTlv, NewResponseTlv, ProbeResponseTlv,
+        REVOKE_STATUS_NOT_FOUND, REVOKE_STATUS_REVOKED, REVOKE_STATUS_UNAUTHORIZED,
+        RevokeRequestTlv, RevokeResponseTlv, STATUS_FAILURE, STATUS_PENDING, STATUS_SUCCESS,
     },
 };
 
@@ -95,65 +94,62 @@ impl CaState {
         self.revoked.contains(cert_name)
     }
 
-    /// Handle a CA INFO request — return the CA's profile.
+    /// Handle a CA INFO request — return the CA's profile as TLV.
     pub fn handle_info(&self) -> Vec<u8> {
-        // Populate the CA's public key from the first registered trust anchor.
-        let public_key = self
+        let ca_certificate = self
             .manager
             .trust_anchor_names()
             .first()
             .and_then(|name| self.manager.trust_anchor(name))
-            .map(|cert| {
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&cert.public_key)
-            })
+            .map(|cert| bytes::Bytes::from(serialize_cert(&cert)))
             .unwrap_or_else(|| {
                 tracing::warn!(
-                    "CA has no trust anchor configured; INFO response has empty public_key"
+                    "CA has no trust anchor configured; INFO response has empty ca_certificate"
                 );
-                String::new()
+                bytes::Bytes::new()
             });
 
-        let profile = CaProfile {
+        let profile = CaProfileTlv {
             ca_prefix: self.config.prefix.to_string(),
             ca_info: self.config.info.clone(),
-            public_key,
+            ca_certificate,
+            max_validity_secs: self.config.max_validity.as_secs(),
             challenges: self
                 .config
                 .challenges
                 .iter()
                 .map(|c| c.challenge_type().to_string())
                 .collect(),
-            default_validity_secs: self.config.default_validity.as_secs(),
-            max_validity_secs: self.config.max_validity.as_secs(),
         };
-        serde_json::to_vec(&profile).unwrap_or_default()
+        profile.encode().to_vec()
     }
 
     /// Handle a PROBE request — check namespace policy without creating state.
     ///
     /// Route: `/<ca-prefix>/CA/PROBE`; requested name in ApplicationParameters.
+    /// Returns TLV-encoded [`ProbeResponseTlv`].
     pub fn handle_probe(&self, requested_name: &str) -> Vec<u8> {
         let result: Result<ndn_packet::Name, _> = requested_name.parse();
         let resp = match result {
-            Err(_) => ProbeResponse {
+            Err(_) => ProbeResponseTlv {
                 allowed: false,
                 reason: Some(format!("invalid NDN name: {requested_name}")),
                 max_suffix_length: None,
             },
             Ok(name) => match self.config.policy.evaluate(&name, None, &self.config.prefix) {
-                PolicyDecision::Allow => ProbeResponse {
+                PolicyDecision::Allow => ProbeResponseTlv {
                     allowed: true,
                     reason: None,
                     max_suffix_length: None,
                 },
-                PolicyDecision::Deny(reason) => ProbeResponse {
+                PolicyDecision::Deny(reason) => ProbeResponseTlv {
                     allowed: false,
                     reason: Some(reason),
                     max_suffix_length: None,
                 },
             },
         };
-        serde_json::to_vec(&resp).unwrap_or_default()
+        resp.encode().to_vec()
     }
 
     /// Handle a NEW request — validate, perform ECDH, store state, return challenges.
@@ -385,51 +381,43 @@ impl CaState {
 
     /// Handle a REVOKE request.
     ///
-    /// Route: `/<ca-prefix>/CA/REVOKE`; body is a JSON-encoded [`RevokeRequest`].
+    /// Route: `/<ca-prefix>/CA/REVOKE`; body is TLV-encoded [`RevokeRequestTlv`].
+    /// Returns TLV-encoded [`RevokeResponseTlv`].
     pub async fn handle_revoke(&self, body: &[u8]) -> Vec<u8> {
-        let resp = self.do_revoke(body).await;
-        serde_json::to_vec(&resp).unwrap_or_default()
+        let status = self.do_revoke(body).await;
+        RevokeResponseTlv { status, reason: None }.encode().to_vec()
     }
 
-    async fn do_revoke(&self, body: &[u8]) -> RevokeResponse {
-        let req: RevokeRequest = match serde_json::from_slice(body) {
+    async fn do_revoke(&self, body: &[u8]) -> u8 {
+        let req = match RevokeRequestTlv::decode(bytes::Bytes::copy_from_slice(body)) {
             Ok(r) => r,
-            Err(_) => return RevokeResponse { status: RevokeStatus::Unauthorized },
-        };
-
-        // Verify the requester proves possession of the certificate being revoked.
-        // They must sign the cert_name bytes with the corresponding private key.
-        let sig_bytes = match base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&req.signature)
-        {
-            Ok(b) => b,
-            Err(_) => return RevokeResponse { status: RevokeStatus::Unauthorized },
+            Err(_) => return REVOKE_STATUS_UNAUTHORIZED,
         };
 
         // Find the cert in CA trust anchors to get its public key.
         let cert_name_parsed: ndn_packet::Name = match req.cert_name.parse() {
             Ok(n) => n,
-            Err(_) => return RevokeResponse { status: RevokeStatus::NotFound },
+            Err(_) => return REVOKE_STATUS_NOT_FOUND,
         };
 
         let anchor = self.manager.trust_anchor(&cert_name_parsed);
         let public_key = match anchor {
             Some(c) => c.public_key,
-            None => return RevokeResponse { status: RevokeStatus::NotFound },
+            None => return REVOKE_STATUS_NOT_FOUND,
         };
 
         // Verify: requester signed cert_name with the cert's private key.
         use ndn_security::{Ed25519Verifier, VerifyOutcome, Verifier};
         let outcome = Ed25519Verifier
-            .verify(req.cert_name.as_bytes(), &sig_bytes, &public_key)
+            .verify(req.cert_name.as_bytes(), &req.signature, &public_key)
             .await;
 
         match outcome {
             Ok(VerifyOutcome::Valid) => {
                 self.revoked.insert(req.cert_name);
-                RevokeResponse { status: RevokeStatus::Revoked }
+                REVOKE_STATUS_REVOKED
             }
-            _ => RevokeResponse { status: RevokeStatus::Unauthorized },
+            _ => REVOKE_STATUS_UNAUTHORIZED,
         }
     }
 

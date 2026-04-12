@@ -92,7 +92,7 @@ impl NdnIdentity {
         name: impl AsRef<str>,
         resolver: &UniversalResolver,
     ) -> Result<Self, IdentityError> {
-        let doc = resolver.resolve(did).await?;
+        let doc = resolver.resolve_document(did).await?;
         let identity = Self::ephemeral(name)?;
         if let Some(anchor) = ndn_security::did::did_document_to_trust_anchor(
             &doc,

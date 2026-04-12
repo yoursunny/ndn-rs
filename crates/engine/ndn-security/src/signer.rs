@@ -134,6 +134,86 @@ impl Signer for HmacSha256Signer {
     }
 }
 
+/// BLAKE3 digest signer for high-throughput self-certifying content.
+///
+/// **Experimental / NDA extension** — uses signature type code 6, which is not
+/// yet assigned by the NDN Packet Format specification. This is analogous to
+/// `DigestSha256` (type 0) but uses BLAKE3, which is 3–8x faster on modern
+/// CPUs due to SIMD parallelism.
+///
+/// The "signature" is a 32-byte BLAKE3 hash of the signed region. There is no
+/// secret key — this provides integrity (content addressing) but not
+/// authentication. For keyed BLAKE3 (authentication), use [`Blake3KeyedSigner`].
+pub struct Blake3Signer {
+    key_name: Name,
+}
+
+/// Signature type code for BLAKE3 digest (experimental, not yet in NDN spec).
+pub const SIGNATURE_TYPE_DIGEST_BLAKE3: u64 = 6;
+
+impl Blake3Signer {
+    pub fn new(key_name: Name) -> Self {
+        Self { key_name }
+    }
+}
+
+impl Signer for Blake3Signer {
+    fn sig_type(&self) -> SignatureType {
+        SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3)
+    }
+
+    fn key_name(&self) -> &Name {
+        &self.key_name
+    }
+
+    fn sign<'a>(&'a self, region: &'a [u8]) -> BoxFuture<'a, Result<Bytes, TrustError>> {
+        Box::pin(async move { self.sign_sync(region) })
+    }
+
+    fn sign_sync(&self, region: &[u8]) -> Result<Bytes, TrustError> {
+        let hash = blake3::hash(region);
+        Ok(Bytes::copy_from_slice(hash.as_bytes()))
+    }
+}
+
+/// BLAKE3 keyed signer for authenticated high-throughput content.
+///
+/// Uses a 32-byte secret key with BLAKE3's built-in keyed hashing mode.
+/// Faster than HMAC-SHA256 while providing equivalent security guarantees.
+pub struct Blake3KeyedSigner {
+    key: [u8; 32],
+    key_name: Name,
+}
+
+impl Blake3KeyedSigner {
+    /// Create from a 32-byte key. Pads or truncates `key_bytes` to 32 bytes.
+    pub fn new(key_bytes: &[u8], key_name: Name) -> Self {
+        let mut key = [0u8; 32];
+        let len = key_bytes.len().min(32);
+        key[..len].copy_from_slice(&key_bytes[..len]);
+        Self { key, key_name }
+    }
+}
+
+impl Signer for Blake3KeyedSigner {
+    fn sig_type(&self) -> SignatureType {
+        SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3)
+    }
+
+    fn key_name(&self) -> &Name {
+        &self.key_name
+    }
+
+    fn sign<'a>(&'a self, region: &'a [u8]) -> BoxFuture<'a, Result<Bytes, TrustError>> {
+        Box::pin(async move { self.sign_sync(region) })
+    }
+
+    fn sign_sync(&self, region: &[u8]) -> Result<Bytes, TrustError> {
+        let hash = blake3::keyed_hash(&self.key, region);
+        Ok(Bytes::copy_from_slice(hash.as_bytes()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

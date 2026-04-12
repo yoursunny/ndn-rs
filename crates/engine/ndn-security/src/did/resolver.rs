@@ -1,4 +1,10 @@
 //! [`DidResolver`] trait and built-in resolver implementations.
+//!
+//! Per W3C DID Core §7.1, `resolve(did, options)` returns a
+//! [`DidResolutionResult`] containing three components: the document, document
+//! metadata, and resolution metadata. Every resolver in this module returns the
+//! full result; [`UniversalResolver::resolve_document`] provides a convenience
+//! shortcut when only the document is needed.
 
 pub mod key;
 pub mod ndn;
@@ -8,9 +14,18 @@ pub use ndn::NdnDidResolver;
 
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use crate::did::document::DidDocument;
+use crate::did::{
+    document::DidDocument,
+    metadata::{DidResolutionError, DidResolutionResult},
+};
 
-/// Error type for DID resolution.
+// ── Error type (legacy convenience) ──────────────────────────────────────────
+
+/// High-level DID error for use in application code.
+///
+/// Resolvers return [`DidResolutionResult`] per the W3C spec; `DidError` is
+/// produced by [`DidResolutionResult::into_document()`] for callers that only
+/// need the document and want a simple `Result<DidDocument, DidError>`.
 #[derive(Debug, thiserror::Error)]
 pub enum DidError {
     #[error("invalid DID: {0}")]
@@ -25,17 +40,25 @@ pub enum DidError {
     InvalidDocument(String),
 }
 
-/// A resolver that can dereference a DID string to a [`DidDocument`].
+// ── DidResolver trait ─────────────────────────────────────────────────────────
+
+/// A resolver that can dereference a DID string to a [`DidResolutionResult`].
+///
+/// Per W3C DID Core §7.1, `resolve` must return the complete resolution result
+/// including document metadata and resolution metadata — even on failure (the
+/// error is encoded in `did_resolution_metadata.error`).
 pub trait DidResolver: Send + Sync {
     /// The DID method this resolver handles (e.g., `"ndn"`, `"key"`).
     fn method(&self) -> &str;
 
-    /// Resolve the DID, returning its document.
+    /// Resolve the DID, returning the full W3C resolution result.
     fn resolve<'a>(
         &'a self,
         did: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<DidDocument, DidError>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = DidResolutionResult> + Send + 'a>>;
 }
+
+// ── UniversalResolver ─────────────────────────────────────────────────────────
 
 /// A resolver that dispatches to method-specific resolvers.
 ///
@@ -48,9 +71,7 @@ pub struct UniversalResolver {
 impl UniversalResolver {
     /// Create a resolver with [`KeyDidResolver`] and [`NdnDidResolver`] registered.
     pub fn new() -> Self {
-        let mut r = Self {
-            resolvers: HashMap::new(),
-        };
+        let mut r = Self { resolvers: HashMap::new() };
         r.register(KeyDidResolver);
         r.register(NdnDidResolver::default());
         r
@@ -62,20 +83,37 @@ impl UniversalResolver {
         self
     }
 
-    /// Register an additional resolver by mutable reference.
-    pub fn register(&mut self, resolver: impl DidResolver + 'static) {
+    fn register(&mut self, resolver: impl DidResolver + 'static) {
         self.resolvers
             .insert(resolver.method().to_string(), Box::new(resolver));
     }
 
-    /// Resolve any supported DID.
-    pub async fn resolve(&self, did: &str) -> Result<DidDocument, DidError> {
-        let method = parse_method(did)?;
-        let resolver = self
-            .resolvers
-            .get(method)
-            .ok_or_else(|| DidError::UnsupportedMethod(method.to_string()))?;
-        resolver.resolve(did).await
+    /// Resolve a DID, returning the full W3C [`DidResolutionResult`].
+    pub async fn resolve(&self, did: &str) -> DidResolutionResult {
+        let method = match parse_method(did) {
+            Some(m) => m,
+            None => {
+                return DidResolutionResult::err(
+                    DidResolutionError::InvalidDid,
+                    format!("cannot parse DID method from: {did}"),
+                );
+            }
+        };
+
+        match self.resolvers.get(method) {
+            Some(resolver) => resolver.resolve(did).await,
+            None => DidResolutionResult::err(
+                DidResolutionError::MethodNotSupported,
+                format!("no resolver registered for did:{method}"),
+            ),
+        }
+    }
+
+    /// Convenience: resolve and return just the [`DidDocument`].
+    ///
+    /// Maps W3C resolution errors to [`DidError`] for simpler call sites.
+    pub async fn resolve_document(&self, did: &str) -> Result<DidDocument, DidError> {
+        self.resolve(did).await.into_document()
     }
 }
 
@@ -85,13 +123,35 @@ impl Default for UniversalResolver {
     }
 }
 
-/// Extract the method name from a DID string (`did:<method>:...`).
-pub(crate) fn parse_method(did: &str) -> Result<&str, DidError> {
-    let without_did = did
-        .strip_prefix("did:")
-        .ok_or_else(|| DidError::InvalidDid(did.to_string()))?;
-    let colon = without_did
-        .find(':')
-        .ok_or_else(|| DidError::InvalidDid(did.to_string()))?;
-    Ok(&without_did[..colon])
+/// Extract the method name from a DID string (`did:<method>:...` → `<method>`).
+pub(crate) fn parse_method(did: &str) -> Option<&str> {
+    let rest = did.strip_prefix("did:")?;
+    let colon = rest.find(':')?;
+    Some(&rest[..colon])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_method_valid() {
+        assert_eq!(parse_method("did:ndn:com:acme:alice"), Some("ndn"));
+        assert_eq!(parse_method("did:key:z6Mk..."), Some("key"));
+        assert_eq!(parse_method("did:web:example.com"), Some("web"));
+    }
+
+    #[test]
+    fn parse_method_invalid() {
+        assert_eq!(parse_method("not-a-did"), None);
+        assert_eq!(parse_method("did:"), None);
+        assert_eq!(parse_method("did:no-colon"), None);
+    }
+
+    #[tokio::test]
+    async fn unsupported_method_returns_error_result() {
+        let resolver = UniversalResolver::new();
+        let result = resolver.resolve("did:web:example.com").await;
+        assert!(result.did_resolution_metadata.error.is_some());
+    }
 }

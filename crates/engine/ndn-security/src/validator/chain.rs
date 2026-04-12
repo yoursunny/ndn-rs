@@ -42,7 +42,12 @@ impl Validator {
             return ValidationResult::Invalid(TrustError::InvalidSignature);
         };
 
-        if !self.schema.allows(&data.name, first_key) {
+        if !self
+            .schema
+            .read()
+            .expect("schema RwLock poisoned")
+            .allows(&data.name, first_key)
+        {
             return ValidationResult::Invalid(TrustError::SchemaMismatch);
         }
 

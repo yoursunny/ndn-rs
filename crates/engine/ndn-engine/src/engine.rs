@@ -9,7 +9,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use ndn_packet::Interest;
-use ndn_security::SecurityManager;
+use ndn_security::{SecurityManager, Validator};
 use ndn_store::{ErasedContentStore, Pit, PitToken, StrategyTable};
 use ndn_strategy::MeasurementsTable;
 use ndn_transport::{Face, FaceId, FacePersistency, FaceTable};
@@ -137,6 +137,11 @@ pub struct EngineInner {
     /// Security manager for signing/verification (optional — `None` disables
     /// security policy enforcement).
     pub security: Option<Arc<SecurityManager>>,
+    /// Active validator — shared with `ValidationStage` and the management API.
+    ///
+    /// The schema inside the validator is behind a `RwLock`, allowing runtime
+    /// modification via `/localhost/nfd/security/schema-*` commands.
+    pub validator: Option<Arc<Validator>>,
     /// Pipeline inbound channel — used to spawn readers for dynamically-added
     /// faces (those registered after `build()` completes).
     ///
@@ -190,6 +195,16 @@ impl ForwarderEngine {
 
     pub fn security(&self) -> Option<Arc<SecurityManager>> {
         self.inner.security.as_ref().map(Arc::clone)
+    }
+
+    /// The active validator, if any.
+    ///
+    /// The returned `Arc<Validator>` is the same instance used by the pipeline.
+    /// Its trust schema can be modified at runtime via
+    /// [`Validator::add_schema_rule`], [`Validator::remove_schema_rule`], and
+    /// [`Validator::set_schema`].
+    pub fn validator(&self) -> Option<Arc<Validator>> {
+        self.inner.validator.as_ref().map(Arc::clone)
     }
 
     pub fn strategy_table(&self) -> Arc<StrategyTable<dyn ErasedStrategy>> {

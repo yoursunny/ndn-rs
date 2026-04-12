@@ -1,14 +1,17 @@
 //! `did:key` resolver — fully local, no network required.
 //!
-//! Only Ed25519 keys (`z6Mk...`) are supported.
+//! Only Ed25519 keys (`z6Mk...` — multicodec 0xed01 + base58btc multibase) are
+//! supported. Per the `did:key` specification, the DID Document is derived
+//! directly from the public key bytes without any network fetch.
+//!
+//! Reference: <https://w3c-ccg.github.io/did-method-key/>
 
 use std::{future::Future, pin::Pin};
 
-use base64::Engine;
-
 use crate::did::{
     document::{DidDocument, VerificationMethod, VerificationRef},
-    resolver::{DidError, DidResolver},
+    metadata::{DidResolutionError, DidResolutionResult},
+    resolver::DidResolver,
 };
 
 /// Multicodec prefix for Ed25519 public keys.
@@ -25,36 +28,34 @@ impl DidResolver for KeyDidResolver {
     fn resolve<'a>(
         &'a self,
         did: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<DidDocument, DidError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = DidResolutionResult> + Send + 'a>> {
         let did = did.to_string();
-        Box::pin(async move { resolve_key_did(&did) })
+        Box::pin(async move {
+            match resolve_key_did(&did) {
+                Ok(doc) => DidResolutionResult::ok(doc),
+                Err(e) => DidResolutionResult::err(
+                    match &e {
+                        s if s.contains("invalid") || s.contains("unsupported") => {
+                            DidResolutionError::InvalidDid
+                        }
+                        _ => DidResolutionError::InternalError,
+                    },
+                    e,
+                ),
+            }
+        })
     }
 }
 
-fn resolve_key_did(did: &str) -> Result<DidDocument, DidError> {
+fn resolve_key_did(did: &str) -> Result<DidDocument, String> {
     let key_str = did
         .strip_prefix("did:key:")
-        .ok_or_else(|| DidError::InvalidDid(did.to_string()))?;
+        .ok_or_else(|| format!("not a did:key DID: {did}"))?;
 
     let public_key = decode_multibase_key(key_str)?;
     let key_id = format!("{did}#{key_str}");
 
-    let mut jwk = serde_json::Map::new();
-    jwk.insert("kty".to_string(), "OKP".into());
-    jwk.insert("crv".to_string(), "Ed25519".into());
-    jwk.insert(
-        "x".to_string(),
-        base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(&public_key)
-            .into(),
-    );
-
-    let vm = VerificationMethod {
-        id: key_id.clone(),
-        typ: "JsonWebKey2020".to_string(),
-        controller: did.to_string(),
-        public_key_jwk: Some(jwk),
-    };
+    let vm = VerificationMethod::ed25519_jwk(&key_id, did, &public_key);
 
     Ok(DidDocument {
         context: vec![
@@ -62,33 +63,37 @@ fn resolve_key_did(did: &str) -> Result<DidDocument, DidError> {
             "https://w3id.org/security/suites/jws-2020/v1".to_string(),
         ],
         id: did.to_string(),
+        controller: None,
         verification_methods: vec![vm],
         authentication: vec![VerificationRef::Reference(key_id.clone())],
-        assertion_method: vec![VerificationRef::Reference(key_id)],
+        assertion_method: vec![VerificationRef::Reference(key_id.clone())],
+        key_agreement: vec![],
+        capability_invocation: vec![VerificationRef::Reference(key_id.clone())],
+        capability_delegation: vec![VerificationRef::Reference(key_id)],
         service: vec![],
         also_known_as: vec![],
     })
 }
 
-fn decode_multibase_key(encoded: &str) -> Result<Vec<u8>, DidError> {
-    let b58 = encoded.strip_prefix('z').ok_or_else(|| {
-        DidError::InvalidDid(format!("unsupported multibase prefix in {encoded}"))
-    })?;
+fn decode_multibase_key(encoded: &str) -> Result<Vec<u8>, String> {
+    let b58 = encoded
+        .strip_prefix('z')
+        .ok_or_else(|| format!("unsupported multibase prefix in {encoded}"))?;
 
     let bytes = bs58_decode(b58)
-        .map_err(|_| DidError::InvalidDid(format!("invalid base58 in {encoded}")))?;
+        .map_err(|_| format!("invalid base58 in {encoded}"))?;
 
     if bytes.len() < 2 {
-        return Err(DidError::InvalidDid("key too short".to_string()));
+        return Err("key too short".to_string());
     }
 
     if bytes[0] == ED25519_MULTICODEC[0] && bytes[1] == ED25519_MULTICODEC[1] {
         Ok(bytes[2..].to_vec())
     } else {
-        Err(DidError::InvalidDid(format!(
+        Err(format!(
             "unsupported key type (multicodec prefix {:02x}{:02x})",
             bytes[0], bytes[1]
-        )))
+        ))
     }
 }
 
@@ -124,10 +129,20 @@ mod tests {
     async fn resolve_known_key_did() {
         let did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
         let resolver = KeyDidResolver;
-        let doc = resolver.resolve(did).await;
-        assert!(doc.is_ok(), "should resolve: {doc:?}");
-        let doc = doc.unwrap();
+        let result = resolver.resolve(did).await;
+        assert!(result.did_resolution_metadata.error.is_none(), "{result:?}");
+        let doc = result.did_document.unwrap();
         assert_eq!(doc.id, did);
         assert!(!doc.verification_methods.is_empty());
+        assert!(!doc.authentication.is_empty());
+        assert!(!doc.capability_invocation.is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_did_returns_error_result() {
+        let resolver = KeyDidResolver;
+        let result = resolver.resolve("did:key:invalid").await;
+        assert!(result.did_resolution_metadata.error.is_some());
+        assert!(result.did_document.is_none());
     }
 }

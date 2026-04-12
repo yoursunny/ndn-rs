@@ -13,6 +13,7 @@ dashmap       = { workspace = true }
 thiserror     = { workspace = true }
 ring          = { workspace = true }
 ed25519-dalek = { workspace = true }
+blake3        = { workspace = true }
 # DID support (formerly ndn-did)
 serde         = { workspace = true }
 serde_json    = { workspace = true }

@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use ndn_packet::Name;
 use ndn_security::{
-    CertCache, CertFetcher, SecurityManager, SecurityProfile, TrustSchema, Validator,
+    CertCache, CertFetcher, SchemaRule, SecurityManager, SecurityProfile, TrustSchema, Validator,
 };
 use ndn_store::{
     CsAdmissionPolicy, CsObserver, ErasedContentStore, LruCs, ObservableCs, Pit, StrategyTable,
@@ -70,6 +70,9 @@ pub struct EngineBuilder {
     security_profile: SecurityProfile,
     discovery: Option<Arc<dyn DiscoveryProtocol>>,
     routing_protocols: Vec<Arc<dyn RoutingProtocol>>,
+    /// Static trust schema rules applied at startup in addition to those
+    /// implied by the security profile.
+    schema_rules: Vec<SchemaRule>,
 }
 
 impl EngineBuilder {
@@ -87,6 +90,7 @@ impl EngineBuilder {
             security_profile: SecurityProfile::Default,
             discovery: None,
             routing_protocols: Vec::new(),
+            schema_rules: Vec::new(),
         }
     }
 
@@ -153,6 +157,24 @@ impl EngineBuilder {
     /// - `Custom(v)`: use a caller-provided validator
     pub fn security_profile(mut self, p: SecurityProfile) -> Self {
         self.security_profile = p;
+        self
+    }
+
+    /// Add a static trust schema rule loaded at startup.
+    ///
+    /// Rules are added to the validator's schema after the profile's default
+    /// rules are applied. Call this once per rule, or apply many rules by
+    /// iterating over a config list:
+    ///
+    /// ```rust,ignore
+    /// for rule in &config.security.rules {
+    ///     if let Ok(r) = SchemaRule::parse(&format!("{} => {}", rule.data, rule.key)) {
+    ///         builder = builder.schema_rule(r);
+    ///     }
+    /// }
+    /// ```
+    pub fn schema_rule(mut self, rule: SchemaRule) -> Self {
+        self.schema_rules.push(rule);
         self
     }
 
@@ -255,6 +277,16 @@ impl EngineBuilder {
         let (validator, cert_fetcher) =
             resolve_security_profile(self.security_profile, &self.security);
 
+        // Apply static schema rules from config (e.g. [[security.rule]] entries).
+        if let Some(v) = &validator {
+            for rule in self.schema_rules {
+                v.add_schema_rule(rule);
+            }
+        }
+
+        // Keep a clone of the validator Arc for the engine (management API access).
+        let engine_validator = validator.clone();
+
         // Discovery protocol (default: no-op).
         let discovery: Arc<dyn DiscoveryProtocol> =
             self.discovery.unwrap_or_else(|| Arc::new(NoDiscovery));
@@ -283,6 +315,7 @@ impl EngineBuilder {
             measurements: Arc::clone(&measurements),
             strategy_table: Arc::clone(&strategy_table),
             security: self.security,
+            validator: engine_validator,
             pipeline_tx: OnceLock::new(),
             face_states: Arc::clone(&face_states),
             discovery: Arc::clone(&discovery),

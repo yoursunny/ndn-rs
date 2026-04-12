@@ -75,6 +75,59 @@ impl Verifier for Ed25519Verifier {
     }
 }
 
+/// BLAKE3 digest verifier — checks that `sig_value` is the BLAKE3 hash of `region`.
+///
+/// `public_key` is unused (BLAKE3 digest signing has no key). Pass an empty slice.
+pub struct Blake3DigestVerifier;
+
+impl Verifier for Blake3DigestVerifier {
+    fn verify<'a>(
+        &'a self,
+        region: &'a [u8],
+        sig_value: &'a [u8],
+        _public_key: &'a [u8],
+    ) -> BoxFuture<'a, Result<VerifyOutcome, TrustError>> {
+        Box::pin(async move {
+            let Ok(expected): Result<&[u8; 32], _> = sig_value.try_into() else {
+                return Ok(VerifyOutcome::Invalid);
+            };
+            let hash = blake3::hash(region);
+            if hash.as_bytes() == expected {
+                Ok(VerifyOutcome::Valid)
+            } else {
+                Ok(VerifyOutcome::Invalid)
+            }
+        })
+    }
+}
+
+/// BLAKE3 keyed verifier — checks that `sig_value` is the BLAKE3 keyed hash of `region`.
+///
+/// `public_key` must be exactly 32 bytes (the BLAKE3 key).
+pub struct Blake3KeyedVerifier;
+
+impl Verifier for Blake3KeyedVerifier {
+    fn verify<'a>(
+        &'a self,
+        region: &'a [u8],
+        sig_value: &'a [u8],
+        public_key: &'a [u8],
+    ) -> BoxFuture<'a, Result<VerifyOutcome, TrustError>> {
+        Box::pin(async move {
+            let key: &[u8; 32] = public_key.try_into().map_err(|_| TrustError::InvalidKey)?;
+            let Ok(expected): Result<&[u8; 32], _> = sig_value.try_into() else {
+                return Ok(VerifyOutcome::Invalid);
+            };
+            let hash = blake3::keyed_hash(key, region);
+            if hash.as_bytes() == expected {
+                Ok(VerifyOutcome::Valid)
+            } else {
+                Ok(VerifyOutcome::Invalid)
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

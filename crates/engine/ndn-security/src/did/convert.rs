@@ -2,11 +2,11 @@
 //!
 //! An NDN certificate is structurally equivalent to a DID Document:
 //! the namespace IS the identifier, and the certificate's public key
-//! is the verification method. This module makes that equivalence explicit.
+//! is the verification method. This module makes that equivalence explicit
+//! and provides a builder for zone-based DID Documents.
 
 use std::sync::Arc;
 
-use base64::Engine;
 use ndn_packet::Name;
 
 use crate::Certificate;
@@ -24,19 +24,19 @@ const KEY_COMPONENT: &[u8] = b"KEY";
 /// The certificate's `name` is expected to be a KEY name like
 /// `/com/acme/alice/KEY/v=123/self`. The identity DID is derived from
 /// the prefix before `/KEY/`.
-pub fn cert_to_did_document(cert: &Certificate) -> DidDocument {
+///
+/// # Key agreement key
+///
+/// Pass `x25519_key` to include a `keyAgreement` entry. This is an X25519
+/// public key separate from the Ed25519 signing key — critical for NDA's
+/// encrypted content tier. The X25519 key is typically derived from the
+/// Ed25519 seed (e.g., via RFC 7748 conversion) or generated independently.
+pub fn cert_to_did_document(cert: &Certificate, x25519_key: Option<&[u8]>) -> DidDocument {
     let identity_name = strip_key_suffix(cert.name.as_ref());
     let did = name_to_did(&identity_name);
     let key_id = format!("{did}#key-0");
 
-    let jwk = build_jwk(&cert.public_key);
-
-    let vm = VerificationMethod {
-        id: key_id.clone(),
-        typ: "JsonWebKey2020".to_string(),
-        controller: did.clone(),
-        public_key_jwk: Some(jwk),
-    };
+    let vm = VerificationMethod::ed25519_jwk(&key_id, &did, &cert.public_key);
 
     let mut doc = DidDocument {
         context: vec![
@@ -44,13 +44,26 @@ pub fn cert_to_did_document(cert: &Certificate) -> DidDocument {
             "https://w3id.org/security/suites/jws-2020/v1".to_string(),
         ],
         id: did.clone(),
+        controller: None,
         verification_methods: vec![vm],
         authentication: vec![VerificationRef::Reference(key_id.clone())],
-        assertion_method: vec![VerificationRef::Reference(key_id)],
+        assertion_method: vec![VerificationRef::Reference(key_id.clone())],
+        key_agreement: vec![],
+        capability_invocation: vec![VerificationRef::Reference(key_id.clone())],
+        capability_delegation: vec![VerificationRef::Reference(key_id)],
         service: vec![],
         also_known_as: vec![],
     };
 
+    // Add X25519 key agreement VM if provided.
+    if let Some(x25519_bytes) = x25519_key {
+        let ka_id = format!("{did}#key-agreement-0");
+        let ka_vm = VerificationMethod::x25519_jwk(&ka_id, &did, x25519_bytes);
+        doc.verification_methods.push(ka_vm);
+        doc.key_agreement.push(VerificationRef::Reference(ka_id));
+    }
+
+    // Set also_known_as from issuer name if different from subject.
     if let Some(issuer) = &cert.issuer {
         let issuer_identity = strip_key_suffix(issuer.as_ref());
         let issuer_did = name_to_did(&issuer_identity);
@@ -62,13 +75,87 @@ pub fn cert_to_did_document(cert: &Certificate) -> DidDocument {
     doc
 }
 
+/// Build a W3C DID Document for a self-certifying [`ZoneKey`].
+///
+/// The resulting document:
+/// - Has `id` = `did:ndn:v1:<base64url(zone-root-name-TLV)>`
+/// - Lists the Ed25519 signing key as `authentication`, `assertionMethod`,
+///   `capabilityInvocation`, and `capabilityDelegation`
+/// - Optionally lists an X25519 key as `keyAgreement`
+/// - Has no `controller` (the zone controls itself)
+///
+/// Publish this document as a signed Data packet at the zone root name so
+/// that `NdnDidResolver` can fetch and verify it.
+pub fn build_zone_did_document(
+    zone_key: &crate::zone::ZoneKey,
+    x25519_key: Option<&[u8]>,
+    services: Vec<crate::did::document::Service>,
+) -> DidDocument {
+    let did = zone_key.zone_root_did();
+    let key_id = format!("{did}#key-0");
+
+    let vm = VerificationMethod::ed25519_jwk(&key_id, &did, zone_key.public_key_bytes());
+
+    let mut doc = DidDocument {
+        context: vec![
+            "https://www.w3.org/ns/did/v1".to_string(),
+            "https://w3id.org/security/suites/jws-2020/v1".to_string(),
+        ],
+        id: did.clone(),
+        controller: None,
+        verification_methods: vec![vm],
+        authentication: vec![VerificationRef::Reference(key_id.clone())],
+        assertion_method: vec![VerificationRef::Reference(key_id.clone())],
+        key_agreement: vec![],
+        capability_invocation: vec![VerificationRef::Reference(key_id.clone())],
+        capability_delegation: vec![VerificationRef::Reference(key_id)],
+        service: services,
+        also_known_as: vec![],
+    };
+
+    if let Some(x25519_bytes) = x25519_key {
+        let ka_id = format!("{did}#key-agreement-0");
+        let ka_vm = VerificationMethod::x25519_jwk(&ka_id, &did, x25519_bytes);
+        doc.verification_methods.push(ka_vm);
+        doc.key_agreement.push(VerificationRef::Reference(ka_id));
+    }
+
+    doc
+}
+
+/// Build a deactivated zone DID Document expressing zone succession.
+///
+/// When a zone owner rotates to a new zone, they publish this document at the
+/// old zone root name. The `successor_did` is listed in `alsoKnownAs`.
+/// Resolvers that check [`DidResolutionResult::is_deactivated`] will follow
+/// the succession chain.
+pub fn build_zone_succession_document(
+    old_zone_key: &crate::zone::ZoneKey,
+    successor_did: impl Into<String>,
+) -> DidDocument {
+    let did = old_zone_key.zone_root_did();
+    let key_id = format!("{did}#key-0");
+    let vm = VerificationMethod::ed25519_jwk(&key_id, &did, old_zone_key.public_key_bytes());
+
+    DidDocument {
+        context: vec!["https://www.w3.org/ns/did/v1".to_string()],
+        id: did.clone(),
+        controller: None,
+        verification_methods: vec![vm],
+        authentication: vec![VerificationRef::Reference(key_id.clone())],
+        assertion_method: vec![],
+        key_agreement: vec![],
+        capability_invocation: vec![],
+        capability_delegation: vec![],
+        service: vec![],
+        also_known_as: vec![successor_did.into()],
+    }
+}
+
 /// Attempt to reconstruct a trust anchor [`Certificate`] from a [`DidDocument`].
 ///
 /// Returns `None` if the document does not contain a recognised Ed25519 key.
-pub fn did_document_to_trust_anchor(
-    doc: &DidDocument,
-    name: Arc<Name>,
-) -> Option<Certificate> {
+pub fn did_document_to_trust_anchor(doc: &DidDocument, name: Arc<Name>) -> Option<Certificate> {
     let key_bytes = doc.ed25519_public_key()?;
     Some(Certificate {
         name,
@@ -81,8 +168,7 @@ pub fn did_document_to_trust_anchor(
     })
 }
 
-/// Strip the `/KEY/<version>/<issuer>` suffix from a certificate name to get
-/// the identity name.
+/// Strip the `/KEY/<version>/<issuer>` suffix from a certificate name.
 ///
 /// `/com/acme/alice/KEY/v=123/self` → `/com/acme/alice`
 pub(crate) fn strip_key_suffix(name: &Name) -> Name {
@@ -94,15 +180,6 @@ pub(crate) fn strip_key_suffix(name: &Name) -> Name {
         Some(pos) if pos > 0 => Name::from_components(comps[..pos].iter().cloned()),
         _ => name.clone(),
     }
-}
-
-fn build_jwk(public_key: &[u8]) -> serde_json::Map<String, serde_json::Value> {
-    let x = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key);
-    let mut map = serde_json::Map::new();
-    map.insert("kty".to_string(), "OKP".into());
-    map.insert("crv".to_string(), "Ed25519".into());
-    map.insert("x".to_string(), x.into());
-    map
 }
 
 #[cfg(test)]
@@ -122,5 +199,54 @@ mod tests {
         let name: Name = "/com/acme/alice".parse().unwrap();
         let stripped = strip_key_suffix(&name);
         assert_eq!(stripped, name);
+    }
+
+    #[test]
+    fn cert_to_did_doc_has_required_relationships() {
+        use bytes::Bytes;
+        let name: Name = "/com/acme/alice/KEY/v=1/self".parse().unwrap();
+        let cert = Certificate {
+            name: Arc::new(name),
+            public_key: Bytes::from(vec![0u8; 32]),
+            valid_from: 0,
+            valid_until: u64::MAX,
+            issuer: None,
+            signed_region: None,
+            sig_value: None,
+        };
+        let doc = cert_to_did_document(&cert, None);
+        assert_eq!(doc.id, "did:ndn:com:acme:alice");
+        assert!(!doc.authentication.is_empty());
+        assert!(!doc.assertion_method.is_empty());
+        assert!(!doc.capability_invocation.is_empty());
+        assert!(!doc.capability_delegation.is_empty());
+        assert!(doc.key_agreement.is_empty()); // no X25519 supplied
+    }
+
+    #[test]
+    fn cert_to_did_doc_with_x25519() {
+        use bytes::Bytes;
+        let name: Name = "/com/acme/alice/KEY/v=1/self".parse().unwrap();
+        let cert = Certificate {
+            name: Arc::new(name),
+            public_key: Bytes::from(vec![0u8; 32]),
+            valid_from: 0,
+            valid_until: u64::MAX,
+            issuer: None,
+            signed_region: None,
+            sig_value: None,
+        };
+        let x25519 = [0xABu8; 32];
+        let doc = cert_to_did_document(&cert, Some(&x25519));
+        assert!(!doc.key_agreement.is_empty());
+        assert_eq!(doc.verification_methods.len(), 2);
+        // The X25519 VM should have crv=X25519.
+        let ka_vm = &doc.verification_methods[1];
+        let crv = ka_vm
+            .public_key_jwk
+            .as_ref()
+            .and_then(|jwk| jwk.get("crv"))
+            .and_then(|v| v.as_str());
+        assert_eq!(crv, Some("X25519"));
     }
 }

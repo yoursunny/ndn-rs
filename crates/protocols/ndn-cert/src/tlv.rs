@@ -490,6 +490,163 @@ impl ChallengeResponseTlv {
     }
 }
 
+/// TLV-encoded PROBE response (content of `/<ca>/CA/PROBE` Data packet).
+pub struct ProbeResponseTlv {
+    /// Whether the CA will issue for the requested name.
+    pub allowed: bool,
+    /// Reason for denial (present when `allowed == false`).
+    pub reason: Option<String>,
+    /// Max components the CA permits after its own prefix.
+    pub max_suffix_length: Option<u8>,
+}
+
+impl ProbeResponseTlv {
+    pub fn encode(&self) -> Bytes {
+        let mut w = TlvWriter::new();
+        w.write_tlv(TLV_STATUS, &[if self.allowed { 1u8 } else { 0u8 }]);
+        if let Some(ref reason) = self.reason {
+            w.write_tlv(TLV_ERROR_INFO, reason.as_bytes());
+        }
+        if let Some(msl) = self.max_suffix_length {
+            w.write_tlv(TLV_MAX_SUFFIX_LENGTH, &[msl]);
+        }
+        w.finish()
+    }
+
+    pub fn decode(buf: Bytes) -> Result<Self, CertError> {
+        let mut r = TlvReader::new(buf);
+        let mut allowed = None;
+        let mut reason = None;
+        let mut max_suffix_length = None;
+
+        while !r.is_empty() {
+            let (typ, val) = r
+                .read_tlv()
+                .map_err(|e| CertError::InvalidRequest(format!("TLV parse error: {e}")))?;
+            match typ {
+                TLV_STATUS => {
+                    allowed = val.first().map(|&b| b != 0);
+                }
+                TLV_ERROR_INFO => {
+                    reason = std::str::from_utf8(&val).ok().map(str::to_string);
+                }
+                TLV_MAX_SUFFIX_LENGTH => {
+                    max_suffix_length = val.first().copied();
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            allowed: allowed.unwrap_or(false),
+            reason,
+            max_suffix_length,
+        })
+    }
+}
+
+/// TLV-encoded REVOKE request body (`/<ca>/CA/REVOKE` ApplicationParameters).
+pub struct RevokeRequestTlv {
+    /// Name of the certificate to revoke (UTF-8 NDN name URI).
+    pub cert_name: String,
+    /// Ed25519 signature of `cert_name` bytes, proving possession.
+    pub signature: Bytes,
+}
+
+/// REVOKE response status codes.
+pub const REVOKE_STATUS_REVOKED: u8 = 0;
+pub const REVOKE_STATUS_NOT_FOUND: u8 = 1;
+pub const REVOKE_STATUS_UNAUTHORIZED: u8 = 2;
+
+impl RevokeRequestTlv {
+    pub fn encode(&self) -> Bytes {
+        let mut w = TlvWriter::new();
+        w.write_tlv(TLV_ISSUED_CERT_NAME, self.cert_name.as_bytes());
+        w.write_tlv(TLV_AUTH_TAG, &self.signature);
+        w.finish()
+    }
+
+    pub fn decode(buf: Bytes) -> Result<Self, CertError> {
+        let mut r = TlvReader::new(buf);
+        let mut cert_name = None;
+        let mut signature = None;
+
+        while !r.is_empty() {
+            let (typ, val) = r
+                .read_tlv()
+                .map_err(|e| CertError::InvalidRequest(format!("TLV parse error: {e}")))?;
+            match typ {
+                TLV_ISSUED_CERT_NAME => {
+                    cert_name = Some(
+                        std::str::from_utf8(&val)
+                            .map_err(|_| {
+                                CertError::InvalidRequest("invalid cert-name UTF-8".into())
+                            })?
+                            .to_string(),
+                    );
+                }
+                TLV_AUTH_TAG => {
+                    signature = Some(val);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            cert_name: cert_name
+                .ok_or_else(|| CertError::InvalidRequest("missing cert-name".into()))?,
+            signature: signature
+                .ok_or_else(|| CertError::InvalidRequest("missing signature".into()))?,
+        })
+    }
+}
+
+/// TLV-encoded REVOKE response body.
+pub struct RevokeResponseTlv {
+    /// One of the `REVOKE_STATUS_*` constants.
+    pub status: u8,
+    /// Optional human-readable reason.
+    pub reason: Option<String>,
+}
+
+impl RevokeResponseTlv {
+    pub fn encode(&self) -> Bytes {
+        let mut w = TlvWriter::new();
+        w.write_tlv(TLV_STATUS, &[self.status]);
+        if let Some(ref reason) = self.reason {
+            w.write_tlv(TLV_ERROR_INFO, reason.as_bytes());
+        }
+        w.finish()
+    }
+
+    pub fn decode(buf: Bytes) -> Result<Self, CertError> {
+        let mut r = TlvReader::new(buf);
+        let mut status = None;
+        let mut reason = None;
+
+        while !r.is_empty() {
+            let (typ, val) = r
+                .read_tlv()
+                .map_err(|e| CertError::InvalidRequest(format!("TLV parse error: {e}")))?;
+            match typ {
+                TLV_STATUS => {
+                    status = val.first().copied();
+                }
+                TLV_ERROR_INFO => {
+                    reason = std::str::from_utf8(&val).ok().map(str::to_string);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            status: status
+                .ok_or_else(|| CertError::InvalidRequest("missing status".into()))?,
+            reason,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

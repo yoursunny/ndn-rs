@@ -48,7 +48,7 @@ pub enum Action {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::context::PacketContext;
+    use crate::pipeline::context::PacketContext;
     use bytes::Bytes;
     use ndn_transport::FaceId;
     use smallvec::smallvec;

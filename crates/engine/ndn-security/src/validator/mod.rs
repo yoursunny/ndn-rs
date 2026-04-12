@@ -1,12 +1,13 @@
 mod chain;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use ndn_packet::{Data, Name};
 
 use crate::cert_cache::Certificate;
 use crate::cert_fetcher::CertFetcher;
+use crate::trust_schema::SchemaRule;
 use crate::verifier::Verifier;
 use crate::{CertCache, Ed25519Verifier, SafeData, TrustError, TrustSchema, VerifyOutcome};
 
@@ -22,8 +23,13 @@ pub enum ValidationResult {
 }
 
 /// Validates Data packets against a trust schema and certificate chain.
+///
+/// The active [`TrustSchema`] is stored in an `Arc<RwLock<TrustSchema>>` so it
+/// can be replaced or extended at runtime without rebuilding the validator.
+/// Reads (hot path) acquire a shared lock; writes (management API) acquire an
+/// exclusive lock.
 pub struct Validator {
-    pub(super) schema: TrustSchema,
+    pub(super) schema: Arc<RwLock<TrustSchema>>,
     pub(super) cert_cache: Arc<CertCache>,
     pub(super) verifier: Ed25519Verifier,
     pub(super) max_chain: usize,
@@ -37,7 +43,7 @@ impl Validator {
     /// Create a validator with a private cert cache (no chain walking).
     pub fn new(schema: TrustSchema) -> Self {
         Self {
-            schema,
+            schema: Arc::new(RwLock::new(schema)),
             cert_cache: Arc::new(CertCache::new()),
             verifier: Ed25519Verifier,
             max_chain: 5,
@@ -55,7 +61,7 @@ impl Validator {
         max_chain: usize,
     ) -> Self {
         Self {
-            schema,
+            schema: Arc::new(RwLock::new(schema)),
             cert_cache,
             verifier: Ed25519Verifier,
             max_chain,
@@ -80,6 +86,56 @@ impl Validator {
         self.trust_anchors.iter().any(|r| r.key().as_ref() == name)
     }
 
+    // ── Runtime schema modification ───────────────────────────────────────────
+
+    /// Replace the active trust schema.
+    ///
+    /// Takes effect immediately for all subsequent validations.
+    pub fn set_schema(&self, schema: TrustSchema) {
+        *self.schema.write().expect("schema RwLock poisoned") = schema;
+    }
+
+    /// Append a rule to the active schema.
+    pub fn add_schema_rule(&self, rule: SchemaRule) {
+        self.schema
+            .write()
+            .expect("schema RwLock poisoned")
+            .add_rule(rule);
+    }
+
+    /// Remove the rule at `index` from the active schema.
+    ///
+    /// Returns the removed rule, or `None` if `index` is out of bounds.
+    pub fn remove_schema_rule(&self, index: usize) -> Option<SchemaRule> {
+        let mut guard = self.schema.write().expect("schema RwLock poisoned");
+        if index < guard.rules().len() {
+            Some(guard.remove_rule(index))
+        } else {
+            None
+        }
+    }
+
+    /// Snapshot the current schema rules as `(data_pattern, key_pattern)` text pairs.
+    pub fn schema_rules_text(&self) -> Vec<(String, String)> {
+        self.schema
+            .read()
+            .expect("schema RwLock poisoned")
+            .rules()
+            .iter()
+            .map(|r| (
+                r.data_pattern.to_string(),
+                r.key_pattern.to_string(),
+            ))
+            .collect()
+    }
+
+    /// Returns a clone of the current [`TrustSchema`].
+    pub fn schema_snapshot(&self) -> TrustSchema {
+        self.schema.read().expect("schema RwLock poisoned").clone()
+    }
+
+    // ── Validation ────────────────────────────────────────────────────────────
+
     /// Validate a Data packet (single-hop, returns Pending if cert missing).
     ///
     /// For full chain walking with async cert fetching, use `validate_chain`.
@@ -91,7 +147,12 @@ impl Validator {
             return ValidationResult::Invalid(TrustError::InvalidSignature);
         };
 
-        if !self.schema.allows(&data.name, key_locator) {
+        if !self
+            .schema
+            .read()
+            .expect("schema RwLock poisoned")
+            .allows(&data.name, key_locator)
+        {
             return ValidationResult::Invalid(TrustError::SchemaMismatch);
         }
 
