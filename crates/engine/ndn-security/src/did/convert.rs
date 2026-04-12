@@ -215,7 +215,11 @@ mod tests {
             sig_value: None,
         };
         let doc = cert_to_did_document(&cert, None);
-        assert_eq!(doc.id, "did:ndn:com:acme:alice");
+        // name_to_did always produces binary-encoded DIDs; verify the id round-trips
+        // back to the identity name rather than asserting the deprecated simple form.
+        let identity_name: Name = "/com/acme/alice".parse().unwrap();
+        let expected_did = crate::did::encoding::name_to_did(&identity_name);
+        assert_eq!(doc.id, expected_did);
         assert!(!doc.authentication.is_empty());
         assert!(!doc.assertion_method.is_empty());
         assert!(!doc.capability_invocation.is_empty());
