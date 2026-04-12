@@ -108,7 +108,7 @@ fn list_interfaces_unix() -> Vec<InterfaceInfo> {
                 .to_string_lossy()
                 .into_owned();
 
-            let flags = (*ifa).ifa_flags as u32;
+            let flags = (*ifa).ifa_flags;
             let is_up =
                 flags & (libc::IFF_UP as u32) != 0 && flags & (libc::IFF_RUNNING as u32) != 0;
             let is_multicast = flags & (libc::IFF_MULTICAST as u32) != 0;
