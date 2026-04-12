@@ -31,4 +31,3 @@ pub mod peek;
 
 #[cfg(feature = "put")]
 pub mod put;
-

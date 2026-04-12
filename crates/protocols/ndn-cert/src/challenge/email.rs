@@ -15,7 +15,12 @@
 //! The `EmailSender` trait is deliberately transport-agnostic so callers can
 //! plug in any delivery mechanism (SMTP via `lettre`, HTTP webhook, mock for tests).
 
-use std::{future::Future, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use ring::digest::{SHA256, digest};
 
@@ -112,7 +117,11 @@ impl ChallengeHandler for EmailChallenge {
                 CertError::InvalidRequest("missing 'email' parameter".to_string())
             })?;
 
-            let phase = state.data.get("phase").and_then(|v| v.as_str()).unwrap_or("");
+            let phase = state
+                .data
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let remaining_tries = state
                 .data
                 .get("remaining_tries")
@@ -123,10 +132,9 @@ impl ChallengeHandler for EmailChallenge {
                 "awaiting_email" => {
                     // Round 1: send the OTP to the provided email address.
                     let otp = generate_otp();
-                    sender
-                        .send(&email, &otp)
-                        .await
-                        .map_err(|e| CertError::InvalidRequest(format!("email send failed: {e}")))?;
+                    sender.send(&email, &otp).await.map_err(|e| {
+                        CertError::InvalidRequest(format!("email send failed: {e}"))
+                    })?;
 
                     let otp_hash = sha256_hex(&otp);
                     let expires_at = now_secs() + code_ttl_secs as u64;
@@ -167,7 +175,7 @@ impl ChallengeHandler for EmailChallenge {
                         None => {
                             return Ok(ChallengeOutcome::Denied(
                                 "missing 'code' parameter".to_string(),
-                            ))
+                            ));
                         }
                     };
 
@@ -206,7 +214,9 @@ impl ChallengeHandler for EmailChallenge {
                     }
                 }
 
-                _ => Ok(ChallengeOutcome::Denied("unknown challenge phase".to_string())),
+                _ => Ok(ChallengeOutcome::Denied(
+                    "unknown challenge phase".to_string(),
+                )),
             }
         })
     }

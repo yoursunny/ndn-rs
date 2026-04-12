@@ -105,7 +105,9 @@ impl CaProfileTlv {
                 TLV_CA_PREFIX => {
                     ca_prefix = Some(
                         std::str::from_utf8(&val)
-                            .map_err(|_| CertError::InvalidRequest("invalid ca-prefix UTF-8".into()))?
+                            .map_err(|_| {
+                                CertError::InvalidRequest("invalid ca-prefix UTF-8".into())
+                            })?
                             .to_string(),
                     );
                 }
@@ -475,8 +477,7 @@ impl ChallengeResponseTlv {
         }
 
         Ok(Self {
-            status: status
-                .ok_or_else(|| CertError::InvalidRequest("missing status".into()))?,
+            status: status.ok_or_else(|| CertError::InvalidRequest("missing status".into()))?,
             challenge_status,
             remaining_tries,
             remaining_time_secs,
@@ -640,8 +641,7 @@ impl RevokeResponseTlv {
         }
 
         Ok(Self {
-            status: status
-                .ok_or_else(|| CertError::InvalidRequest("missing status".into()))?,
+            status: status.ok_or_else(|| CertError::InvalidRequest("missing status".into()))?,
             reason,
         })
     }

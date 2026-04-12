@@ -16,7 +16,7 @@ use crate::types::LogEntry;
 // ── RouterProc ────────────────────────────────────────────────────────────────
 
 pub struct RouterProc {
-    child:   Child,
+    child: Child,
     log_buf: Arc<Mutex<VecDeque<LogEntry>>>,
 }
 
@@ -46,7 +46,9 @@ impl RouterProc {
                     let entry = LogEntry::parse_line(&line);
                     let mut q = buf.lock().unwrap();
                     q.push_back(entry);
-                    if q.len() > LOG_BUF_CAP { q.pop_front(); }
+                    if q.len() > LOG_BUF_CAP {
+                        q.pop_front();
+                    }
                 }
             });
         }
@@ -60,7 +62,9 @@ impl RouterProc {
                     let entry = LogEntry::parse_line(&line);
                     let mut q = buf.lock().unwrap();
                     q.push_back(entry);
-                    if q.len() > LOG_BUF_CAP { q.pop_front(); }
+                    if q.len() > LOG_BUF_CAP {
+                        q.pop_front();
+                    }
                 }
             });
         }

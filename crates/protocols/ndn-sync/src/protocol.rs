@@ -93,11 +93,7 @@ impl SyncHandle {
     ///
     /// A common convention is to pass a Name TLV (type 7 + length + components)
     /// so the consumer can directly fetch the named object.
-    pub async fn publish_with_mapping(
-        &self,
-        name: Name,
-        mapping: Bytes,
-    ) -> Result<(), SyncError> {
+    pub async fn publish_with_mapping(&self, name: Name, mapping: Bytes) -> Result<(), SyncError> {
         self.tx
             .send((name, Some(mapping)))
             .await

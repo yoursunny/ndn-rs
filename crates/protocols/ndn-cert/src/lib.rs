@@ -40,14 +40,14 @@ pub mod protocol;
 pub mod tlv;
 
 pub use ca::{CaConfig, CaState};
-pub use ecdh::{EcdhKeypair, SessionKey};
-pub use challenge::{ChallengeHandler, ChallengeOutcome, ChallengeState};
 pub use challenge::email::{EmailChallenge, EmailSender};
 pub use challenge::pin::PinChallenge;
-pub use challenge::yubikey::YubikeyHotpChallenge;
 pub use challenge::possession::PossessionChallenge;
 pub use challenge::token::{TokenChallenge, TokenStore};
+pub use challenge::yubikey::YubikeyHotpChallenge;
+pub use challenge::{ChallengeHandler, ChallengeOutcome, ChallengeState};
 pub use client::EnrollmentSession;
+pub use ecdh::{EcdhKeypair, SessionKey};
 pub use error::CertError;
 pub use policy::{DelegationPolicy, HierarchicalPolicy, NamespacePolicy, PolicyDecision};
 pub use protocol::{

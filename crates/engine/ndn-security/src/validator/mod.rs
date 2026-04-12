@@ -122,10 +122,7 @@ impl Validator {
             .expect("schema RwLock poisoned")
             .rules()
             .iter()
-            .map(|r| (
-                r.data_pattern.to_string(),
-                r.key_pattern.to_string(),
-            ))
+            .map(|r| (r.data_pattern.to_string(), r.key_pattern.to_string()))
             .collect()
     }
 

@@ -58,11 +58,11 @@ pub enum ToolData {
     },
     /// Emitted by the server when a client session is negotiated.
     IperfClientConnected {
-        flow_id:      String,
+        flow_id: String,
         duration_secs: u64,
-        sign_mode:    String,
+        sign_mode: String,
         payload_size: usize,
-        reverse:      bool,
+        reverse: bool,
     },
     /// Emitted after a single or segmented peek completes.
     PeekResult {
@@ -85,16 +85,32 @@ pub enum ToolData {
 
 impl ToolEvent {
     pub fn info(text: impl Into<String>) -> Self {
-        Self { text: text.into(), level: EventLevel::Info, structured: None }
+        Self {
+            text: text.into(),
+            level: EventLevel::Info,
+            structured: None,
+        }
     }
     pub fn warn(text: impl Into<String>) -> Self {
-        Self { text: text.into(), level: EventLevel::Warn, structured: None }
+        Self {
+            text: text.into(),
+            level: EventLevel::Warn,
+            structured: None,
+        }
     }
     pub fn error(text: impl Into<String>) -> Self {
-        Self { text: text.into(), level: EventLevel::Error, structured: None }
+        Self {
+            text: text.into(),
+            level: EventLevel::Error,
+            structured: None,
+        }
     }
     pub fn summary(text: impl Into<String>) -> Self {
-        Self { text: text.into(), level: EventLevel::Summary, structured: None }
+        Self {
+            text: text.into(),
+            level: EventLevel::Summary,
+            structured: None,
+        }
     }
     pub fn with_data(mut self, data: ToolData) -> Self {
         self.structured = Some(data);
@@ -117,6 +133,9 @@ impl Default for ConnectConfig {
         let face_socket = "/tmp/ndn.sock".to_string();
         #[cfg(windows)]
         let face_socket = r"\\.\pipe\ndn".to_string();
-        Self { face_socket, use_shm: true }
+        Self {
+            face_socket,
+            use_shm: true,
+        }
     }
 }

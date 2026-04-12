@@ -73,41 +73,41 @@ pub mod verb {
     pub const COUNTERS: &[u8] = b"counters";
 
     // security — identity
-    pub const IDENTITY_LIST:     &[u8] = b"identity-list";
+    pub const IDENTITY_LIST: &[u8] = b"identity-list";
     pub const IDENTITY_GENERATE: &[u8] = b"identity-generate";
-    pub const IDENTITY_DID:      &[u8] = b"identity-did";
+    pub const IDENTITY_DID: &[u8] = b"identity-did";
     /// Dataset that returns the active identity status (name, is_ephemeral, pib_path).
-    pub const IDENTITY_STATUS:   &[u8] = b"identity-status";
-    pub const ANCHOR_LIST:       &[u8] = b"anchor-list";
-    pub const KEY_DELETE:        &[u8] = b"key-delete";
+    pub const IDENTITY_STATUS: &[u8] = b"identity-status";
+    pub const ANCHOR_LIST: &[u8] = b"anchor-list";
+    pub const KEY_DELETE: &[u8] = b"key-delete";
 
     // security — NDNCERT CA
-    pub const CA_INFO:      &[u8] = b"ca-info";
-    pub const CA_ENROLL:    &[u8] = b"ca-enroll";
+    pub const CA_INFO: &[u8] = b"ca-info";
+    pub const CA_ENROLL: &[u8] = b"ca-enroll";
     pub const CA_TOKEN_ADD: &[u8] = b"ca-token-add";
-    pub const CA_REQUESTS:  &[u8] = b"ca-requests";
+    pub const CA_REQUESTS: &[u8] = b"ca-requests";
 
     // security — YubiKey PIV
-    pub const YUBIKEY_DETECT:   &[u8] = b"yubikey-detect";
+    pub const YUBIKEY_DETECT: &[u8] = b"yubikey-detect";
     pub const YUBIKEY_GENERATE: &[u8] = b"yubikey-generate";
 
     // security — trust schema management
     /// Add a rule to the active trust schema.
     /// ControlParameters.uri = `"<data_pattern> => <key_pattern>"`.
-    pub const SCHEMA_RULE_ADD:    &[u8] = b"schema-rule-add";
+    pub const SCHEMA_RULE_ADD: &[u8] = b"schema-rule-add";
     /// Remove the rule at the given index.
     /// ControlParameters.count = `rule_index`.
     pub const SCHEMA_RULE_REMOVE: &[u8] = b"schema-rule-remove";
     /// List all active trust schema rules (dataset, no parameters).
-    pub const SCHEMA_LIST:        &[u8] = b"schema-list";
+    pub const SCHEMA_LIST: &[u8] = b"schema-list";
     /// Replace the entire schema.
     /// ControlParameters.uri = newline-separated rule strings.
-    pub const SCHEMA_SET:         &[u8] = b"schema-set";
+    pub const SCHEMA_SET: &[u8] = b"schema-set";
 
     // log
-    pub const GET_FILTER:  &[u8] = b"get-filter";
-    pub const SET_FILTER:  &[u8] = b"set-filter";
-    pub const GET_RECENT:  &[u8] = b"get-recent";
+    pub const GET_FILTER: &[u8] = b"get-filter";
+    pub const SET_FILTER: &[u8] = b"set-filter";
+    pub const GET_RECENT: &[u8] = b"get-recent";
 
     // discovery
     pub const DVR_STATUS: &[u8] = b"dvr-status";

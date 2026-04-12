@@ -1,44 +1,44 @@
 //! Security view — identity management, trust anchors, certificate chain,
 //! DID explorer, NDNCERT CA panel, and YubiKey integration.
 
-use dioxus::prelude::*;
 use crate::app::{AppCtx, DashCmd};
 use crate::types::SchemaRuleInfo;
 use crate::views::onboarding::encode_did_ndn;
+use dioxus::prelude::*;
 
 // ── Tab IDs ───────────────────────────────────────────────────────────────────
 
-const TAB_IDENTITIES:    u8 = 0;
-const TAB_ANCHORS:       u8 = 1;
-const TAB_CHAIN:         u8 = 2;
-const TAB_DID:           u8 = 3;
-const TAB_CA:            u8 = 4;
-const TAB_YUBIKEY:       u8 = 5;
-const TAB_SCHEMA:        u8 = 6;
+const TAB_IDENTITIES: u8 = 0;
+const TAB_ANCHORS: u8 = 1;
+const TAB_CHAIN: u8 = 2;
+const TAB_DID: u8 = 3;
+const TAB_CA: u8 = 4;
+const TAB_YUBIKEY: u8 = 5;
+const TAB_SCHEMA: u8 = 6;
 
 // ── Root component ────────────────────────────────────────────────────────────
 
 #[component]
 pub fn Security() -> Element {
     let ctx = use_context::<AppCtx>();
-    let keys            = ctx.security_keys.read();
-    let anchors         = ctx.security_anchors.read();
-    let schema          = ctx.schema_rules.read();
-    let is_ephemeral    = *ctx.identity_is_ephemeral.read();
-    let identity_name   = ctx.identity_name.read().clone();
-    let pib_path        = ctx.identity_pib_path.read().clone();
+    let keys = ctx.security_keys.read();
+    let anchors = ctx.security_anchors.read();
+    let schema = ctx.schema_rules.read();
+    let is_ephemeral = *ctx.identity_is_ephemeral.read();
+    let identity_name = ctx.identity_name.read().clone();
+    let pib_path = ctx.identity_pib_path.read().clone();
 
-    let mut active_tab:   Signal<u8>     = use_signal(|| TAB_IDENTITIES);
+    let mut active_tab: Signal<u8> = use_signal(|| TAB_IDENTITIES);
     let new_key_name: Signal<String> = use_signal(String::new);
 
     let tabs: &[(&str, u8)] = &[
-        ("Identities",     TAB_IDENTITIES),
-        ("Trust Anchors",  TAB_ANCHORS),
-        ("Cert Chain",     TAB_CHAIN),
-        ("DID",            TAB_DID),
-        ("CA / NDNCERT",   TAB_CA),
-        ("YubiKey",        TAB_YUBIKEY),
-        ("Trust Schema",   TAB_SCHEMA),
+        ("Identities", TAB_IDENTITIES),
+        ("Trust Anchors", TAB_ANCHORS),
+        ("Cert Chain", TAB_CHAIN),
+        ("DID", TAB_DID),
+        ("CA / NDNCERT", TAB_CA),
+        ("YubiKey", TAB_YUBIKEY),
+        ("Trust Schema", TAB_SCHEMA),
     ];
 
     rsx! {
@@ -259,12 +259,17 @@ fn ChainTab(
     keys: Vec<crate::types::SecurityKeyInfo>,
     anchors: Vec<crate::types::AnchorInfo>,
 ) -> Element {
-    let has_anchor   = !anchors.is_empty();
+    let has_anchor = !anchors.is_empty();
     let has_identity = !keys.is_empty();
-    let identity     = keys.first();
-    let has_cert     = identity.map(|k| k.has_cert).unwrap_or(false);
-    let identity_name = identity.map(|k| k.name.clone()).unwrap_or_else(|| "(none)".to_string());
-    let anchor_name  = anchors.first().map(|a| a.name.clone()).unwrap_or_else(|| "(none)".to_string());
+    let identity = keys.first();
+    let has_cert = identity.map(|k| k.has_cert).unwrap_or(false);
+    let identity_name = identity
+        .map(|k| k.name.clone())
+        .unwrap_or_else(|| "(none)".to_string());
+    let anchor_name = anchors
+        .first()
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| "(none)".to_string());
     let (expiry_cls, expiry_lbl) = identity
         .map(|k| k.expiry_badge())
         .unwrap_or(("badge badge-gray", "—".to_string()));
@@ -325,10 +330,10 @@ fn ChainTab(
 
 fn chain_node(icon: &str, label: &str, name: &str, status: &str, tooltip: &str) -> Element {
     let border_color = match status {
-        "ok"      => "var(--green)",
-        "warn"    => "var(--yellow)",
+        "ok" => "var(--green)",
+        "warn" => "var(--yellow)",
         "missing" => "var(--border)",
-        _         => "var(--border)",
+        _ => "var(--border)",
     };
     let opacity = if status == "missing" { "0.45" } else { "1" };
     rsx! {
@@ -347,9 +352,12 @@ fn chain_node(icon: &str, label: &str, name: &str, status: &str, tooltip: &str) 
 #[component]
 fn DidTab(keys: Vec<crate::types::SecurityKeyInfo>) -> Element {
     let mut copied = use_signal(|| false);
-    let first_key  = keys.first().cloned();
+    let first_key = keys.first().cloned();
 
-    let identity_name = first_key.as_ref().map(|k| k.name.clone()).unwrap_or_default();
+    let identity_name = first_key
+        .as_ref()
+        .map(|k| k.name.clone())
+        .unwrap_or_default();
     let did_ndn = if identity_name.is_empty() {
         String::new()
     } else {
@@ -606,9 +614,9 @@ fn CaTab() -> Element {
 #[component]
 fn EnrollStep(label: &'static str, desc: &'static str, status: &'static str) -> Element {
     let dot_class = match status {
-        "done"   => "enroll-step-dot done",
+        "done" => "enroll-step-dot done",
         "active" => "enroll-step-dot active",
-        _        => "enroll-step-dot",
+        _ => "enroll-step-dot",
     };
     rsx! {
         div { class: "enroll-step",
@@ -635,9 +643,9 @@ fn InfoKv(label: &'static str, val: &'static str) -> Element {
 fn YubikeyTab() -> Element {
     let ctx = use_context::<AppCtx>();
     let mut hotp_seed: Signal<Option<String>> = use_signal(|| None);
-    let mut hotp_counter: Signal<u64>         = use_signal(|| 0);
-    let mut show_cmd: Signal<bool>            = use_signal(|| false);
-    let mut piv_name: Signal<String>          = use_signal(String::new);
+    let mut hotp_counter: Signal<u64> = use_signal(|| 0);
+    let mut show_cmd: Signal<bool> = use_signal(|| false);
+    let mut piv_name: Signal<String> = use_signal(String::new);
 
     let yk_status = ctx.yubikey_status.read().clone();
 
@@ -832,9 +840,9 @@ fn YubikeyTab() -> Element {
 #[component]
 fn SchemaTab(rules: Vec<SchemaRuleInfo>) -> Element {
     let ctx = use_context::<AppCtx>();
-    let mut new_rule:      Signal<String> = use_signal(String::new);
-    let mut bulk_rules:    Signal<String> = use_signal(String::new);
-    let mut show_bulk:     Signal<bool>   = use_signal(|| false);
+    let mut new_rule: Signal<String> = use_signal(String::new);
+    let mut bulk_rules: Signal<String> = use_signal(String::new);
+    let mut show_bulk: Signal<bool> = use_signal(|| false);
 
     rsx! {
         div { class: "section-title", "Trust Schema" }
@@ -1003,7 +1011,11 @@ fn generate_hotp_seed() -> String {
 
 #[component]
 fn BootstrapStep(n: u8, step: &'static str, desc: &'static str, first: bool) -> Element {
-    let border = if first { "" } else { "border-top:1px solid var(--border-subtle);" };
+    let border = if first {
+        ""
+    } else {
+        "border-top:1px solid var(--border-subtle);"
+    };
     rsx! {
         div { style: "display:flex;gap:10px;padding:8px 0;{border}",
             div { style: "width:24px;height:24px;border-radius:50%;background:var(--accent-dim);border:1px solid var(--accent-solid)44;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--accent);flex-shrink:0;",

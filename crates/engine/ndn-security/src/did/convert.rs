@@ -173,9 +173,9 @@ pub fn did_document_to_trust_anchor(doc: &DidDocument, name: Arc<Name>) -> Optio
 /// `/com/acme/alice/KEY/v=123/self` → `/com/acme/alice`
 pub(crate) fn strip_key_suffix(name: &Name) -> Name {
     let comps = name.components();
-    let key_pos = comps.iter().rposition(|c| {
-        c.typ == GENERIC_NAME_COMPONENT && c.value.as_ref() == KEY_COMPONENT
-    });
+    let key_pos = comps
+        .iter()
+        .rposition(|c| c.typ == GENERIC_NAME_COMPONENT && c.value.as_ref() == KEY_COMPONENT);
     match key_pos {
         Some(pos) if pos > 0 => Name::from_components(comps[..pos].iter().cloned()),
         _ => name.clone(),

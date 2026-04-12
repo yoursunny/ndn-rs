@@ -116,7 +116,8 @@ impl Subscriber {
         socket: impl AsRef<Path>,
         group_prefix: impl Into<Name>,
     ) -> Result<Self, AppError> {
-        Self::connect_psync_with_config(socket, group_prefix, ndn_sync::PSyncConfig::default()).await
+        Self::connect_psync_with_config(socket, group_prefix, ndn_sync::PSyncConfig::default())
+            .await
     }
 
     /// Connect with PSync and explicit configuration.
@@ -135,7 +136,12 @@ impl Subscriber {
             .map_err(AppError::Connection)?;
 
         let local_name = group.clone().append(format!("node-{}", std::process::id()));
-        Self::run_psync(NdnConnection::External(client), group, local_name, psync_config)
+        Self::run_psync(
+            NdnConnection::External(client),
+            group,
+            local_name,
+            psync_config,
+        )
     }
 
     /// Create from an in-process connection (embedded engine).
@@ -163,12 +169,8 @@ impl Subscriber {
         let (net_send_tx, mut net_send_rx) = mpsc::channel::<Bytes>(64);
         let (net_recv_tx, net_recv_rx) = mpsc::channel::<Bytes>(64);
 
-        let mut sync_handle = ndn_sync::join_psync_group(
-            group.clone(),
-            net_send_tx,
-            net_recv_rx,
-            psync_config,
-        );
+        let mut sync_handle =
+            ndn_sync::join_psync_group(group.clone(), net_send_tx, net_recv_rx, psync_config);
 
         let conn = Arc::new(conn);
 
@@ -220,7 +222,10 @@ impl Subscriber {
             }
         });
 
-        Ok(Self { sample_rx, _cancel: cancel })
+        Ok(Self {
+            sample_rx,
+            _cancel: cancel,
+        })
     }
 
     /// Spawn the background tasks that drive the subscription:

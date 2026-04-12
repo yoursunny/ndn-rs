@@ -159,9 +159,7 @@ fn parse_varlength(buf: &[u8]) -> Option<(u64, usize)> {
         254 if buf.len() >= 5 => {
             Some((u32::from_be_bytes(buf[1..5].try_into().unwrap()) as u64, 5))
         }
-        255 if buf.len() >= 9 => {
-            Some((u64::from_be_bytes(buf[1..9].try_into().unwrap()), 9))
-        }
+        255 if buf.len() >= 9 => Some((u64::from_be_bytes(buf[1..9].try_into().unwrap()), 9)),
         _ => None,
     }
 }
@@ -172,7 +170,11 @@ pub fn tlv_packet_end(buf: &[u8]) -> Option<usize> {
     let (_, type_len) = parse_varlength(buf)?;
     let (length, length_len) = parse_varlength(&buf[type_len..])?;
     let total = type_len + length_len + length as usize;
-    if buf.len() >= total { Some(total) } else { None }
+    if buf.len() >= total {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -238,7 +240,10 @@ mod tests {
         // Partial junk, then a new first-fragment that forms a complete packet.
         assert_eq!(asm.push(Bytes::from_static(&[0x80, 0xFF])), None);
         let complete = Bytes::from_static(&[0x80, 0x05, 0x01, 0x42]);
-        assert_eq!(asm.push(complete), Some(Bytes::from_static(&[0x05, 0x01, 0x42])));
+        assert_eq!(
+            asm.push(complete),
+            Some(Bytes::from_static(&[0x05, 0x01, 0x42]))
+        );
     }
 
     // ── fragment_to_vec ──────────────────────────────────────────────────────

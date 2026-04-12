@@ -6,8 +6,8 @@ use anyhow::Result;
 use smallvec::{SmallVec, smallvec};
 use tracing::warn;
 
-use ndn_packet::Name;
 use ndn_engine::pipeline::{ForwardingAction, NackReason};
+use ndn_packet::Name;
 use ndn_strategy::StrategyContext;
 
 use ndn_engine::stages::ErasedStrategy;

@@ -55,8 +55,7 @@ impl AppSink {
             })
             .await
             .map_err(|_| AppError::Closed)?;
-        rx.await
-            .map_err(|_| AppError::Closed)?
+        rx.await.map_err(|_| AppError::Closed)?
     }
 
     /// Register a handler for Interests matching `prefix`.

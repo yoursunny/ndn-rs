@@ -161,7 +161,10 @@ impl SchemaRule {
         }
         let data_pattern = NamePattern::parse(parts[0].trim())?;
         let key_pattern = NamePattern::parse(parts[1].trim())?;
-        Ok(Self { data_pattern, key_pattern })
+        Ok(Self {
+            data_pattern,
+            key_pattern,
+        })
     }
 
     /// Check whether `data_name` and `key_name` satisfy this rule.

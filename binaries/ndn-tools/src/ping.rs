@@ -42,7 +42,10 @@ struct ConnectOpts {
 
 impl From<ConnectOpts> for ConnectConfig {
     fn from(o: ConnectOpts) -> Self {
-        Self { face_socket: o.face_socket, use_shm: !o.no_shm }
+        Self {
+            face_socket: o.face_socket,
+            use_shm: !o.no_shm,
+        }
     }
 }
 
@@ -115,12 +118,30 @@ async fn main() -> Result<()> {
     });
 
     match cli.command {
-        Command::Server { conn, prefix, freshness, sign } =>
+        Command::Server {
+            conn,
+            prefix,
+            freshness,
+            sign,
+        } => {
             ndn_tools_core::ping::run_server(
-                PingServerParams { conn: conn.into(), prefix, freshness_ms: freshness, sign },
+                PingServerParams {
+                    conn: conn.into(),
+                    prefix,
+                    freshness_ms: freshness,
+                    sign,
+                },
                 tx,
-            ).await,
-        Command::Client { conn, prefix, count, interval, lifetime } =>
+            )
+            .await
+        }
+        Command::Client {
+            conn,
+            prefix,
+            count,
+            interval,
+            lifetime,
+        } => {
             ndn_tools_core::ping::run_client(
                 PingClientParams {
                     conn: conn.into(),
@@ -130,6 +151,8 @@ async fn main() -> Result<()> {
                     lifetime_ms: lifetime,
                 },
                 tx,
-            ).await,
+            )
+            .await
+        }
     }
 }

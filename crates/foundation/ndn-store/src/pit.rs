@@ -213,7 +213,12 @@ impl Pit {
         #[cfg(not(target_arch = "wasm32"))]
         return self.entries.remove(token);
         #[cfg(target_arch = "wasm32")]
-        return self.entries.lock().unwrap().remove(token).map(|v| (*token, v));
+        return self
+            .entries
+            .lock()
+            .unwrap()
+            .remove(token)
+            .map(|v| (*token, v));
     }
 
     pub fn len(&self) -> usize {

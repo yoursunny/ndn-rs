@@ -5,7 +5,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use ndn_packet::lp::encode_lp_nack;
-use ndn_packet::{Name, NackReason};
+use ndn_packet::{NackReason, Name};
 
 use crate::AppError;
 use crate::connection::NdnConnection;
@@ -36,7 +36,10 @@ pub struct Responder {
 
 impl Responder {
     pub(crate) fn new(conn: Arc<NdnConnection>, interest_wire: Bytes) -> Self {
-        Self { conn, interest_wire }
+        Self {
+            conn,
+            interest_wire,
+        }
     }
 
     /// Send a raw pre-encoded Data wire packet as the reply.

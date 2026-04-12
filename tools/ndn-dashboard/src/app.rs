@@ -10,10 +10,8 @@ use crate::{
     settings::DASH_SETTINGS,
     styles::CSS,
     tool_runner::{
-        ToolCmd, ToolParams, ToolResultEntry, ToolInstanceState,
-        TOOL_RESULTS, TOOL_INSTANCES,
-        next_result_id,
-        build_result_entry, chrono_now,
+        TOOL_INSTANCES, TOOL_RESULTS, ToolCmd, ToolInstanceState, ToolParams, ToolResultEntry,
+        build_result_entry, chrono_now, next_result_id,
     },
     tray,
     types::*,
@@ -24,7 +22,7 @@ use crate::{
         fleet::Fleet,
         logs::Logs,
         modals::StartRouterModal,
-        onboarding::{is_onboarded, Onboarding},
+        onboarding::{Onboarding, is_onboarded},
         overview::Overview,
         radio::Radio,
         routing::Routing,
@@ -38,24 +36,25 @@ use crate::{
 // ── Global reactive state ────────────────────────────────────────────────────
 // GlobalSignal is shared across all windows spawned from this process.
 
-pub static ROUTER_LOG:         GlobalSignal<VecDeque<LogEntry>> = Signal::global(VecDeque::new);
-pub static LOG_FILTER:         GlobalSignal<String>             = Signal::global(String::new);
-pub static ROUTER_RUNNING:     GlobalSignal<bool>               = Signal::global(|| false);
+pub static ROUTER_LOG: GlobalSignal<VecDeque<LogEntry>> = Signal::global(VecDeque::new);
+pub static LOG_FILTER: GlobalSignal<String> = Signal::global(String::new);
+pub static ROUTER_RUNNING: GlobalSignal<bool> = Signal::global(|| false);
 /// Set by LogPane in any window; polled by the main cmd coroutine each tick.
-pub static PENDING_LOG_FILTER: GlobalSignal<Option<String>>     = Signal::global(|| None);
+pub static PENDING_LOG_FILTER: GlobalSignal<Option<String>> = Signal::global(|| None);
 /// Last ring-buffer sequence number received from the router.
 /// Reset to 0 on each new connection so that the first poll fetches all buffered lines.
-pub static LAST_LOG_SEQ:       GlobalSignal<u64>                = Signal::global(|| 0);
+pub static LAST_LOG_SEQ: GlobalSignal<u64> = Signal::global(|| 0);
 /// Logs tab split layout — persisted as u8 so the Logs view can be remounted
 /// without losing the user's split choice. 0=Single, 1=Horizontal, 2=Vertical.
-pub static LOG_SPLIT_MODE:     GlobalSignal<u8>                 = Signal::global(|| 0u8);
+pub static LOG_SPLIT_MODE: GlobalSignal<u8> = Signal::global(|| 0u8);
 /// Logs tab split ratio (percent for the first pane, 20–80).
-pub static LOG_SPLIT_RATIO:    GlobalSignal<u32>                = Signal::global(|| 50u32);
+pub static LOG_SPLIT_RATIO: GlobalSignal<u32> = Signal::global(|| 50u32);
 /// Saved config presets: (name, toml_string).
-pub static CONFIG_PRESETS:     GlobalSignal<Vec<(String, String)>> = Signal::global(Vec::new);
+pub static CONFIG_PRESETS: GlobalSignal<Vec<(String, String)>> = Signal::global(Vec::new);
 
 /// Currently active view — writable from anywhere (tray, tool shortcuts, etc.).
-pub static ACTIVE_VIEW: GlobalSignal<crate::views::View> = Signal::global(|| crate::views::View::Overview);
+pub static ACTIVE_VIEW: GlobalSignal<crate::views::View> =
+    Signal::global(|| crate::views::View::Overview);
 
 /// Dark mode toggle — `true` = dark (default), `false` = light.
 pub static DARK_MODE: GlobalSignal<bool> = Signal::global(|| true);
@@ -64,44 +63,54 @@ pub static DARK_MODE: GlobalSignal<bool> = Signal::global(|| true);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[allow(dead_code)]
-pub enum ToastLevel { Info, Success, Warning, Error }
+pub enum ToastLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
 
 impl ToastLevel {
     pub fn css_class(self) -> &'static str {
         match self {
-            ToastLevel::Info    => "toast-info",
+            ToastLevel::Info => "toast-info",
             ToastLevel::Success => "toast-success",
             ToastLevel::Warning => "toast-warning",
-            ToastLevel::Error   => "toast-error",
+            ToastLevel::Error => "toast-error",
         }
     }
     pub fn icon(self) -> &'static str {
         match self {
-            ToastLevel::Info    => "ℹ",
+            ToastLevel::Info => "ℹ",
             ToastLevel::Success => "✓",
             ToastLevel::Warning => "⚠",
-            ToastLevel::Error   => "✕",
+            ToastLevel::Error => "✕",
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Toast {
-    pub id:      u64,
+    pub id: u64,
     pub message: String,
-    pub level:   ToastLevel,
+    pub level: ToastLevel,
     pub created: std::time::Instant,
 }
 
-pub static TOASTS:  GlobalSignal<std::collections::VecDeque<Toast>> = Signal::global(std::collections::VecDeque::new);
-static TOAST_ID:    GlobalSignal<u64>                               = Signal::global(|| 0u64);
+pub static TOASTS: GlobalSignal<std::collections::VecDeque<Toast>> =
+    Signal::global(std::collections::VecDeque::new);
+static TOAST_ID: GlobalSignal<u64> = Signal::global(|| 0u64);
 
 pub fn push_toast(msg: impl Into<String>, level: ToastLevel) {
     let mut id = TOAST_ID.write();
     *id += 1;
-    TOASTS.write().push_back(Toast { id: *id, message: msg.into(), level, created: std::time::Instant::now() });
+    TOASTS.write().push_back(Toast {
+        id: *id,
+        message: msg.into(),
+        level,
+        created: std::time::Instant::now(),
+    });
 }
-
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
@@ -110,9 +119,19 @@ pub fn push_toast(msg: impl Into<String>, level: ToastLevel) {
 pub enum DashCmd {
     FaceCreate(String),
     FaceDestroy(u64),
-    RouteAdd { prefix: String, face_id: u64, cost: u64 },
-    RouteRemove { prefix: String, face_id: u64 },
-    StrategySet { prefix: String, strategy: String },
+    RouteAdd {
+        prefix: String,
+        face_id: u64,
+        cost: u64,
+    },
+    RouteRemove {
+        prefix: String,
+        face_id: u64,
+    },
+    StrategySet {
+        prefix: String,
+        strategy: String,
+    },
     StrategyUnset(String),
     CsCapacity(u64),
     CsErase(String),
@@ -125,7 +144,11 @@ pub enum DashCmd {
     ReplaySession,
     SecurityGenerate(String),
     SecurityKeyDelete(String),
-    SecurityEnroll { ca_prefix: String, challenge_type: String, challenge_param: String },
+    SecurityEnroll {
+        ca_prefix: String,
+        challenge_type: String,
+        challenge_param: String,
+    },
     SecurityTokenAdd(String),
     YubikeyDetect,
     YubikeyGeneratePiv(String),
@@ -151,7 +174,6 @@ pub enum RouterCmd {
     Stop,
 }
 
-
 // ── Connection state ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,18 +187,18 @@ pub enum ConnState {
 impl ConnState {
     pub fn badge_class(&self) -> &'static str {
         match self {
-            ConnState::Connected    => "badge badge-green",
-            ConnState::Connecting   => "badge badge-yellow",
+            ConnState::Connected => "badge badge-green",
+            ConnState::Connecting => "badge badge-yellow",
             ConnState::Disconnected => "badge badge-gray",
-            ConnState::Error(_)     => "badge badge-red",
+            ConnState::Error(_) => "badge badge-red",
         }
     }
     pub fn label(&self) -> String {
         match self {
-            ConnState::Connected    => "Connected".into(),
-            ConnState::Connecting   => "Connecting…".into(),
+            ConnState::Connected => "Connected".into(),
+            ConnState::Connecting => "Connecting…".into(),
             ConnState::Disconnected => "Disconnected".into(),
-            ConnState::Error(e)     => format!("Error: {e}"),
+            ConnState::Error(e) => format!("Error: {e}"),
         }
     }
 }
@@ -187,42 +209,42 @@ impl ConnState {
 #[derive(Clone, Copy)]
 pub struct AppCtx {
     #[allow(dead_code)]
-    pub conn:              Signal<ConnState>,
-    pub status:            Signal<Option<ForwarderStatus>>,
-    pub faces:             Signal<Vec<FaceInfo>>,
-    pub routes:            Signal<Vec<FibEntry>>,
-    pub cs:                Signal<Option<CsInfo>>,
-    pub strategies:        Signal<Vec<StrategyEntry>>,
-    pub counters:          Signal<Vec<FaceCounter>>,
-    pub measurements:      Signal<Vec<MeasurementEntry>>,
-    pub config_toml:       Signal<String>,
-    pub throughput:        Signal<VecDeque<ThroughputSample>>,
+    pub conn: Signal<ConnState>,
+    pub status: Signal<Option<ForwarderStatus>>,
+    pub faces: Signal<Vec<FaceInfo>>,
+    pub routes: Signal<Vec<FibEntry>>,
+    pub cs: Signal<Option<CsInfo>>,
+    pub strategies: Signal<Vec<StrategyEntry>>,
+    pub counters: Signal<Vec<FaceCounter>>,
+    pub measurements: Signal<Vec<MeasurementEntry>>,
+    pub config_toml: Signal<String>,
+    pub throughput: Signal<VecDeque<ThroughputSample>>,
     #[allow(dead_code)]
-    pub prev_counters:     Signal<ThroughputSample>,
-    pub session_log:       Signal<Vec<SessionEntry>>,
-    pub recording:         Signal<bool>,
-    pub neighbors:         Signal<Vec<NeighborInfo>>,
-    pub security_keys:        Signal<Vec<SecurityKeyInfo>>,
-    pub security_anchors:     Signal<Vec<AnchorInfo>>,
-    pub ca_info:              Signal<Option<CaInfo>>,
-    pub schema_rules:         Signal<Vec<SchemaRuleInfo>>,
-    pub yubikey_status:       Signal<Option<String>>,
+    pub prev_counters: Signal<ThroughputSample>,
+    pub session_log: Signal<Vec<SessionEntry>>,
+    pub recording: Signal<bool>,
+    pub neighbors: Signal<Vec<NeighborInfo>>,
+    pub security_keys: Signal<Vec<SecurityKeyInfo>>,
+    pub security_anchors: Signal<Vec<AnchorInfo>>,
+    pub ca_info: Signal<Option<CaInfo>>,
+    pub schema_rules: Signal<Vec<SchemaRuleInfo>>,
+    pub yubikey_status: Signal<Option<String>>,
     /// Active identity name (may be the ephemeral name when no PIB is loaded).
-    pub identity_name:        Signal<String>,
+    pub identity_name: Signal<String>,
     /// `true` when the router is using an ephemeral in-memory signing key.
     pub identity_is_ephemeral: Signal<bool>,
     /// PIB path reported by the router (`None` when ephemeral).
-    pub identity_pib_path:    Signal<Option<String>>,
-    pub cs_hit_history:    Signal<VecDeque<f64>>,
+    pub identity_pib_path: Signal<Option<String>>,
+    pub cs_hit_history: Signal<VecDeque<f64>>,
     /// Per-face throughput rate history (60 samples × 3 s = 3 min window).
-    pub face_throughput:   Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
+    pub face_throughput: Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
     /// Live discovery protocol status (best-effort; `None` if router does not support).
-    pub discovery_status:  Signal<Option<DiscoveryStatus>>,
+    pub discovery_status: Signal<Option<DiscoveryStatus>>,
     /// Live DVR routing status (best-effort; `None` if DVR is not active).
-    pub dvr_status:        Signal<Option<DvrStatus>>,
-    pub router_cmd:        Coroutine<RouterCmd>,
-    pub cmd:               Coroutine<DashCmd>,
-    pub tool_cmd:          Coroutine<ToolCmd>,
+    pub dvr_status: Signal<Option<DvrStatus>>,
+    pub router_cmd: Coroutine<RouterCmd>,
+    pub cmd: Coroutine<DashCmd>,
+    pub tool_cmd: Coroutine<ToolCmd>,
 }
 
 // ── Tool event processing ─────────────────────────────────────────────────────
@@ -235,10 +257,10 @@ pub struct AppCtx {
 /// round-trip, which overflows the edit-notification channel under iperf load
 /// and produces `Error sending edits applied notification` log errors.
 fn process_tool_event(
-    inst_id:      u32,
-    ev_opt:       Option<ndn_tools_core::common::ToolEvent>,
-    handles:      &mut HashMap<u32, tokio::task::AbortHandle>,
-    srv_ping_id:  u32,
+    inst_id: u32,
+    ev_opt: Option<ndn_tools_core::common::ToolEvent>,
+    handles: &mut HashMap<u32, tokio::task::AbortHandle>,
+    srv_ping_id: u32,
     srv_iperf_id: u32,
 ) {
     use ndn_tools_core::common::ToolData;
@@ -259,7 +281,9 @@ fn process_tool_event(
                         let entry = build_result_entry(inst, &ts);
                         let mut results = TOOL_RESULTS.write();
                         results.push_front(entry);
-                        while results.len() > max_results { results.pop_back(); }
+                        while results.len() > max_results {
+                            results.pop_back();
+                        }
                     }
                 }
             }
@@ -267,33 +291,42 @@ fn process_tool_event(
         Some(ev) => {
             if inst_id == srv_iperf_id {
                 if let Some(ToolData::IperfClientConnected {
-                    flow_id, duration_secs, sign_mode, payload_size, reverse,
-                }) = &ev.structured {
+                    flow_id,
+                    duration_secs,
+                    sign_mode,
+                    payload_size,
+                    reverse,
+                }) = &ev.structured
+                {
                     let ts = chrono_now();
                     let mode = if *reverse { "reverse" } else { "forward" };
                     let entry = ToolResultEntry {
-                        id:             next_result_id(),
+                        id: next_result_id(),
                         ts,
-                        tool:           "iperf-server",
-                        label:          format!("session {flow_id}"),
-                        run_summary:    format!("{mode}  ·  sign={sign_mode}  ·  size={payload_size}B"),
+                        tool: "iperf-server",
+                        label: format!("session {flow_id}"),
+                        run_summary: format!(
+                            "{mode}  ·  sign={sign_mode}  ·  size={payload_size}B"
+                        ),
                         throughput_bps: None,
-                        bytes:          None,
-                        duration_secs:  Some(*duration_secs as f64),
-                        loss_pct:       None,
-                        rtt_avg_us:     None,
-                        summary_lines:  vec![
+                        bytes: None,
+                        duration_secs: Some(*duration_secs as f64),
+                        loss_pct: None,
+                        rtt_avg_us: None,
+                        summary_lines: vec![
                             format!("mode={mode}"),
                             format!("sign={sign_mode}"),
                             format!("size={payload_size}B"),
                         ],
-                        intervals:  vec![],
-                        ping_rtts:  vec![],
+                        intervals: vec![],
+                        ping_rtts: vec![],
                     };
                     let max_results = DASH_SETTINGS.peek().results_max_entries;
                     let mut results = TOOL_RESULTS.write();
                     results.push_front(entry);
-                    while results.len() > max_results { results.pop_back(); }
+                    while results.len() > max_results {
+                        results.pop_back();
+                    }
                 }
             } else if inst_id != srv_ping_id {
                 let mut insts = TOOL_INSTANCES.write();
@@ -302,7 +335,9 @@ fn process_tool_event(
                         Some(ToolData::IperfInterval { throughput_bps, .. }) => {
                             inst.tp_history.push(*throughput_bps);
                             inst.elapsed_secs = inst.start_time.elapsed().as_secs_f64();
-                            if inst.tp_history.len() > 480 { inst.tp_history.remove(0); }
+                            if inst.tp_history.len() > 480 {
+                                inst.tp_history.remove(0);
+                            }
                         }
                         Some(ToolData::IperfSummary { .. }) => {
                             inst.iperf_summary = ev.structured.clone();
@@ -310,7 +345,9 @@ fn process_tool_event(
                         Some(ToolData::PingResult { rtt_us, .. }) => {
                             inst.current_rtt_us = Some(*rtt_us);
                             inst.ping_rtts.push(*rtt_us);
-                            if inst.ping_rtts.len() > 500 { inst.ping_rtts.remove(0); }
+                            if inst.ping_rtts.len() > 500 {
+                                inst.ping_rtts.remove(0);
+                            }
                         }
                         Some(ToolData::PingSummary { .. }) => {
                             inst.ping_summary = ev.structured.clone();
@@ -318,7 +355,9 @@ fn process_tool_event(
                         _ => {}
                     }
                     inst.output.push_back(ev);
-                    if inst.output.len() > 200 { inst.output.pop_front(); }
+                    if inst.output.len() > 200 {
+                        inst.output.pop_front();
+                    }
                 }
             }
         }
@@ -333,38 +372,39 @@ pub fn App() -> Element {
     // OS event loop has started — use_hook fires during the first render).
     use_hook(tray::setup);
 
-    let mut conn_state:      Signal<ConnState>                    = use_signal(|| ConnState::Disconnected);
-    let mut socket_path:     Signal<String>                       = use_signal(default_socket_path);
-    let status:          Signal<Option<ForwarderStatus>>      = use_signal(|| None);
-    let faces:           Signal<Vec<FaceInfo>>                = use_signal(Vec::new);
-    let routes:          Signal<Vec<FibEntry>>                = use_signal(Vec::new);
-    let cs:              Signal<Option<CsInfo>>               = use_signal(|| None);
-    let strategies:      Signal<Vec<StrategyEntry>>           = use_signal(Vec::new);
-    let counters:        Signal<Vec<FaceCounter>>             = use_signal(Vec::new);
-    let measurements:    Signal<Vec<MeasurementEntry>>        = use_signal(Vec::new);
-    let config_toml:     Signal<String>                       = use_signal(String::new);
-    let throughput:      Signal<VecDeque<ThroughputSample>>   = use_signal(VecDeque::new);
-    let prev_counters:   Signal<ThroughputSample>             = use_signal(ThroughputSample::default);
-    let session_log:     Signal<Vec<SessionEntry>>            = use_signal(Vec::new);
-    let recording:       Signal<bool>                         = use_signal(|| false);
-    let neighbors:       Signal<Vec<NeighborInfo>>            = use_signal(Vec::new);
-    let security_keys:        Signal<Vec<SecurityKeyInfo>>    = use_signal(Vec::new);
-    let security_anchors:     Signal<Vec<AnchorInfo>>         = use_signal(Vec::new);
-    let ca_info:              Signal<Option<CaInfo>>          = use_signal(|| None);
-    let schema_rules:         Signal<Vec<SchemaRuleInfo>>     = use_signal(Vec::new);
-    let yubikey_status:       Signal<Option<String>>          = use_signal(|| None);
-    let identity_name:        Signal<String>                  = use_signal(String::new);
-    let identity_is_ephemeral: Signal<bool>                   = use_signal(|| false);
-    let identity_pib_path:    Signal<Option<String>>          = use_signal(|| None);
-    let cs_hit_history:  Signal<VecDeque<f64>>               = use_signal(VecDeque::new);
-    let face_throughput: Signal<HashMap<u64, VecDeque<ThroughputSample>>> = use_signal(HashMap::new);
-    let face_prev_ctr:   Signal<HashMap<u64, ThroughputSample>>           = use_signal(HashMap::new);
-    let discovery_status: Signal<Option<DiscoveryStatus>>                 = use_signal(|| None);
-    let dvr_status:       Signal<Option<DvrStatus>>                       = use_signal(|| None);
+    let mut conn_state: Signal<ConnState> = use_signal(|| ConnState::Disconnected);
+    let mut socket_path: Signal<String> = use_signal(default_socket_path);
+    let status: Signal<Option<ForwarderStatus>> = use_signal(|| None);
+    let faces: Signal<Vec<FaceInfo>> = use_signal(Vec::new);
+    let routes: Signal<Vec<FibEntry>> = use_signal(Vec::new);
+    let cs: Signal<Option<CsInfo>> = use_signal(|| None);
+    let strategies: Signal<Vec<StrategyEntry>> = use_signal(Vec::new);
+    let counters: Signal<Vec<FaceCounter>> = use_signal(Vec::new);
+    let measurements: Signal<Vec<MeasurementEntry>> = use_signal(Vec::new);
+    let config_toml: Signal<String> = use_signal(String::new);
+    let throughput: Signal<VecDeque<ThroughputSample>> = use_signal(VecDeque::new);
+    let prev_counters: Signal<ThroughputSample> = use_signal(ThroughputSample::default);
+    let session_log: Signal<Vec<SessionEntry>> = use_signal(Vec::new);
+    let recording: Signal<bool> = use_signal(|| false);
+    let neighbors: Signal<Vec<NeighborInfo>> = use_signal(Vec::new);
+    let security_keys: Signal<Vec<SecurityKeyInfo>> = use_signal(Vec::new);
+    let security_anchors: Signal<Vec<AnchorInfo>> = use_signal(Vec::new);
+    let ca_info: Signal<Option<CaInfo>> = use_signal(|| None);
+    let schema_rules: Signal<Vec<SchemaRuleInfo>> = use_signal(Vec::new);
+    let yubikey_status: Signal<Option<String>> = use_signal(|| None);
+    let identity_name: Signal<String> = use_signal(String::new);
+    let identity_is_ephemeral: Signal<bool> = use_signal(|| false);
+    let identity_pib_path: Signal<Option<String>> = use_signal(|| None);
+    let cs_hit_history: Signal<VecDeque<f64>> = use_signal(VecDeque::new);
+    let face_throughput: Signal<HashMap<u64, VecDeque<ThroughputSample>>> =
+        use_signal(HashMap::new);
+    let face_prev_ctr: Signal<HashMap<u64, ThroughputSample>> = use_signal(HashMap::new);
+    let discovery_status: Signal<Option<DiscoveryStatus>> = use_signal(|| None);
+    let dvr_status: Signal<Option<DvrStatus>> = use_signal(|| None);
     let mut error_msg: Signal<Option<String>> = use_signal(|| None);
-    let mut show_onboarding: Signal<bool>                     = use_signal(|| !is_onboarded());
-    let mut show_start_modal: Signal<bool>                    = use_signal(|| false);
-    let mut show_gear_menu:   Signal<bool>                    = use_signal(|| false);
+    let mut show_onboarding: Signal<bool> = use_signal(|| !is_onboarded());
+    let mut show_start_modal: Signal<bool> = use_signal(|| false);
+    let mut show_gear_menu: Signal<bool> = use_signal(|| false);
 
     // Apply initial theme on mount and reactively on change.
     use_effect(move || {
@@ -378,8 +418,7 @@ pub fn App() -> Element {
 
     // Shared channel: router_cmd → tool_cmd server lifecycle commands.
     // Defined before both coroutines so each can capture its end.
-    let (srv_cmd_tx, srv_cmd_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ToolCmd>();
+    let (srv_cmd_tx, srv_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<ToolCmd>();
     // Wrap both ends in Arc so closures (FnMut) can clone the Arc each invocation.
     // The actual sender/receiver is taken from the Option on first (and only) call.
     let srv_cmd_tx_arc = std::sync::Arc::new(srv_cmd_tx);
@@ -391,71 +430,71 @@ pub fn App() -> Element {
     let router_cmd = use_coroutine(move |mut rx: UnboundedReceiver<RouterCmd>| {
         let srv_cmd_tx = srv_cmd_tx_arc_r.clone();
         async move {
-        let mut proc: Option<forwarder_proc::RouterProc> = None;
-        let mut check = tokio::time::interval(Duration::from_millis(500));
+            let mut proc: Option<forwarder_proc::RouterProc> = None;
+            let mut check = tokio::time::interval(Duration::from_millis(500));
 
-        loop {
-            tokio::select! {
-                _ = check.tick() => {
-                    if let Some(ref mut p) = proc {
-                        if !p.is_running() {
-                            proc = None;
-                            *ROUTER_RUNNING.write() = false;
-                            // Stop in-process tool servers when router dies.
-                            let _ = srv_cmd_tx.send(ToolCmd::StopPingServer);
-                            let _ = srv_cmd_tx.send(ToolCmd::StopIperfServer);
-                        } else {
-                            let lines = p.drain_logs();
-                            if !lines.is_empty() {
-                                let mut log = ROUTER_LOG.write();
-                                for entry in lines {
-                                    log.push_back(entry);
-                                    if log.len() > 2000 { log.pop_front(); }
+            loop {
+                tokio::select! {
+                    _ = check.tick() => {
+                        if let Some(ref mut p) = proc {
+                            if !p.is_running() {
+                                proc = None;
+                                *ROUTER_RUNNING.write() = false;
+                                // Stop in-process tool servers when router dies.
+                                let _ = srv_cmd_tx.send(ToolCmd::StopPingServer);
+                                let _ = srv_cmd_tx.send(ToolCmd::StopIperfServer);
+                            } else {
+                                let lines = p.drain_logs();
+                                if !lines.is_empty() {
+                                    let mut log = ROUTER_LOG.write();
+                                    for entry in lines {
+                                        log.push_back(entry);
+                                        if log.len() > 2000 { log.pop_front(); }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                Some(cmd) = rx.next() => {
-                    match cmd {
-                        RouterCmd::Start(config_path) => {
-                            if proc.is_none() {
-                                match forwarder_proc::find_binary() {
-                                    Some(bin) => {
-                                        match forwarder_proc::RouterProc::start(&bin, config_path.as_deref()).await {
-                                            Ok(p) => {
-                                                *ROUTER_RUNNING.write() = true;
-                                                proc = Some(p);
+                    Some(cmd) = rx.next() => {
+                        match cmd {
+                            RouterCmd::Start(config_path) => {
+                                if proc.is_none() {
+                                    match forwarder_proc::find_binary() {
+                                        Some(bin) => {
+                                            match forwarder_proc::RouterProc::start(&bin, config_path.as_deref()).await {
+                                                Ok(p) => {
+                                                    *ROUTER_RUNNING.write() = true;
+                                                    proc = Some(p);
 
-                                                // Give the router a moment to bind its socket.
-                                                tokio::time::sleep(Duration::from_millis(800)).await;
+                                                    // Give the router a moment to bind its socket.
+                                                    tokio::time::sleep(Duration::from_millis(800)).await;
 
-                                                // Auto-start in-process servers if configured.
-                                                let s = DASH_SETTINGS.peek().clone();
-                                                if s.ping_server_auto  { let _ = srv_cmd_tx.send(ToolCmd::StartPingServer);  }
-                                                if s.iperf_server_auto { let _ = srv_cmd_tx.send(ToolCmd::StartIperfServer); }
+                                                    // Auto-start in-process servers if configured.
+                                                    let s = DASH_SETTINGS.peek().clone();
+                                                    if s.ping_server_auto  { let _ = srv_cmd_tx.send(ToolCmd::StartPingServer);  }
+                                                    if s.iperf_server_auto { let _ = srv_cmd_tx.send(ToolCmd::StartIperfServer); }
+                                                }
+                                                Err(e) => tracing::error!("start router: {e}"),
                                             }
-                                            Err(e) => tracing::error!("start router: {e}"),
                                         }
+                                        None => tracing::warn!("ndn-fwd binary not found in PATH"),
                                     }
-                                    None => tracing::warn!("ndn-fwd binary not found in PATH"),
                                 }
                             }
-                        }
-                        RouterCmd::Stop => {
-                            // Stop in-process tool servers first.
-                            let _ = srv_cmd_tx.send(ToolCmd::StopPingServer);
-                            let _ = srv_cmd_tx.send(ToolCmd::StopIperfServer);
-                            if let Some(ref mut p) = proc {
-                                p.kill().await;
+                            RouterCmd::Stop => {
+                                // Stop in-process tool servers first.
+                                let _ = srv_cmd_tx.send(ToolCmd::StopPingServer);
+                                let _ = srv_cmd_tx.send(ToolCmd::StopIperfServer);
+                                if let Some(ref mut p) = proc {
+                                    p.kill().await;
+                                }
+                                proc = None;
+                                *ROUTER_RUNNING.write() = false;
                             }
-                            proc = None;
-                            *ROUTER_RUNNING.write() = false;
                         }
                     }
                 }
             }
-        }
         } // close async move
     }); // close FnMut closure + use_coroutine
 
@@ -470,24 +509,34 @@ pub fn App() -> Element {
             // actually something to remove, to avoid spurious reactive updates.
             {
                 let now = std::time::Instant::now();
-                if TOASTS.read().iter().any(|t| now.duration_since(t.created).as_secs() >= 5) {
-                    TOASTS.write().retain(|t| now.duration_since(t.created).as_secs() < 5);
+                if TOASTS
+                    .read()
+                    .iter()
+                    .any(|t| now.duration_since(t.created).as_secs() >= 5)
+                {
+                    TOASTS
+                        .write()
+                        .retain(|t| now.duration_since(t.created).as_secs() < 5);
                 }
             }
 
             // Sync icon/tooltip with current state.
             let connected = matches!(*conn_state.read(), ConnState::Connected);
-            let running   = *ROUTER_RUNNING.read();
+            let running = *ROUTER_RUNNING.read();
             tray::update_state(connected, running);
 
             // Forward tray-menu events.
             while let Some(tc) = tray::poll_menu_event() {
                 match tc {
-                    tray::TrayCmd::StartRouter   => router_cmd.send(RouterCmd::Start(None)),
-                    tray::TrayCmd::StopRouter    => router_cmd.send(RouterCmd::Stop),
+                    tray::TrayCmd::StartRouter => router_cmd.send(RouterCmd::Start(None)),
+                    tray::TrayCmd::StopRouter => router_cmd.send(RouterCmd::Stop),
                     tray::TrayCmd::OpenDashboard => { /* window is always open */ }
-                    tray::TrayCmd::OpenTools     => { *ACTIVE_VIEW.write() = View::Tools; }
-                    tray::TrayCmd::SendFile      => { *ACTIVE_VIEW.write() = View::Tools; }
+                    tray::TrayCmd::OpenTools => {
+                        *ACTIVE_VIEW.write() = View::Tools;
+                    }
+                    tray::TrayCmd::SendFile => {
+                        *ACTIVE_VIEW.write() = View::Tools;
+                    }
                     tray::TrayCmd::Quit => {
                         // Kill managed router process before exiting.
                         router_cmd.send(RouterCmd::Stop);
@@ -529,7 +578,34 @@ pub fn App() -> Element {
             // Reset the log cursor so the first poll fetches all buffered lines.
             *LAST_LOG_SEQ.write() = 0;
 
-            if let Err(e) = poll_all(&client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await {
+            if let Err(e) = poll_all(
+                &client,
+                status,
+                faces,
+                routes,
+                cs,
+                strategies,
+                counters,
+                measurements,
+                config_toml,
+                throughput,
+                prev_counters,
+                neighbors,
+                security_keys,
+                security_anchors,
+                ca_info,
+                schema_rules,
+                cs_hit_history,
+                face_throughput,
+                face_prev_ctr,
+                discovery_status,
+                dvr_status,
+                identity_name,
+                identity_is_ephemeral,
+                identity_pib_path,
+            )
+            .await
+            {
                 conn_state.set(ConnState::Disconnected);
                 error_msg.set(Some(e));
                 continue;
@@ -565,159 +641,234 @@ pub fn App() -> Element {
     // All GlobalSignal writes happen here — inside the Dioxus runtime.
     //
     // Reserved IDs: SRV_PING_ID / SRV_IPERF_ID for in-process servers.
-    const SRV_PING_ID:  u32 = u32::MAX - 1;
+    const SRV_PING_ID: u32 = u32::MAX - 1;
     const SRV_IPERF_ID: u32 = u32::MAX;
 
     let srv_cmd_rx_cell2 = srv_cmd_rx_cell.clone();
     let tool_cmd = use_coroutine(move |mut rx: UnboundedReceiver<ToolCmd>| {
         let srv_cmd_rx_cell = srv_cmd_rx_cell2.clone();
         async move {
-        use ndn_tools_core::common::ConnectConfig;
+            use ndn_tools_core::common::ConnectConfig;
 
-        // Take srv_cmd_rx out of the Mutex (only happens once on coroutine init).
-        let mut srv_rx = srv_cmd_rx_cell
-            .lock().unwrap()
-            .take()
-            .expect("srv_cmd_rx already taken");
+            // Take srv_cmd_rx out of the Mutex (only happens once on coroutine init).
+            let mut srv_rx = srv_cmd_rx_cell
+                .lock()
+                .unwrap()
+                .take()
+                .expect("srv_cmd_rx already taken");
 
-        // Channel: (instance_id, Option<ToolEvent>). None = tool completed.
-        let (ev_tx, mut ev_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(u32, Option<ndn_tools_core::common::ToolEvent>)>();
+            // Channel: (instance_id, Option<ToolEvent>). None = tool completed.
+            let (ev_tx, mut ev_rx) = tokio::sync::mpsc::unbounded_channel::<(
+                u32,
+                Option<ndn_tools_core::common::ToolEvent>,
+            )>();
 
-        // Map of instance_id → abort handle for currently running tools.
-        let mut handles: std::collections::HashMap<u32, tokio::task::AbortHandle> =
-            std::collections::HashMap::new();
+            // Map of instance_id → abort handle for currently running tools.
+            let mut handles: std::collections::HashMap<u32, tokio::task::AbortHandle> =
+                std::collections::HashMap::new();
 
-        loop {
-            // Merge UI commands and server lifecycle commands into a single Option<ToolCmd>.
-            let maybe_cmd: Option<ToolCmd> = tokio::select! {
-                Some(cmd) = rx.next() => Some(cmd),
-                Some(cmd) = srv_rx.recv() => Some(cmd),
-                Some((inst_id, ev_opt)) = ev_rx.recv() => {
-                    // Process the first event, then drain all immediately
-                    // available events without yielding.  This coalesces a
-                    // burst of tool events into a single Dioxus render cycle
-                    // instead of one re-render (and WebView round-trip) per
-                    // event — preventing the edit-notification overflow that
-                    // logs "Error sending edits applied notification".
-                    process_tool_event(inst_id, ev_opt, &mut handles, SRV_PING_ID, SRV_IPERF_ID);
-                    while let Ok((id, ev)) = ev_rx.try_recv() {
-                        process_tool_event(id, ev, &mut handles, SRV_PING_ID, SRV_IPERF_ID);
+            loop {
+                // Merge UI commands and server lifecycle commands into a single Option<ToolCmd>.
+                let maybe_cmd: Option<ToolCmd> = tokio::select! {
+                    Some(cmd) = rx.next() => Some(cmd),
+                    Some(cmd) = srv_rx.recv() => Some(cmd),
+                    Some((inst_id, ev_opt)) = ev_rx.recv() => {
+                        // Process the first event, then drain all immediately
+                        // available events without yielding.  This coalesces a
+                        // burst of tool events into a single Dioxus render cycle
+                        // instead of one re-render (and WebView round-trip) per
+                        // event — preventing the edit-notification overflow that
+                        // logs "Error sending edits applied notification".
+                        process_tool_event(inst_id, ev_opt, &mut handles, SRV_PING_ID, SRV_IPERF_ID);
+                        while let Ok((id, ev)) = ev_rx.try_recv() {
+                            process_tool_event(id, ev, &mut handles, SRV_PING_ID, SRV_IPERF_ID);
+                        }
+                        None // no command to process
                     }
-                    None // no command to process
-                }
-            };
+                };
 
-            let Some(cmd) = maybe_cmd else { continue };
+                let Some(cmd) = maybe_cmd else { continue };
 
-            // ── Dispatch tool command ──────────────────────────────────────
-            match cmd {
-                ToolCmd::Stop { id } => {
-                    if let Some(inst) = TOOL_INSTANCES.write().get_mut(&id) {
-                        inst.running = false;
-                    }
-                    if let Some(h) = handles.remove(&id) { h.abort(); }
-                }
-
-                ToolCmd::Run { id, params } => {
-                    // Cancel any previous run for this instance slot.
-                    if let Some(h) = handles.remove(&id) { h.abort(); }
-
-                    let settings = DASH_SETTINGS.peek().clone();
-                    let node_pfx = if settings.node_prefix.is_empty() {
-                        None
-                    } else {
-                        Some(settings.node_prefix.clone())
-                    };
-
-                    match &params {
-                        ToolParams::PingClient { prefix, count, interval_ms, lifetime_ms } => {
-                            TOOL_INSTANCES.write().insert(id, ToolInstanceState {
-                                id, kind: "ping", running: true,
-                                tp_history: Vec::new(), current_rtt_us: None,
-                                output: VecDeque::new(),
-                                iperf_summary: None, ping_summary: None,
-                                ping_rtts: Vec::new(),
-                                label: prefix.clone(), elapsed_secs: 0.0,
-                                start_time: std::time::Instant::now(),
-                                run_params: vec![
-                                    format!("count={count}"),
-                                    format!("interval={interval_ms}ms"),
-                                    format!("lifetime={lifetime_ms}ms"),
-                                ],
-                            });
+                // ── Dispatch tool command ──────────────────────────────────────
+                match cmd {
+                    ToolCmd::Stop { id } => {
+                        if let Some(inst) = TOOL_INSTANCES.write().get_mut(&id) {
+                            inst.running = false;
                         }
-                        ToolParams::IperfClient { prefix, duration_secs, window, cc, reverse, sign_mode, face_type } => {
-                            let mut rp = vec![
-                                format!("duration={duration_secs}s"),
-                                format!("window={window}"),
-                                format!("cc={cc}"),
-                                format!("sign={sign_mode}"),
-                                format!("face={face_type}"),
-                            ];
-                            if *reverse { rp.push("reverse".to_string()); }
-                            TOOL_INSTANCES.write().insert(id, ToolInstanceState {
-                                id, kind: "iperf", running: true,
-                                tp_history: Vec::new(), current_rtt_us: None,
-                                output: VecDeque::new(),
-                                iperf_summary: None, ping_summary: None,
-                                ping_rtts: Vec::new(),
-                                label: prefix.clone(), elapsed_secs: 0.0,
-                                start_time: std::time::Instant::now(),
-                                run_params: rp,
-                            });
-                        }
-                        ToolParams::PeekClient { name, pipeline, .. } => {
-                            TOOL_INSTANCES.write().insert(id, ToolInstanceState {
-                                id, kind: "peek", running: true,
-                                tp_history: Vec::new(), current_rtt_us: None,
-                                output: VecDeque::new(),
-                                iperf_summary: None, ping_summary: None,
-                                ping_rtts: Vec::new(),
-                                label: name.clone(), elapsed_secs: 0.0,
-                                start_time: std::time::Instant::now(),
-                                run_params: match pipeline {
-                                    Some(p) => vec![format!("pipeline={p}")],
-                                    None    => vec![],
-                                },
-                            });
-                        }
-                        ToolParams::PutClient { name, sign, freshness_ms, data } => {
-                            TOOL_INSTANCES.write().insert(id, ToolInstanceState {
-                                id, kind: "put", running: true,
-                                tp_history: Vec::new(), current_rtt_us: None,
-                                output: VecDeque::new(),
-                                iperf_summary: None, ping_summary: None,
-                                ping_rtts: Vec::new(),
-                                label: name.clone(), elapsed_secs: 0.0,
-                                start_time: std::time::Instant::now(),
-                                run_params: {
-                                    let mut rp = vec![format!("{}B", data.len())];
-                                    if *sign { rp.push("signed".to_string()); }
-                                    if *freshness_ms > 0 { rp.push(format!("freshness={freshness_ms}ms")); }
-                                    rp
-                                },
-                            });
+                        if let Some(h) = handles.remove(&id) {
+                            h.abort();
                         }
                     }
 
-                    // Spawn a single task that joins run_fut + bridge_fut, then
-                    // sends the completion signal — no race between bridge and done.
-                    // If the tool returns an error (e.g. node_prefix missing for
-                    // reverse mode), forward it as an error event so it's visible.
-                    let done_tx = ev_tx.clone();
-                    let fwd_tx  = ev_tx.clone();
-                    let face_socket = socket_path.peek().clone();
+                    ToolCmd::Run { id, params } => {
+                        // Cancel any previous run for this instance slot.
+                        if let Some(h) = handles.remove(&id) {
+                            h.abort();
+                        }
 
-                    let h = match params {
-                        ToolParams::PingClient { prefix, count, interval_ms, lifetime_ms } => {
-                            tokio::spawn(async move {
+                        let settings = DASH_SETTINGS.peek().clone();
+                        let node_pfx = if settings.node_prefix.is_empty() {
+                            None
+                        } else {
+                            Some(settings.node_prefix.clone())
+                        };
+
+                        match &params {
+                            ToolParams::PingClient {
+                                prefix,
+                                count,
+                                interval_ms,
+                                lifetime_ms,
+                            } => {
+                                TOOL_INSTANCES.write().insert(
+                                    id,
+                                    ToolInstanceState {
+                                        id,
+                                        kind: "ping",
+                                        running: true,
+                                        tp_history: Vec::new(),
+                                        current_rtt_us: None,
+                                        output: VecDeque::new(),
+                                        iperf_summary: None,
+                                        ping_summary: None,
+                                        ping_rtts: Vec::new(),
+                                        label: prefix.clone(),
+                                        elapsed_secs: 0.0,
+                                        start_time: std::time::Instant::now(),
+                                        run_params: vec![
+                                            format!("count={count}"),
+                                            format!("interval={interval_ms}ms"),
+                                            format!("lifetime={lifetime_ms}ms"),
+                                        ],
+                                    },
+                                );
+                            }
+                            ToolParams::IperfClient {
+                                prefix,
+                                duration_secs,
+                                window,
+                                cc,
+                                reverse,
+                                sign_mode,
+                                face_type,
+                            } => {
+                                let mut rp = vec![
+                                    format!("duration={duration_secs}s"),
+                                    format!("window={window}"),
+                                    format!("cc={cc}"),
+                                    format!("sign={sign_mode}"),
+                                    format!("face={face_type}"),
+                                ];
+                                if *reverse {
+                                    rp.push("reverse".to_string());
+                                }
+                                TOOL_INSTANCES.write().insert(
+                                    id,
+                                    ToolInstanceState {
+                                        id,
+                                        kind: "iperf",
+                                        running: true,
+                                        tp_history: Vec::new(),
+                                        current_rtt_us: None,
+                                        output: VecDeque::new(),
+                                        iperf_summary: None,
+                                        ping_summary: None,
+                                        ping_rtts: Vec::new(),
+                                        label: prefix.clone(),
+                                        elapsed_secs: 0.0,
+                                        start_time: std::time::Instant::now(),
+                                        run_params: rp,
+                                    },
+                                );
+                            }
+                            ToolParams::PeekClient { name, pipeline, .. } => {
+                                TOOL_INSTANCES.write().insert(
+                                    id,
+                                    ToolInstanceState {
+                                        id,
+                                        kind: "peek",
+                                        running: true,
+                                        tp_history: Vec::new(),
+                                        current_rtt_us: None,
+                                        output: VecDeque::new(),
+                                        iperf_summary: None,
+                                        ping_summary: None,
+                                        ping_rtts: Vec::new(),
+                                        label: name.clone(),
+                                        elapsed_secs: 0.0,
+                                        start_time: std::time::Instant::now(),
+                                        run_params: match pipeline {
+                                            Some(p) => vec![format!("pipeline={p}")],
+                                            None => vec![],
+                                        },
+                                    },
+                                );
+                            }
+                            ToolParams::PutClient {
+                                name,
+                                sign,
+                                freshness_ms,
+                                data,
+                            } => {
+                                TOOL_INSTANCES.write().insert(
+                                    id,
+                                    ToolInstanceState {
+                                        id,
+                                        kind: "put",
+                                        running: true,
+                                        tp_history: Vec::new(),
+                                        current_rtt_us: None,
+                                        output: VecDeque::new(),
+                                        iperf_summary: None,
+                                        ping_summary: None,
+                                        ping_rtts: Vec::new(),
+                                        label: name.clone(),
+                                        elapsed_secs: 0.0,
+                                        start_time: std::time::Instant::now(),
+                                        run_params: {
+                                            let mut rp = vec![format!("{}B", data.len())];
+                                            if *sign {
+                                                rp.push("signed".to_string());
+                                            }
+                                            if *freshness_ms > 0 {
+                                                rp.push(format!("freshness={freshness_ms}ms"));
+                                            }
+                                            rp
+                                        },
+                                    },
+                                );
+                            }
+                        }
+
+                        // Spawn a single task that joins run_fut + bridge_fut, then
+                        // sends the completion signal — no race between bridge and done.
+                        // If the tool returns an error (e.g. node_prefix missing for
+                        // reverse mode), forward it as an error event so it's visible.
+                        let done_tx = ev_tx.clone();
+                        let fwd_tx = ev_tx.clone();
+                        let face_socket = socket_path.peek().clone();
+
+                        let h = match params {
+                            ToolParams::PingClient {
+                                prefix,
+                                count,
+                                interval_ms,
+                                lifetime_ms,
+                            } => tokio::spawn(async move {
                                 let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
                                 let run_fut = ndn_tools_core::ping::run_client(
                                     ndn_tools_core::ping::PingClientParams {
-                                        conn: ConnectConfig { face_socket, use_shm: true },
-                                        prefix, count, interval_ms, lifetime_ms,
-                                    }, ttx);
+                                        conn: ConnectConfig {
+                                            face_socket,
+                                            use_shm: true,
+                                        },
+                                        prefix,
+                                        count,
+                                        interval_ms,
+                                        lifetime_ms,
+                                    },
+                                    ttx,
+                                );
                                 let bridge_fut = async {
                                     while let Some(ev) = trx.recv().await {
                                         let _ = fwd_tx.send((id, Some(ev)));
@@ -725,13 +876,24 @@ pub fn App() -> Element {
                                 };
                                 let (res, _) = tokio::join!(run_fut, bridge_fut);
                                 if let Err(e) = res {
-                                    let _ = fwd_tx.send((id, Some(ndn_tools_core::common::ToolEvent::error(format!("Error: {e}")))));
+                                    let _ = fwd_tx.send((
+                                        id,
+                                        Some(ndn_tools_core::common::ToolEvent::error(format!(
+                                            "Error: {e}"
+                                        ))),
+                                    ));
                                 }
                                 let _ = done_tx.send((id, None));
-                            })
-                        }
-                        ToolParams::IperfClient { prefix, duration_secs, window, cc, reverse, sign_mode, face_type } => {
-                            tokio::spawn(async move {
+                            }),
+                            ToolParams::IperfClient {
+                                prefix,
+                                duration_secs,
+                                window,
+                                cc,
+                                reverse,
+                                sign_mode,
+                                face_type,
+                            } => tokio::spawn(async move {
                                 let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
                                 let conn = ConnectConfig {
                                     face_socket,
@@ -740,13 +902,24 @@ pub fn App() -> Element {
                                 let run_fut = ndn_tools_core::iperf::run_client(
                                     ndn_tools_core::iperf::IperfClientParams {
                                         conn,
-                                        prefix, duration_secs, initial_window: window, cc,
-                                        min_window: None, max_window: None,
-                                        ai: None, md: None, cubic_c: None,
-                                        lifetime_ms: 4000, quiet: false,
-                                        interval_ms: 250, reverse,
-                                        node_prefix: node_pfx, sign_mode,
-                                    }, ttx);
+                                        prefix,
+                                        duration_secs,
+                                        initial_window: window,
+                                        cc,
+                                        min_window: None,
+                                        max_window: None,
+                                        ai: None,
+                                        md: None,
+                                        cubic_c: None,
+                                        lifetime_ms: 4000,
+                                        quiet: false,
+                                        interval_ms: 250,
+                                        reverse,
+                                        node_prefix: node_pfx,
+                                        sign_mode,
+                                    },
+                                    ttx,
+                                );
                                 let bridge_fut = async {
                                     while let Some(ev) = trx.recv().await {
                                         let _ = fwd_tx.send((id, Some(ev)));
@@ -754,22 +927,38 @@ pub fn App() -> Element {
                                 };
                                 let (res, _) = tokio::join!(run_fut, bridge_fut);
                                 if let Err(e) = res {
-                                    let _ = fwd_tx.send((id, Some(ndn_tools_core::common::ToolEvent::error(format!("Error: {e}")))));
+                                    let _ = fwd_tx.send((
+                                        id,
+                                        Some(ndn_tools_core::common::ToolEvent::error(format!(
+                                            "Error: {e}"
+                                        ))),
+                                    ));
                                 }
                                 let _ = done_tx.send((id, None));
-                            })
-                        }
-                        ToolParams::PeekClient { name, output_file, pipeline } => {
-                            tokio::spawn(async move {
+                            }),
+                            ToolParams::PeekClient {
+                                name,
+                                output_file,
+                                pipeline,
+                            } => tokio::spawn(async move {
                                 let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
                                 let run_fut = ndn_tools_core::peek::run_peek(
                                     ndn_tools_core::peek::PeekParams {
-                                        conn: ConnectConfig { face_socket, use_shm: true },
-                                        name, lifetime_ms: 4000,
-                                        output: output_file, pipeline,
-                                        hex: false, meta_only: false,
-                                        verbose: false, can_be_prefix: false,
-                                    }, ttx);
+                                        conn: ConnectConfig {
+                                            face_socket,
+                                            use_shm: true,
+                                        },
+                                        name,
+                                        lifetime_ms: 4000,
+                                        output: output_file,
+                                        pipeline,
+                                        hex: false,
+                                        meta_only: false,
+                                        verbose: false,
+                                        can_be_prefix: false,
+                                    },
+                                    ttx,
+                                );
                                 let bridge_fut = async {
                                     while let Some(ev) = trx.recv().await {
                                         let _ = fwd_tx.send((id, Some(ev)));
@@ -777,114 +966,166 @@ pub fn App() -> Element {
                                 };
                                 let (res, _) = tokio::join!(run_fut, bridge_fut);
                                 if let Err(e) = res {
-                                    let _ = fwd_tx.send((id, Some(ndn_tools_core::common::ToolEvent::error(format!("Error: {e}")))));
+                                    let _ = fwd_tx.send((
+                                        id,
+                                        Some(ndn_tools_core::common::ToolEvent::error(format!(
+                                            "Error: {e}"
+                                        ))),
+                                    ));
                                 }
                                 let _ = done_tx.send((id, None));
-                            })
-                        }
-                        ToolParams::PutClient { name, data, sign, freshness_ms } => {
-                            let data_bytes = bytes::Bytes::from(data);
-                            tokio::spawn(async move {
-                                let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
-                                let run_fut = ndn_tools_core::put::run_producer(
-                                    ndn_tools_core::put::PutParams {
-                                        conn: ConnectConfig { face_socket, use_shm: true },
-                                        name, data: data_bytes,
-                                        chunk_size: 0, sign, hmac: false,
-                                        freshness_ms, timeout_secs: 0, quiet: false,
-                                    }, ttx);
-                                let bridge_fut = async {
-                                    while let Some(ev) = trx.recv().await {
-                                        let _ = fwd_tx.send((id, Some(ev)));
+                            }),
+                            ToolParams::PutClient {
+                                name,
+                                data,
+                                sign,
+                                freshness_ms,
+                            } => {
+                                let data_bytes = bytes::Bytes::from(data);
+                                tokio::spawn(async move {
+                                    let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
+                                    let run_fut = ndn_tools_core::put::run_producer(
+                                        ndn_tools_core::put::PutParams {
+                                            conn: ConnectConfig {
+                                                face_socket,
+                                                use_shm: true,
+                                            },
+                                            name,
+                                            data: data_bytes,
+                                            chunk_size: 0,
+                                            sign,
+                                            hmac: false,
+                                            freshness_ms,
+                                            timeout_secs: 0,
+                                            quiet: false,
+                                        },
+                                        ttx,
+                                    );
+                                    let bridge_fut = async {
+                                        while let Some(ev) = trx.recv().await {
+                                            let _ = fwd_tx.send((id, Some(ev)));
+                                        }
+                                    };
+                                    let (res, _) = tokio::join!(run_fut, bridge_fut);
+                                    if let Err(e) = res {
+                                        let _ = fwd_tx.send((
+                                            id,
+                                            Some(ndn_tools_core::common::ToolEvent::error(
+                                                format!("Error: {e}"),
+                                            )),
+                                        ));
                                     }
-                                };
-                                let (res, _) = tokio::join!(run_fut, bridge_fut);
-                                if let Err(e) = res {
-                                    let _ = fwd_tx.send((id, Some(ndn_tools_core::common::ToolEvent::error(format!("Error: {e}")))));
-                                }
-                                let _ = done_tx.send((id, None));
-                            })
+                                    let _ = done_tx.send((id, None));
+                                })
+                            }
+                        };
+                        handles.insert(id, h.abort_handle());
+                    }
+
+                    ToolCmd::StartIperfServer => {
+                        if handles.contains_key(&SRV_IPERF_ID) {
+                            continue;
                         }
-                    };
-                    handles.insert(id, h.abort_handle());
-                }
-
-                ToolCmd::StartIperfServer => {
-                    if handles.contains_key(&SRV_IPERF_ID) { continue; }
-                    let settings = DASH_SETTINGS.peek().clone();
-                    let iperf_prefix = if settings.iperf_use_custom_name && !settings.iperf_custom_name.is_empty() {
-                        settings.iperf_custom_name.clone()
-                    } else if !settings.node_prefix.is_empty() {
-                        format!("{}{}", settings.node_prefix.trim_end_matches('/'), settings.iperf_prefix)
-                    } else {
-                        settings.iperf_prefix.clone()
-                    };
-                    let payload_size = settings.iperf_size as usize;
-                    let face_socket = socket_path.peek().clone();
-                    let fwd_tx = ev_tx.clone();
-                    let done_tx = ev_tx.clone();
-                    let h = tokio::spawn(async move {
-                        let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
-                        let run_fut = ndn_tools_core::iperf::run_server(
-                            ndn_tools_core::iperf::IperfServerParams {
-                                conn: ConnectConfig { face_socket, use_shm: settings.iperf_face_type != "unix" },
-                                prefix: iperf_prefix,
-                                payload_size,
-                                freshness_ms: 0,
-                                quiet: true,
-                                interval_ms: 1000,
-                            }, ttx);
-                        let bridge_fut = async {
-                            while let Some(ev) = trx.recv().await {
-                                let _ = fwd_tx.send((SRV_IPERF_ID, Some(ev)));
-                            }
+                        let settings = DASH_SETTINGS.peek().clone();
+                        let iperf_prefix = if settings.iperf_use_custom_name
+                            && !settings.iperf_custom_name.is_empty()
+                        {
+                            settings.iperf_custom_name.clone()
+                        } else if !settings.node_prefix.is_empty() {
+                            format!(
+                                "{}{}",
+                                settings.node_prefix.trim_end_matches('/'),
+                                settings.iperf_prefix
+                            )
+                        } else {
+                            settings.iperf_prefix.clone()
                         };
-                        let _ = tokio::join!(run_fut, bridge_fut);
-                        let _ = done_tx.send((SRV_IPERF_ID, None));
-                    });
-                    handles.insert(SRV_IPERF_ID, h.abort_handle());
-                }
+                        let payload_size = settings.iperf_size as usize;
+                        let face_socket = socket_path.peek().clone();
+                        let fwd_tx = ev_tx.clone();
+                        let done_tx = ev_tx.clone();
+                        let h = tokio::spawn(async move {
+                            let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
+                            let run_fut = ndn_tools_core::iperf::run_server(
+                                ndn_tools_core::iperf::IperfServerParams {
+                                    conn: ConnectConfig {
+                                        face_socket,
+                                        use_shm: settings.iperf_face_type != "unix",
+                                    },
+                                    prefix: iperf_prefix,
+                                    payload_size,
+                                    freshness_ms: 0,
+                                    quiet: true,
+                                    interval_ms: 1000,
+                                },
+                                ttx,
+                            );
+                            let bridge_fut = async {
+                                while let Some(ev) = trx.recv().await {
+                                    let _ = fwd_tx.send((SRV_IPERF_ID, Some(ev)));
+                                }
+                            };
+                            let _ = tokio::join!(run_fut, bridge_fut);
+                            let _ = done_tx.send((SRV_IPERF_ID, None));
+                        });
+                        handles.insert(SRV_IPERF_ID, h.abort_handle());
+                    }
 
-                ToolCmd::StopIperfServer => {
-                    if let Some(h) = handles.remove(&SRV_IPERF_ID) { h.abort(); }
-                }
+                    ToolCmd::StopIperfServer => {
+                        if let Some(h) = handles.remove(&SRV_IPERF_ID) {
+                            h.abort();
+                        }
+                    }
 
-                ToolCmd::StartPingServer => {
-                    if handles.contains_key(&SRV_PING_ID) { continue; }
-                    let settings = DASH_SETTINGS.peek().clone();
-                    let ping_prefix = if !settings.node_prefix.is_empty() {
-                        format!("{}{}", settings.node_prefix.trim_end_matches('/'), settings.ping_prefix)
-                    } else {
-                        settings.ping_prefix.clone()
-                    };
-                    let face_socket = socket_path.peek().clone();
-                    let fwd_tx = ev_tx.clone();
-                    let done_tx = ev_tx.clone();
-                    let h = tokio::spawn(async move {
-                        let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
-                        let run_fut = ndn_tools_core::ping::run_server(
-                            ndn_tools_core::ping::PingServerParams {
-                                conn: ConnectConfig { face_socket, use_shm: true },
-                                prefix: ping_prefix,
-                                freshness_ms: 0,
-                                sign: false,
-                            }, ttx);
-                        let bridge_fut = async {
-                            while let Some(ev) = trx.recv().await {
-                                let _ = fwd_tx.send((SRV_PING_ID, Some(ev)));
-                            }
+                    ToolCmd::StartPingServer => {
+                        if handles.contains_key(&SRV_PING_ID) {
+                            continue;
+                        }
+                        let settings = DASH_SETTINGS.peek().clone();
+                        let ping_prefix = if !settings.node_prefix.is_empty() {
+                            format!(
+                                "{}{}",
+                                settings.node_prefix.trim_end_matches('/'),
+                                settings.ping_prefix
+                            )
+                        } else {
+                            settings.ping_prefix.clone()
                         };
-                        let _ = tokio::join!(run_fut, bridge_fut);
-                        let _ = done_tx.send((SRV_PING_ID, None));
-                    });
-                    handles.insert(SRV_PING_ID, h.abort_handle());
-                }
+                        let face_socket = socket_path.peek().clone();
+                        let fwd_tx = ev_tx.clone();
+                        let done_tx = ev_tx.clone();
+                        let h = tokio::spawn(async move {
+                            let (ttx, mut trx) = tokio::sync::mpsc::channel(256);
+                            let run_fut = ndn_tools_core::ping::run_server(
+                                ndn_tools_core::ping::PingServerParams {
+                                    conn: ConnectConfig {
+                                        face_socket,
+                                        use_shm: true,
+                                    },
+                                    prefix: ping_prefix,
+                                    freshness_ms: 0,
+                                    sign: false,
+                                },
+                                ttx,
+                            );
+                            let bridge_fut = async {
+                                while let Some(ev) = trx.recv().await {
+                                    let _ = fwd_tx.send((SRV_PING_ID, Some(ev)));
+                                }
+                            };
+                            let _ = tokio::join!(run_fut, bridge_fut);
+                            let _ = done_tx.send((SRV_PING_ID, None));
+                        });
+                        handles.insert(SRV_PING_ID, h.abort_handle());
+                    }
 
-                ToolCmd::StopPingServer => {
-                    if let Some(h) = handles.remove(&SRV_PING_ID) { h.abort(); }
+                    ToolCmd::StopPingServer => {
+                        if let Some(h) = handles.remove(&SRV_PING_ID) {
+                            h.abort();
+                        }
+                    }
                 }
             }
-        }
         } // close async move
     }); // close FnMut closure + use_coroutine
 
@@ -929,10 +1170,10 @@ pub fn App() -> Element {
         } else {
             let (cls, _) = keys[0].expiry_badge();
             match cls {
-                "badge badge-green"  => "sec-dot sec-dot-green",
+                "badge badge-green" => "sec-dot sec-dot-green",
                 "badge badge-yellow" => "sec-dot sec-dot-yellow",
-                "badge badge-red"    => "sec-dot sec-dot-red",
-                _                    => "sec-dot sec-dot-gray",
+                "badge badge-red" => "sec-dot sec-dot-red",
+                _ => "sec-dot sec-dot-gray",
             }
         }
     };
@@ -944,8 +1185,17 @@ pub fn App() -> Element {
             let k = &keys[0];
             let (_, _expiry_label) = k.expiry_badge();
             let cert_status = if k.has_cert { "issued" } else { "none" };
-            let days = k.days_to_expiry()
-                .map(|d| if d < 0 { "EXPIRED".to_string() } else if d == 0 { "expires today".to_string() } else { format!("{d}d remaining") })
+            let days = k
+                .days_to_expiry()
+                .map(|d| {
+                    if d < 0 {
+                        "EXPIRED".to_string()
+                    } else if d == 0 {
+                        "expires today".to_string()
+                    } else {
+                        format!("{d}d remaining")
+                    }
+                })
                 .unwrap_or_else(|| "permanent".to_string());
             format!("{}\nCert: {}\nExpiry: {}", k.name, cert_status, days)
         }
@@ -1159,7 +1409,9 @@ pub fn App() -> Element {
 #[component]
 fn ToastOverlay() -> Element {
     let toasts = TOASTS.read();
-    if toasts.is_empty() { return rsx! {}; }
+    if toasts.is_empty() {
+        return rsx! {};
+    }
     rsx! {
         div { class: "toast-container",
             for toast in toasts.iter() {
@@ -1189,20 +1441,19 @@ fn ToastOverlay() -> Element {
 
 fn render_view(view: View) -> Element {
     match view {
-        View::Overview        => rsx! { Overview {} },
-        View::Strategy        => rsx! { Strategy {} },
-        View::Logs            => rsx! { },  // rendered via full-height branch in App
-        View::Session         => rsx! { Session {} },
-        View::Security        => rsx! { Security {} },
-        View::Fleet           => rsx! { Fleet {} },
-        View::Routing         => rsx! { Routing {} },
-        View::Radio           => rsx! { Radio {} },
-        View::Tools           => rsx! { Tools {} },
+        View::Overview => rsx! { Overview {} },
+        View::Strategy => rsx! { Strategy {} },
+        View::Logs => rsx! {}, // rendered via full-height branch in App
+        View::Session => rsx! { Session {} },
+        View::Security => rsx! { Security {} },
+        View::Fleet => rsx! { Fleet {} },
+        View::Routing => rsx! { Routing {} },
+        View::Radio => rsx! { Radio {} },
+        View::Tools => rsx! { Tools {} },
         View::DashboardConfig => rsx! { DashboardConfig {} },
-        View::RouterConfig    => rsx! { Config {} },
+        View::RouterConfig => rsx! { Config {} },
     }
 }
-
 
 fn default_socket_path() -> String {
     #[cfg(windows)]
@@ -1215,49 +1466,49 @@ fn default_socket_path() -> String {
 
 #[allow(clippy::too_many_arguments)]
 async fn poll_all(
-    client:                   &MgmtClient,
-    mut status:               Signal<Option<ForwarderStatus>>,
-    mut faces:                Signal<Vec<FaceInfo>>,
-    mut routes:               Signal<Vec<FibEntry>>,
-    mut cs:                   Signal<Option<CsInfo>>,
-    mut strategies:           Signal<Vec<StrategyEntry>>,
-    mut counters:             Signal<Vec<FaceCounter>>,
-    mut measurements:         Signal<Vec<MeasurementEntry>>,
-    mut config_toml:          Signal<String>,
-    mut throughput:           Signal<VecDeque<ThroughputSample>>,
-    mut prev_counters:        Signal<ThroughputSample>,
-    mut neighbors:            Signal<Vec<NeighborInfo>>,
-    mut security_keys:        Signal<Vec<SecurityKeyInfo>>,
-    mut security_anchors:     Signal<Vec<AnchorInfo>>,
-    mut ca_info:              Signal<Option<CaInfo>>,
-    mut schema_rules:         Signal<Vec<SchemaRuleInfo>>,
-    mut cs_hit_history:       Signal<VecDeque<f64>>,
-    mut face_throughput:      Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
-    mut face_prev_ctr:        Signal<HashMap<u64, ThroughputSample>>,
-    mut discovery_status:     Signal<Option<DiscoveryStatus>>,
-    mut dvr_status:           Signal<Option<DvrStatus>>,
-    mut identity_name:        Signal<String>,
+    client: &MgmtClient,
+    mut status: Signal<Option<ForwarderStatus>>,
+    mut faces: Signal<Vec<FaceInfo>>,
+    mut routes: Signal<Vec<FibEntry>>,
+    mut cs: Signal<Option<CsInfo>>,
+    mut strategies: Signal<Vec<StrategyEntry>>,
+    mut counters: Signal<Vec<FaceCounter>>,
+    mut measurements: Signal<Vec<MeasurementEntry>>,
+    mut config_toml: Signal<String>,
+    mut throughput: Signal<VecDeque<ThroughputSample>>,
+    mut prev_counters: Signal<ThroughputSample>,
+    mut neighbors: Signal<Vec<NeighborInfo>>,
+    mut security_keys: Signal<Vec<SecurityKeyInfo>>,
+    mut security_anchors: Signal<Vec<AnchorInfo>>,
+    mut ca_info: Signal<Option<CaInfo>>,
+    mut schema_rules: Signal<Vec<SchemaRuleInfo>>,
+    mut cs_hit_history: Signal<VecDeque<f64>>,
+    mut face_throughput: Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
+    mut face_prev_ctr: Signal<HashMap<u64, ThroughputSample>>,
+    mut discovery_status: Signal<Option<DiscoveryStatus>>,
+    mut dvr_status: Signal<Option<DvrStatus>>,
+    mut identity_name: Signal<String>,
     mut identity_is_ephemeral: Signal<bool>,
-    mut identity_pib_path:    Signal<Option<String>>,
+    mut identity_pib_path: Signal<Option<String>>,
 ) -> Result<(), String> {
     match client.status().await {
-        Ok(r)  => status.set(Some(ForwarderStatus::parse(&r.status_text))),
+        Ok(r) => status.set(Some(ForwarderStatus::parse(&r.status_text))),
         Err(e) => return Err(e.to_string()),
     }
     match client.face_list().await {
-        Ok(r)  => faces.set(FaceInfo::parse_list(&r.status_text)),
+        Ok(r) => faces.set(FaceInfo::parse_list(&r.status_text)),
         Err(e) => return Err(e.to_string()),
     }
     match client.route_list().await {
-        Ok(r)  => routes.set(FibEntry::parse_list(&r.status_text)),
+        Ok(r) => routes.set(FibEntry::parse_list(&r.status_text)),
         Err(e) => return Err(e.to_string()),
     }
     match client.cs_info().await {
-        Ok(r)  => cs.set(CsInfo::parse(&r.status_text)),
+        Ok(r) => cs.set(CsInfo::parse(&r.status_text)),
         Err(e) => return Err(e.to_string()),
     }
     match client.strategy_list().await {
-        Ok(r)  => strategies.set(StrategyEntry::parse_list(&r.status_text)),
+        Ok(r) => strategies.set(StrategyEntry::parse_list(&r.status_text)),
         Err(e) => return Err(e.to_string()),
     }
     // Phase 2 endpoints — best-effort: ignore errors so older routers still work.
@@ -1287,7 +1538,9 @@ async fn poll_all(
             fp.insert(fid, curr_snap);
             let hist = fh.entry(fid).or_default();
             hist.push_back(rate);
-            if hist.len() > 60 { hist.pop_front(); }
+            if hist.len() > 60 {
+                hist.pop_front();
+            }
         }
         fh.retain(|k, _| active.contains(k));
         fp.retain(|k, _| active.contains(k));
@@ -1299,7 +1552,9 @@ async fn poll_all(
         prev_counters.set(curr);
         let mut hist = throughput.write();
         hist.push_back(rate);
-        if hist.len() > 60 { hist.pop_front(); }
+        if hist.len() > 60 {
+            hist.pop_front();
+        }
     }
     // Phase 4 endpoints — best-effort.
     if let Ok(r) = client.neighbors_list().await {
@@ -1334,8 +1589,8 @@ async fn poll_all(
     // For external routers (not managed by dashboard), poll the ring buffer.
     // Extract signal values as plain integers before any await — guards must not
     // be held across await points or when writing to the same signal.
-    let is_running  = *ROUTER_RUNNING.read();
-    let last_seq    = *LAST_LOG_SEQ.read();
+    let is_running = *ROUTER_RUNNING.read();
+    let last_seq = *LAST_LOG_SEQ.read();
     if !is_running && let Ok(r) = client.log_get_recent(last_seq).await {
         let text = r.status_text.trim().to_string();
         let mut lines = text.lines();
@@ -1353,7 +1608,9 @@ async fn poll_all(
                     if !line.is_empty() {
                         let entry = crate::types::LogEntry::parse_line(line);
                         log.push_back(entry);
-                        if log.len() > 2000 { log.pop_front(); }
+                        if log.len() > 2000 {
+                            log.pop_front();
+                        }
                     }
                 }
             }
@@ -1383,7 +1640,9 @@ async fn poll_all(
         let rate = info.hit_rate_pct();
         let mut h = cs_hit_history.write();
         h.push_back(rate);
-        if h.len() > 60 { h.pop_front(); }
+        if h.len() > 60 {
+            h.pop_front();
+        }
     }
     Ok(())
 }
@@ -1402,14 +1661,18 @@ fn session_entry_to_cmd(entry: &SessionEntry) -> Option<DashCmd> {
             for token in entry.params.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "prefix" => prefix   = v.to_string(),
-                        "face"   => face_id  = v.parse().unwrap_or(0),
-                        "cost"   => cost     = v.parse().unwrap_or(10),
+                        "prefix" => prefix = v.to_string(),
+                        "face" => face_id = v.parse().unwrap_or(0),
+                        "cost" => cost = v.parse().unwrap_or(10),
                         _ => {}
                     }
                 }
             }
-            (!prefix.is_empty()).then_some(DashCmd::RouteAdd { prefix, face_id, cost })
+            (!prefix.is_empty()).then_some(DashCmd::RouteAdd {
+                prefix,
+                face_id,
+                cost,
+            })
         }
         "RouteRemove" => {
             let mut prefix = String::new();
@@ -1417,8 +1680,8 @@ fn session_entry_to_cmd(entry: &SessionEntry) -> Option<DashCmd> {
             for token in entry.params.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "prefix" => prefix  = v.to_string(),
-                        "face"   => face_id = v.parse().unwrap_or(0),
+                        "prefix" => prefix = v.to_string(),
+                        "face" => face_id = v.parse().unwrap_or(0),
                         _ => {}
                     }
                 }
@@ -1431,7 +1694,7 @@ fn session_entry_to_cmd(entry: &SessionEntry) -> Option<DashCmd> {
             for token in entry.params.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "prefix"   => prefix   = v.to_string(),
+                        "prefix" => prefix = v.to_string(),
                         "strategy" => strategy = v.to_string(),
                         _ => {}
                     }
@@ -1441,58 +1704,89 @@ fn session_entry_to_cmd(entry: &SessionEntry) -> Option<DashCmd> {
                 .then_some(DashCmd::StrategySet { prefix, strategy })
         }
         "StrategyUnset" => Some(DashCmd::StrategyUnset(entry.params.clone())),
-        "CsCapacity"    => entry.params.parse::<u64>().ok().map(DashCmd::CsCapacity),
-        "CsErase"       => Some(DashCmd::CsErase(entry.params.clone())),
+        "CsCapacity" => entry.params.parse::<u64>().ok().map(DashCmd::CsCapacity),
+        "CsErase" => Some(DashCmd::CsErase(entry.params.clone())),
         _ => None,
     }
 }
 
 fn cmd_to_session_entry(cmd: &DashCmd) -> Option<SessionEntry> {
     match cmd {
-        DashCmd::FaceCreate(uri) => Some(SessionEntry { kind: "FaceCreate".into(), params: uri.clone() }),
-        DashCmd::FaceDestroy(id) => Some(SessionEntry { kind: "FaceDestroy".into(), params: id.to_string() }),
-        DashCmd::RouteAdd { prefix, face_id, cost } => Some(SessionEntry { kind: "RouteAdd".into(), params: format!("prefix={prefix} face={face_id} cost={cost}") }),
-        DashCmd::RouteRemove { prefix, face_id } => Some(SessionEntry { kind: "RouteRemove".into(), params: format!("prefix={prefix} face={face_id}") }),
-        DashCmd::StrategySet { prefix, strategy } => Some(SessionEntry { kind: "StrategySet".into(), params: format!("prefix={prefix} strategy={strategy}") }),
-        DashCmd::StrategyUnset(prefix) => Some(SessionEntry { kind: "StrategyUnset".into(), params: prefix.clone() }),
-        DashCmd::CsCapacity(bytes) => Some(SessionEntry { kind: "CsCapacity".into(), params: bytes.to_string() }),
-        DashCmd::CsErase(prefix) => Some(SessionEntry { kind: "CsErase".into(), params: prefix.clone() }),
-        DashCmd::Shutdown => Some(SessionEntry { kind: "Shutdown".into(), params: String::new() }),
+        DashCmd::FaceCreate(uri) => Some(SessionEntry {
+            kind: "FaceCreate".into(),
+            params: uri.clone(),
+        }),
+        DashCmd::FaceDestroy(id) => Some(SessionEntry {
+            kind: "FaceDestroy".into(),
+            params: id.to_string(),
+        }),
+        DashCmd::RouteAdd {
+            prefix,
+            face_id,
+            cost,
+        } => Some(SessionEntry {
+            kind: "RouteAdd".into(),
+            params: format!("prefix={prefix} face={face_id} cost={cost}"),
+        }),
+        DashCmd::RouteRemove { prefix, face_id } => Some(SessionEntry {
+            kind: "RouteRemove".into(),
+            params: format!("prefix={prefix} face={face_id}"),
+        }),
+        DashCmd::StrategySet { prefix, strategy } => Some(SessionEntry {
+            kind: "StrategySet".into(),
+            params: format!("prefix={prefix} strategy={strategy}"),
+        }),
+        DashCmd::StrategyUnset(prefix) => Some(SessionEntry {
+            kind: "StrategyUnset".into(),
+            params: prefix.clone(),
+        }),
+        DashCmd::CsCapacity(bytes) => Some(SessionEntry {
+            kind: "CsCapacity".into(),
+            params: bytes.to_string(),
+        }),
+        DashCmd::CsErase(prefix) => Some(SessionEntry {
+            kind: "CsErase".into(),
+            params: prefix.clone(),
+        }),
+        DashCmd::Shutdown => Some(SessionEntry {
+            kind: "Shutdown".into(),
+            params: String::new(),
+        }),
         _ => None,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_cmd(
-    cmd:                  DashCmd,
-    client:               &MgmtClient,
-    status:               Signal<Option<ForwarderStatus>>,
-    faces:                Signal<Vec<FaceInfo>>,
-    routes:               Signal<Vec<FibEntry>>,
-    cs:                   Signal<Option<CsInfo>>,
-    strategies:           Signal<Vec<StrategyEntry>>,
-    counters:             Signal<Vec<FaceCounter>>,
-    measurements:         Signal<Vec<MeasurementEntry>>,
-    mut error_msg:        Signal<Option<String>>,
-    mut config_toml:      Signal<String>,
-    throughput:           Signal<VecDeque<ThroughputSample>>,
-    prev_counters:        Signal<ThroughputSample>,
-    mut session_log:      Signal<Vec<SessionEntry>>,
-    mut recording:        Signal<bool>,
-    neighbors:            Signal<Vec<NeighborInfo>>,
-    security_keys:        Signal<Vec<SecurityKeyInfo>>,
-    security_anchors:     Signal<Vec<AnchorInfo>>,
-    ca_info:              Signal<Option<CaInfo>>,
-    schema_rules:         Signal<Vec<SchemaRuleInfo>>,
-    mut yubikey_status:   Signal<Option<String>>,
-    cs_hit_history:       Signal<VecDeque<f64>>,
-    face_throughput:      Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
-    face_prev_ctr:        Signal<HashMap<u64, ThroughputSample>>,
-    discovery_status:     Signal<Option<DiscoveryStatus>>,
-    dvr_status:           Signal<Option<DvrStatus>>,
-    identity_name:        Signal<String>,
+    cmd: DashCmd,
+    client: &MgmtClient,
+    status: Signal<Option<ForwarderStatus>>,
+    faces: Signal<Vec<FaceInfo>>,
+    routes: Signal<Vec<FibEntry>>,
+    cs: Signal<Option<CsInfo>>,
+    strategies: Signal<Vec<StrategyEntry>>,
+    counters: Signal<Vec<FaceCounter>>,
+    measurements: Signal<Vec<MeasurementEntry>>,
+    mut error_msg: Signal<Option<String>>,
+    mut config_toml: Signal<String>,
+    throughput: Signal<VecDeque<ThroughputSample>>,
+    prev_counters: Signal<ThroughputSample>,
+    mut session_log: Signal<Vec<SessionEntry>>,
+    mut recording: Signal<bool>,
+    neighbors: Signal<Vec<NeighborInfo>>,
+    security_keys: Signal<Vec<SecurityKeyInfo>>,
+    security_anchors: Signal<Vec<AnchorInfo>>,
+    ca_info: Signal<Option<CaInfo>>,
+    schema_rules: Signal<Vec<SchemaRuleInfo>>,
+    mut yubikey_status: Signal<Option<String>>,
+    cs_hit_history: Signal<VecDeque<f64>>,
+    face_throughput: Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
+    face_prev_ctr: Signal<HashMap<u64, ThroughputSample>>,
+    discovery_status: Signal<Option<DiscoveryStatus>>,
+    dvr_status: Signal<Option<DvrStatus>>,
+    identity_name: Signal<String>,
     identity_is_ephemeral: Signal<bool>,
-    identity_pib_path:    Signal<Option<String>>,
+    identity_pib_path: Signal<Option<String>>,
 ) {
     // Session recording: log before dispatch.
     if *recording.read()
@@ -1502,71 +1796,93 @@ async fn run_cmd(
     }
 
     let op_label: Option<&'static str> = match &cmd {
-        DashCmd::FaceCreate(_)      => Some("Face created"),
-        DashCmd::FaceDestroy(_)     => Some("Face destroyed"),
-        DashCmd::RouteAdd { .. }    => Some("Route added"),
+        DashCmd::FaceCreate(_) => Some("Face created"),
+        DashCmd::FaceDestroy(_) => Some("Face destroyed"),
+        DashCmd::RouteAdd { .. } => Some("Route added"),
         DashCmd::RouteRemove { .. } => Some("Route removed"),
-        DashCmd::CsCapacity(_)      => Some("CS capacity updated"),
-        DashCmd::CsErase(_)         => Some("CS entries erased"),
-        DashCmd::Shutdown              => Some("Router shutdown initiated"),
-        DashCmd::StrategySet { .. }    => Some("Strategy updated"),
-        DashCmd::StrategyUnset(_)      => Some("Strategy cleared"),
+        DashCmd::CsCapacity(_) => Some("CS capacity updated"),
+        DashCmd::CsErase(_) => Some("CS entries erased"),
+        DashCmd::Shutdown => Some("Router shutdown initiated"),
+        DashCmd::StrategySet { .. } => Some("Strategy updated"),
+        DashCmd::StrategyUnset(_) => Some("Strategy cleared"),
         DashCmd::DiscoveryConfigSet(_) => Some("Discovery config applied"),
-        DashCmd::DvrConfigSet(_)       => Some("DVR config applied"),
-        DashCmd::SchemaRuleAdd(_)      => Some("Trust schema rule added"),
-        DashCmd::SchemaRuleRemove(_)   => Some("Trust schema rule removed"),
-        DashCmd::SchemaSet(_)          => Some("Trust schema updated"),
+        DashCmd::DvrConfigSet(_) => Some("DVR config applied"),
+        DashCmd::SchemaRuleAdd(_) => Some("Trust schema rule added"),
+        DashCmd::SchemaRuleRemove(_) => Some("Trust schema rule removed"),
+        DashCmd::SchemaSet(_) => Some("Trust schema updated"),
         _ => None,
     };
 
     let result: Result<(), String> = match cmd {
-        DashCmd::FaceCreate(uri) => {
-            client.face_create(&uri).await.map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::FaceDestroy(id) => {
-            client.face_destroy(id).await.map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::RouteAdd { prefix, face_id, cost } => {
-            match prefix.parse::<ndn_packet::Name>() {
-                Ok(n) => client.route_add(&n, Some(face_id), cost).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
-        DashCmd::RouteRemove { prefix, face_id } => {
-            match prefix.parse::<ndn_packet::Name>() {
-                Ok(n) => client.route_remove(&n, Some(face_id)).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
+        DashCmd::FaceCreate(uri) => client
+            .face_create(&uri)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::FaceDestroy(id) => client
+            .face_destroy(id)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::RouteAdd {
+            prefix,
+            face_id,
+            cost,
+        } => match prefix.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .route_add(&n, Some(face_id), cost)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
+        DashCmd::RouteRemove { prefix, face_id } => match prefix.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .route_remove(&n, Some(face_id))
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
         DashCmd::StrategySet { prefix, strategy } => {
-            match (prefix.parse::<ndn_packet::Name>(), strategy.parse::<ndn_packet::Name>()) {
-                (Ok(p), Ok(s)) => client.strategy_set(&p, &s).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
+            match (
+                prefix.parse::<ndn_packet::Name>(),
+                strategy.parse::<ndn_packet::Name>(),
+            ) {
+                (Ok(p), Ok(s)) => client
+                    .strategy_set(&p, &s)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string()),
                 _ => Err("Invalid NDN name".into()),
             }
         }
-        DashCmd::StrategyUnset(prefix) => {
-            match prefix.parse::<ndn_packet::Name>() {
-                Ok(n) => client.strategy_unset(&n).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
-        DashCmd::CsCapacity(bytes) => {
-            client.cs_config(Some(bytes)).await.map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::CsErase(prefix) => {
-            match prefix.parse::<ndn_packet::Name>() {
-                Ok(n) => client.cs_erase(&n, None).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
-        DashCmd::Shutdown => {
-            client.shutdown().await.map(|_| ()).map_err(|e| e.to_string())
-        }
+        DashCmd::StrategyUnset(prefix) => match prefix.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .strategy_unset(&n)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
+        DashCmd::CsCapacity(bytes) => client
+            .cs_config(Some(bytes))
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::CsErase(prefix) => match prefix.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .cs_erase(&n, None)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
+        DashCmd::Shutdown => client
+            .shutdown()
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
         DashCmd::Reconnect => return,
         DashCmd::RefreshConfig => {
             config_toml.set(String::new()); // clear so poll_all re-fetches
@@ -1593,38 +1909,77 @@ async fn run_cmd(
                     // Skip recording the replayed commands to avoid infinite loops.
                     let was_recording = *recording.read();
                     recording.set(false);
-                    Box::pin(run_cmd(replay_cmd, client, status, faces, routes, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, schema_rules, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path)).await;
+                    Box::pin(run_cmd(
+                        replay_cmd,
+                        client,
+                        status,
+                        faces,
+                        routes,
+                        cs,
+                        strategies,
+                        counters,
+                        measurements,
+                        error_msg,
+                        config_toml,
+                        throughput,
+                        prev_counters,
+                        session_log,
+                        recording,
+                        neighbors,
+                        security_keys,
+                        security_anchors,
+                        ca_info,
+                        schema_rules,
+                        yubikey_status,
+                        cs_hit_history,
+                        face_throughput,
+                        face_prev_ctr,
+                        discovery_status,
+                        dvr_status,
+                        identity_name,
+                        identity_is_ephemeral,
+                        identity_pib_path,
+                    ))
+                    .await;
                     recording.set(was_recording);
                     tokio::time::sleep(Duration::from_millis(150)).await;
                 }
             }
             return;
         }
-        DashCmd::SecurityGenerate(name) => {
-            match name.parse::<ndn_packet::Name>() {
-                Ok(n) => client.security_identity_generate(&n).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
-        DashCmd::SecurityKeyDelete(name) => {
-            match name.parse::<ndn_packet::Name>() {
-                Ok(n) => client.security_key_delete(&n).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
-        DashCmd::SecurityEnroll { ca_prefix, challenge_type, challenge_param } => {
-            match ca_prefix.parse::<ndn_packet::Name>() {
-                Ok(n) => client.security_ca_enroll(&n, &challenge_type, &challenge_param).await
-                    .map(|_| ()).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
-        }
-        DashCmd::SecurityTokenAdd(description) => {
-            client.security_ca_token_add(&description).await
-                .map(|_| ()).map_err(|e| e.to_string())
-        }
+        DashCmd::SecurityGenerate(name) => match name.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .security_identity_generate(&n)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
+        DashCmd::SecurityKeyDelete(name) => match name.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .security_key_delete(&n)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
+        DashCmd::SecurityEnroll {
+            ca_prefix,
+            challenge_type,
+            challenge_param,
+        } => match ca_prefix.parse::<ndn_packet::Name>() {
+            Ok(n) => client
+                .security_ca_enroll(&n, &challenge_type, &challenge_param)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        },
+        DashCmd::SecurityTokenAdd(description) => client
+            .security_ca_token_add(&description)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
         DashCmd::YubikeyDetect => {
             match client.security_yubikey_detect().await {
                 Ok(r) => {
@@ -1637,52 +1992,83 @@ async fn run_cmd(
                 }
             }
         }
-        DashCmd::YubikeyGeneratePiv(name) => {
-            match name.parse::<ndn_packet::Name>() {
-                Ok(n) => match client.security_yubikey_generate(&n).await {
-                    Ok(p) => {
-                        let pubkey = p.uri.unwrap_or_else(|| "(no key returned)".to_string());
-                        yubikey_status.set(Some(format!("Generated. Public key: {pubkey}")));
-                        Ok(())
-                    }
-                    Err(e) => {
-                        yubikey_status.set(Some(format!("Generate failed: {e}")));
-                        Ok(())
-                    }
-                },
-                Err(_) => {
-                    yubikey_status.set(Some("Invalid NDN name".to_string()));
+        DashCmd::YubikeyGeneratePiv(name) => match name.parse::<ndn_packet::Name>() {
+            Ok(n) => match client.security_yubikey_generate(&n).await {
+                Ok(p) => {
+                    let pubkey = p.uri.unwrap_or_else(|| "(no key returned)".to_string());
+                    yubikey_status.set(Some(format!("Generated. Public key: {pubkey}")));
                     Ok(())
                 }
+                Err(e) => {
+                    yubikey_status.set(Some(format!("Generate failed: {e}")));
+                    Ok(())
+                }
+            },
+            Err(_) => {
+                yubikey_status.set(Some("Invalid NDN name".to_string()));
+                Ok(())
             }
-        }
-        DashCmd::DiscoveryConfigSet(params) => {
-            client.discovery_config_set(&params).await
-                .map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::DvrConfigSet(params) => {
-            client.routing_dvr_config_set(&params).await
-                .map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::SchemaRuleAdd(rule) => {
-            client.security_schema_rule_add(&rule).await
-                .map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::SchemaRuleRemove(index) => {
-            client.security_schema_rule_remove(index).await
-                .map(|_| ()).map_err(|e| e.to_string())
-        }
-        DashCmd::SchemaSet(rules) => {
-            client.security_schema_set(&rules).await
-                .map(|_| ()).map_err(|e| e.to_string())
-        }
+        },
+        DashCmd::DiscoveryConfigSet(params) => client
+            .discovery_config_set(&params)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::DvrConfigSet(params) => client
+            .routing_dvr_config_set(&params)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::SchemaRuleAdd(rule) => client
+            .security_schema_rule_add(&rule)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::SchemaRuleRemove(index) => client
+            .security_schema_rule_remove(index)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        DashCmd::SchemaSet(rules) => client
+            .security_schema_set(&rules)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
     };
 
     match result {
         Ok(()) => {
             error_msg.set(None);
-            if let Some(label) = op_label { push_toast(label, ToastLevel::Success); }
-            let _ = poll_all(client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await;
+            if let Some(label) = op_label {
+                push_toast(label, ToastLevel::Success);
+            }
+            let _ = poll_all(
+                client,
+                status,
+                faces,
+                routes,
+                cs,
+                strategies,
+                counters,
+                measurements,
+                config_toml,
+                throughput,
+                prev_counters,
+                neighbors,
+                security_keys,
+                security_anchors,
+                ca_info,
+                schema_rules,
+                cs_hit_history,
+                face_throughput,
+                face_prev_ctr,
+                discovery_status,
+                dvr_status,
+                identity_name,
+                identity_is_ephemeral,
+                identity_pib_path,
+            )
+            .await;
         }
         Err(e) => {
             push_toast(format!("Command failed: {e}"), ToastLevel::Error);
@@ -1694,14 +2080,20 @@ async fn run_cmd(
 ///
 /// Expected format: `identity=<name> is_ephemeral=<bool> pib_path=<path>`
 fn parse_identity_status(text: &str) -> (String, bool, Option<String>) {
-    let mut name      = String::new();
+    let mut name = String::new();
     let mut ephemeral = false;
-    let mut pib_path  = None::<String>;
+    let mut pib_path = None::<String>;
 
     for token in text.split_whitespace() {
-        if let Some(v) = token.strip_prefix("identity=")     { name = v.to_string(); }
-        if let Some(v) = token.strip_prefix("is_ephemeral=") { ephemeral = v == "true"; }
-        if let Some(v) = token.strip_prefix("pib_path=")     { pib_path = Some(v.to_string()); }
+        if let Some(v) = token.strip_prefix("identity=") {
+            name = v.to_string();
+        }
+        if let Some(v) = token.strip_prefix("is_ephemeral=") {
+            ephemeral = v == "true";
+        }
+        if let Some(v) = token.strip_prefix("pib_path=") {
+            pib_path = Some(v.to_string());
+        }
     }
     (name, ephemeral, if ephemeral { None } else { pib_path })
 }

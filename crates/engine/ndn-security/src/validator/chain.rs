@@ -4,9 +4,9 @@ use std::sync::Arc;
 use ndn_packet::{Data, Name, SignatureType};
 
 use crate::cert_cache::Certificate;
+use crate::safe_data::TrustPath;
 use crate::verifier::Verifier;
 use crate::{SafeData, TrustError, VerifyOutcome};
-use crate::safe_data::TrustPath;
 
 use super::{ValidationResult, Validator, now_ns};
 

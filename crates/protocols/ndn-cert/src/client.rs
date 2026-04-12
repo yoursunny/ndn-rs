@@ -13,8 +13,8 @@ use crate::{
     ecdh::{EcdhKeypair, SessionKey},
     error::CertError,
     tlv::{
-        ChallengeRequestTlv, ChallengeResponseTlv, NewRequestTlv, NewResponseTlv,
-        STATUS_FAILURE, STATUS_PENDING, STATUS_SUCCESS,
+        ChallengeRequestTlv, ChallengeResponseTlv, NewRequestTlv, NewResponseTlv, STATUS_FAILURE,
+        STATUS_PENDING, STATUS_SUCCESS,
     },
 };
 
@@ -107,13 +107,14 @@ impl EnrollmentSession {
         let resp = NewResponseTlv::decode(bytes::Bytes::copy_from_slice(body))?;
 
         if resp.challenges.is_empty() {
-            return Err(CertError::InvalidRequest("no challenges offered".to_string()));
+            return Err(CertError::InvalidRequest(
+                "no challenges offered".to_string(),
+            ));
         }
 
-        let kp = self
-            .ecdh_keypair
-            .take()
-            .ok_or_else(|| CertError::InvalidRequest("no ECDH keypair — call new_request_body first".into()))?;
+        let kp = self.ecdh_keypair.take().ok_or_else(|| {
+            CertError::InvalidRequest("no ECDH keypair — call new_request_body first".into())
+        })?;
 
         let session_key = kp.derive_session_key(&resp.ecdh_pub, &resp.salt, &resp.request_id)?;
 
@@ -156,7 +157,9 @@ impl EnrollmentSession {
     /// Remaining attempts for an in-progress challenge.
     pub fn remaining_tries(&self) -> Option<u8> {
         match &self.state {
-            SessionState::Challenging { remaining_tries, .. } => Some(*remaining_tries),
+            SessionState::Challenging {
+                remaining_tries, ..
+            } => Some(*remaining_tries),
             _ => None,
         }
     }
@@ -173,10 +176,9 @@ impl EnrollmentSession {
             .request_id_bytes
             .ok_or_else(|| CertError::InvalidRequest("not in challenge state".to_string()))?;
 
-        let session_key = self
-            .session_key
-            .as_ref()
-            .ok_or_else(|| CertError::InvalidRequest("no session key — call handle_new_response first".into()))?;
+        let session_key = self.session_key.as_ref().ok_or_else(|| {
+            CertError::InvalidRequest("no session key — call handle_new_response first".into())
+        })?;
 
         let params_json = serde_json::to_vec(&parameters)?;
         let (iv, encrypted_payload, auth_tag) =
@@ -310,8 +312,7 @@ mod tests {
         let pk_len = 32usize;
         let name_len =
             u32::from_be_bytes(cr_bytes[20 + pk_len..24 + pk_len].try_into().unwrap()) as usize;
-        let name_str =
-            std::str::from_utf8(&cr_bytes[24 + pk_len..24 + pk_len + name_len]).unwrap();
+        let name_str = std::str::from_utf8(&cr_bytes[24 + pk_len..24 + pk_len + name_len]).unwrap();
         assert_eq!(name_str, "/com/acme/alice/KEY/v=0");
     }
 

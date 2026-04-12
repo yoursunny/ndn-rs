@@ -272,9 +272,7 @@ fn parse_varlength(buf: &[u8]) -> Option<(u64, usize)> {
         254 if buf.len() >= 5 => {
             Some((u32::from_be_bytes(buf[1..5].try_into().unwrap()) as u64, 5))
         }
-        255 if buf.len() >= 9 => {
-            Some((u64::from_be_bytes(buf[1..9].try_into().unwrap()), 9))
-        }
+        255 if buf.len() >= 9 => Some((u64::from_be_bytes(buf[1..9].try_into().unwrap()), 9)),
         _ => None,
     }
 }
@@ -283,7 +281,11 @@ fn tlv_packet_end(buf: &[u8]) -> Option<usize> {
     let (_, type_len) = parse_varlength(buf)?;
     let (length, length_len) = parse_varlength(&buf[type_len..])?;
     let total = type_len + length_len + length as usize;
-    if buf.len() >= total { Some(total) } else { None }
+    if buf.len() >= total {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -372,7 +374,7 @@ mod tests {
         let mut ble = MockBle::new(64);
         // Full packet: type=6, length=4, value=[1,2,3,4]
         let f1 = [0x80u8, 0x06, 0x04, 0x01, 0x02]; // first frag (5 bytes → 4 of packet)
-        let f2 = [0x01u8, 0x03, 0x04];              // continuation (3 bytes → 2 of packet)
+        let f2 = [0x01u8, 0x03, 0x04]; // continuation (3 bytes → 2 of packet)
         ble.push_fragment(&f1);
         ble.push_fragment(&f2);
 
@@ -423,7 +425,10 @@ mod tests {
         let mut result = None;
         for _ in 0..10 {
             match recv_face.recv(&mut buf) {
-                Ok(n) => { result = Some(n); break; }
+                Ok(n) => {
+                    result = Some(n);
+                    break;
+                }
                 Err(nb::Error::WouldBlock) => {}
                 Err(e) => panic!("unexpected error: {:?}", e),
             }

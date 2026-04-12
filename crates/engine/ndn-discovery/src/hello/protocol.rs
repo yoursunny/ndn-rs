@@ -16,12 +16,12 @@ use ndn_tlv::TlvWriter;
 use ndn_transport::FaceId;
 use tracing::{debug, info, trace};
 
-use crate::config::PrefixAnnouncementMode;
 use super::medium::{HELLO_PREFIX_DEPTH, HelloCore, LinkMedium, MAX_DIFF_ENTRIES};
 use super::probe::{
     build_direct_probe, build_indirect_probe, build_probe_ack, is_probe_ack, parse_direct_probe,
     parse_indirect_probe,
 };
+use crate::config::PrefixAnnouncementMode;
 use crate::scope::{probe_direct, probe_via};
 use crate::strategy::{ProbeRequest, TriggerEvent};
 use crate::wire::{parse_raw_data, parse_raw_interest, write_nni};

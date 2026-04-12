@@ -258,12 +258,7 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
 
     let mgmt = MgmtClient::connect(&cli.socket)
         .await
-        .with_context(|| {
-            format!(
-                "Cannot connect to '{}'. Is ndn-router running?",
-                cli.socket
-            )
-        })?;
+        .with_context(|| format!("Cannot connect to '{}'. Is ndn-router running?", cli.socket))?;
 
     match &cli.command {
         Command::Route { action } => match action {
@@ -607,5 +602,3 @@ fn print_control_response(resp: &ControlResponse) {
         print_params(body);
     }
 }
-
-

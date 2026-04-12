@@ -83,7 +83,9 @@ impl NdnSubscriber {
         let group: Name = group_prefix
             .parse()
             .map_err(|_| NdnError::invalid_name(&group_prefix))?;
-        let local_name = group.clone().append(format!("node-{}", std::process::id()).as_bytes());
+        let local_name = group
+            .clone()
+            .append(format!("node-{}", std::process::id()).as_bytes());
         let handle = engine.alloc_app_handle()?;
         let conn = NdnConnection::Embedded(handle);
         let rt = Arc::clone(engine.rt());

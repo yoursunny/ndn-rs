@@ -34,7 +34,10 @@ use yubikey::{
     piv::{self, AlgorithmId, SlotId},
 };
 
-use crate::{Signer, TrustError, key_store::{KeyAlgorithm, KeyStore}};
+use crate::{
+    Signer, TrustError,
+    key_store::{KeyAlgorithm, KeyStore},
+};
 
 /// PIV slot identifier for YubiKey key storage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,8 +77,8 @@ pub struct YubikeyKeyStore {
 impl YubikeyKeyStore {
     /// Connect to the first available YubiKey.
     pub fn open() -> Result<Self, TrustError> {
-        let yk = YubiKey::open()
-            .map_err(|e| TrustError::KeyStore(format!("YubiKey not found: {e}")))?;
+        let yk =
+            YubiKey::open().map_err(|e| TrustError::KeyStore(format!("YubiKey not found: {e}")))?;
         Ok(Self {
             yk: Arc::new(std::sync::Mutex::new(yk)),
             slots: DashMap::new(),
@@ -102,24 +105,25 @@ impl YubikeyKeyStore {
         let yk = Arc::clone(&self.yk);
         let slot_id = SlotId::from(slot);
 
-        let pub_bytes: Vec<u8> = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, TrustError> {
-            let mut guard = yk
-                .lock()
-                .map_err(|_| TrustError::KeyStore("YubiKey mutex poisoned".into()))?;
-            let spki = piv::generate(
-                &mut guard,
-                slot_id,
-                AlgorithmId::EccP256,
-                PinPolicy::Default,
-                TouchPolicy::Default,
-            )
-            .map_err(|e| TrustError::KeyStore(format!("YubiKey generate failed: {e}")))?;
+        let pub_bytes: Vec<u8> =
+            tokio::task::spawn_blocking(move || -> Result<Vec<u8>, TrustError> {
+                let mut guard = yk
+                    .lock()
+                    .map_err(|_| TrustError::KeyStore("YubiKey mutex poisoned".into()))?;
+                let spki = piv::generate(
+                    &mut guard,
+                    slot_id,
+                    AlgorithmId::EccP256,
+                    PinPolicy::Default,
+                    TouchPolicy::Default,
+                )
+                .map_err(|e| TrustError::KeyStore(format!("YubiKey generate failed: {e}")))?;
 
-            // Extract the raw EC public key point (65 bytes for P-256 uncompressed).
-            Ok(spki.subject_public_key.raw_bytes().to_vec())
-        })
-        .await
-        .map_err(|e| TrustError::KeyStore(format!("spawn_blocking join error: {e}")))??;
+                // Extract the raw EC public key point (65 bytes for P-256 uncompressed).
+                Ok(spki.subject_public_key.raw_bytes().to_vec())
+            })
+            .await
+            .map_err(|e| TrustError::KeyStore(format!("spawn_blocking join error: {e}")))??;
 
         self.slots.insert(Arc::new(key_name), slot);
         Ok(Bytes::from(pub_bytes))
@@ -145,7 +149,8 @@ impl KeyStore for YubikeyKeyStore {
     }
 
     async fn generate_key(&self, name: Name, _algo: KeyAlgorithm) -> Result<Name, TrustError> {
-        self.generate_in_slot(name.clone(), YubikeySlot::Authentication).await?;
+        self.generate_in_slot(name.clone(), YubikeySlot::Authentication)
+            .await?;
         Ok(name)
     }
 
@@ -178,9 +183,8 @@ impl Signer for YubikeySigner {
     fn sign<'a>(
         &'a self,
         region: &'a [u8],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Bytes, TrustError>> + Send + 'a>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Bytes, TrustError>> + Send + 'a>>
+    {
         // Compute SHA-256 digest in software; the YubiKey signs the digest on-device.
         let digest = {
             use ring::digest;
@@ -198,9 +202,7 @@ impl Signer for YubikeySigner {
                         .map_err(|_| TrustError::KeyStore("YubiKey mutex poisoned".into()))?;
                     piv::sign_data(&mut guard, &digest, AlgorithmId::EccP256, slot_id)
                         .map(|buf| buf.to_vec())
-                        .map_err(|e| {
-                            TrustError::KeyStore(format!("YubiKey sign failed: {e}"))
-                        })
+                        .map_err(|e| TrustError::KeyStore(format!("YubiKey sign failed: {e}")))
                 })
                 .await
                 .map_err(|e| TrustError::KeyStore(format!("spawn_blocking join error: {e}")))??;

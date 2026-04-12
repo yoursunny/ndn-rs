@@ -103,7 +103,9 @@ impl ForwarderConfig {
         // Validate route costs.
         for route in &self.routes {
             if route.prefix.is_empty() {
-                return Err(ConfigError::Invalid("route prefix must not be empty".into()));
+                return Err(ConfigError::Invalid(
+                    "route prefix must not be empty".into(),
+                ));
             }
         }
 
@@ -139,7 +141,9 @@ fn expand_env_vars(s: &str) -> String {
                 Ok(val) => result.push_str(&val),
                 Err(_) => {
                     // Unknown variable — replace with empty string and warn on stderr.
-                    eprintln!("ndn-config: unknown env var ${{{var_name}}}, replacing with empty string");
+                    eprintln!(
+                        "ndn-config: unknown env var ${{{var_name}}}, replacing with empty string"
+                    );
                 }
             }
         } else {
@@ -154,17 +158,19 @@ fn validate_face_config(face: &FaceConfig) -> Result<(), ConfigError> {
     match face {
         FaceConfig::Udp { bind, remote } | FaceConfig::Tcp { bind, remote } => {
             if let Some(addr) = bind {
-                addr.parse::<std::net::SocketAddr>().map_err(|_| {
-                    ConfigError::Invalid(format!("invalid bind address: {addr}"))
-                })?;
+                addr.parse::<std::net::SocketAddr>()
+                    .map_err(|_| ConfigError::Invalid(format!("invalid bind address: {addr}")))?;
             }
             if let Some(addr) = remote {
-                addr.parse::<std::net::SocketAddr>().map_err(|_| {
-                    ConfigError::Invalid(format!("invalid remote address: {addr}"))
-                })?;
+                addr.parse::<std::net::SocketAddr>()
+                    .map_err(|_| ConfigError::Invalid(format!("invalid remote address: {addr}")))?;
             }
         }
-        FaceConfig::Multicast { group, port: _, interface: _ } => {
+        FaceConfig::Multicast {
+            group,
+            port: _,
+            interface: _,
+        } => {
             let ip: std::net::IpAddr = group.parse().map_err(|_| {
                 ConfigError::Invalid(format!("invalid multicast group address: {group}"))
             })?;
@@ -181,7 +187,8 @@ fn validate_face_config(face: &FaceConfig) -> Result<(), ConfigError> {
                 })?;
             }
             if let Some(u) = url
-                && !u.starts_with("ws://") && !u.starts_with("wss://")
+                && !u.starts_with("ws://")
+                && !u.starts_with("wss://")
             {
                 return Err(ConfigError::Invalid(format!(
                     "WebSocket URL must start with ws:// or wss://: {u}"
@@ -190,10 +197,14 @@ fn validate_face_config(face: &FaceConfig) -> Result<(), ConfigError> {
         }
         FaceConfig::Serial { path, baud } => {
             if path.is_empty() {
-                return Err(ConfigError::Invalid("serial face path must not be empty".into()));
+                return Err(ConfigError::Invalid(
+                    "serial face path must not be empty".into(),
+                ));
             }
             if *baud == 0 {
-                return Err(ConfigError::Invalid("serial face baud rate must be > 0".into()));
+                return Err(ConfigError::Invalid(
+                    "serial face baud rate must be > 0".into(),
+                ));
             }
         }
         FaceConfig::Unix { .. } | FaceConfig::EtherMulticast { .. } => {
@@ -448,7 +459,12 @@ fn default_iface_whitelist() -> Vec<String> {
 }
 
 fn default_ether_iface_blacklist() -> Vec<String> {
-    vec!["lo".to_owned(), "lo0".to_owned(), "docker*".to_owned(), "virbr*".to_owned()]
+    vec![
+        "lo".to_owned(),
+        "lo0".to_owned(),
+        "docker*".to_owned(),
+        "virbr*".to_owned(),
+    ]
 }
 
 fn default_udp_iface_blacklist() -> Vec<String> {
@@ -575,7 +591,6 @@ pub struct SecurityConfig {
     pub profile: String,
 
     // ── NDNCERT CA (optional) ─────────────────────────────────────────────────
-
     /// NDN name prefix for the built-in NDNCERT CA, e.g. `/ndn/edu/example/CA`.
     ///
     /// When set, the router registers handlers under `<ca_prefix>/CA/INFO`,
@@ -621,7 +636,6 @@ pub struct SecurityConfig {
     pub rules: Vec<TrustRuleConfig>,
 
     // ── PIB backing store ─────────────────────────────────────────────────────
-
     /// Key backing store type.
     ///
     /// - `"file"` — file-based PIB at `pib_path` (default, persisted across restarts)

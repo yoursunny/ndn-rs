@@ -41,8 +41,8 @@ use objc2::{msg_send, sel};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 
-use super::{BleError, BleFace, CHAN_DEPTH, BLE_RX_CHAR_UUID, BLE_SERVICE_UUID, BLE_TX_CHAR_UUID};
 use super::framing::{ATT_OVERHEAD, Assembler, fragment_to_vec};
+use super::{BLE_RX_CHAR_UUID, BLE_SERVICE_UUID, BLE_TX_CHAR_UUID, BleError, BleFace, CHAN_DEPTH};
 
 // ── GCD dispatch-queue FFI ────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ unsafe extern "C" {
     );
     // CBAdvertisementData keys (extern NSString constants from CoreBluetooth.framework)
     static CBAdvertisementDataServiceUUIDsKey: *const AnyObject;
-    static CBAdvertisementDataLocalNameKey:    *const AnyObject;
+    static CBAdvertisementDataLocalNameKey: *const AnyObject;
 }
 
 // ── Shared state between GCD queue and tokio ──────────────────────────────────
@@ -90,7 +90,10 @@ static MACOS_SHARED: AtomicUsize = AtomicUsize::new(0);
 fn install_shared(shared: Box<MacosShared>) -> *mut MacosShared {
     let raw = Box::into_raw(shared);
     let prev = MACOS_SHARED.compare_exchange(0, raw as usize, Ordering::AcqRel, Ordering::Acquire);
-    assert!(prev.is_ok(), "only one BleFace per process is supported on macOS");
+    assert!(
+        prev.is_ok(),
+        "only one BleFace per process is supported on macOS"
+    );
     raw
 }
 
@@ -314,8 +317,7 @@ unsafe fn create_ndn_service() -> *mut AnyObject {
     let svc_class = AnyClass::get("CBMutableService").expect("CBMutableService not found");
     let svc_uuid = make_cbuuid(BLE_SERVICE_UUID);
     let svc_alloc: *mut AnyObject = msg_send![svc_class, alloc];
-    let svc: *mut AnyObject =
-        msg_send![svc_alloc, initWithType: svc_uuid, primary: true as u8];
+    let svc: *mut AnyObject = msg_send![svc_alloc, initWithType: svc_uuid, primary: true as u8];
     // Release the UUID (svc has retained it).
     let _: () = msg_send![svc_uuid, release];
 
@@ -335,11 +337,7 @@ unsafe fn create_ndn_service() -> *mut AnyObject {
 
 /// Create a `CBMutableCharacteristic`.
 /// Returns raw pointer with retain count +1 (caller must eventually release).
-unsafe fn create_char(
-    uuid_str: &str,
-    properties: usize,
-    permissions: usize,
-) -> *mut AnyObject {
+unsafe fn create_char(uuid_str: &str, properties: usize, permissions: usize) -> *mut AnyObject {
     let char_class =
         AnyClass::get("CBMutableCharacteristic").expect("CBMutableCharacteristic not found");
     let uuid = make_cbuuid(uuid_str);
@@ -397,7 +395,9 @@ unsafe fn nsstring_to_rust(ns: *mut AnyObject) -> String {
     if utf8.is_null() {
         return String::new();
     }
-    std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned()
+    std::ffi::CStr::from_ptr(utf8)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Build the advertising NSDictionary and call `startAdvertising:`.
@@ -484,9 +484,8 @@ pub async fn bind(id: ndn_transport::FaceId) -> Result<BleFace, BleError> {
     let (tx_sender, mut tx_receiver) = mpsc::channel::<Bytes>(CHAN_DEPTH);
 
     // Create the GCD serial queue for CoreBluetooth.
-    let ble_queue: DispatchQueue = unsafe {
-        dispatch_queue_create(c"ndn.ble.peripheral".as_ptr(), std::ptr::null())
-    };
+    let ble_queue: DispatchQueue =
+        unsafe { dispatch_queue_create(c"ndn.ble.peripheral".as_ptr(), std::ptr::null()) };
     assert!(!ble_queue.is_null(), "failed to create BLE dispatch queue");
 
     // Box up the shared state and install in the global singleton.
@@ -537,7 +536,10 @@ pub async fn bind(id: ndn_transport::FaceId) -> Result<BleFace, BleError> {
                 break;
             }
             let sptr = shared_addr as *mut MacosShared;
-            let work = Box::new(TxWork { shared_ptr: sptr, pkt });
+            let work = Box::new(TxWork {
+                shared_ptr: sptr,
+                pkt,
+            });
             unsafe {
                 dispatch_async_f(queue, Box::into_raw(work) as *mut c_void, do_tx_work);
             }

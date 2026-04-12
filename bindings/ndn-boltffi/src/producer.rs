@@ -82,7 +82,9 @@ impl NdnProducer {
     /// - [`NdnError::InvalidName`] — `prefix` is not a valid NDN URI.
     /// - [`NdnError::Engine`] — engine has been shut down.
     pub fn new(engine: &NdnEngine, prefix: String) -> Result<Self, NdnError> {
-        let name: Name = prefix.parse().map_err(|_| NdnError::invalid_name(&prefix))?;
+        let name: Name = prefix
+            .parse()
+            .map_err(|_| NdnError::invalid_name(&prefix))?;
         let producer = engine.register_producer_internal(name)?;
         Ok(NdnProducer::new_inner(producer, Arc::clone(engine.rt())))
     }

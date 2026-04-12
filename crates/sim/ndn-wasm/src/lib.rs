@@ -149,12 +149,20 @@ impl WasmPipeline {
         lifetime_ms: f64,
     ) -> JsValue {
         let nonce = if nonce == 0 {
-            (self.inner.now_ms as u32).wrapping_mul(1664525u32).wrapping_add(1013904223u32)
+            (self.inner.now_ms as u32)
+                .wrapping_mul(1664525u32)
+                .wrapping_add(1013904223u32)
         } else {
             nonce
         };
         let trace = self.inner.process_interest(
-            name, can_be_prefix, must_be_fresh, nonce, lifetime_ms, 0, &self.config,
+            name,
+            can_be_prefix,
+            must_be_fresh,
+            nonce,
+            lifetime_ms,
+            0,
+            &self.config,
         );
         serde_wasm_bindgen::to_value(&trace).unwrap_or(JsValue::NULL)
     }
@@ -167,7 +175,9 @@ impl WasmPipeline {
         freshness_ms: u64,
         sig_type: &str,
     ) -> JsValue {
-        let trace = self.inner.process_data(name, content, freshness_ms, sig_type, &self.config);
+        let trace = self
+            .inner
+            .process_data(name, content, freshness_ms, sig_type, &self.config);
         serde_wasm_bindgen::to_value(&trace).unwrap_or(JsValue::NULL)
     }
 
@@ -240,7 +250,9 @@ impl Default for WasmTopology {
 impl WasmTopology {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WasmTopology {
-        WasmTopology { inner: SimTopology::new() }
+        WasmTopology {
+            inner: SimTopology::new(),
+        }
     }
 
     // ── Node management ───────────────────────────────────────────────────────
@@ -285,8 +297,16 @@ impl WasmTopology {
     // ── Link management ───────────────────────────────────────────────────────
 
     /// Connect two nodes. Returns the link ID.
-    pub fn add_link(&mut self, node_a: u32, node_b: u32, delay_ms: u32, bandwidth_bps: f64, loss_rate: f64) -> u32 {
-        self.inner.add_link(node_a, node_b, delay_ms, bandwidth_bps as u64, loss_rate)
+    pub fn add_link(
+        &mut self,
+        node_a: u32,
+        node_b: u32,
+        delay_ms: u32,
+        bandwidth_bps: f64,
+        loss_rate: f64,
+    ) -> u32 {
+        self.inner
+            .add_link(node_a, node_b, delay_ms, bandwidth_bps as u64, loss_rate)
     }
 
     // ── FIB management ────────────────────────────────────────────────────────
@@ -330,7 +350,8 @@ impl WasmTopology {
     }
 
     pub fn measurements_snapshot(&self, node_id: u32) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner.measurements_snapshot(node_id)).unwrap_or(JsValue::NULL)
+        serde_wasm_bindgen::to_value(&self.inner.measurements_snapshot(node_id))
+            .unwrap_or(JsValue::NULL)
     }
 
     /// JSON array of all nodes (for topology canvas rendering).
@@ -369,7 +390,13 @@ pub fn tlv_encode_interest(
     nonce: u32,
     lifetime_ms: u32,
 ) -> String {
-    let bytes = tlv::encode_interest(name, can_be_prefix, must_be_fresh, nonce, lifetime_ms as u64);
+    let bytes = tlv::encode_interest(
+        name,
+        can_be_prefix,
+        must_be_fresh,
+        nonce,
+        lifetime_ms as u64,
+    );
     tlv::bytes_to_hex(&bytes)
 }
 
@@ -472,7 +499,8 @@ fn scenario_triangle_cache(topo: &mut SimTopology) -> ScenarioDesc {
 
     ScenarioDesc {
         name: "triangle-cache".to_string(),
-        description: "Send Interest twice — first fetches from Producer, second hits Router CS".to_string(),
+        description: "Send Interest twice — first fetches from Producer, second hits Router CS"
+            .to_string(),
         consumer_node: consumer,
         interest_name: "/ndn/media/video.mp4".to_string(),
         nodes: topo.nodes_snapshot(),
@@ -498,7 +526,8 @@ fn scenario_multipath(topo: &mut SimTopology) -> ScenarioDesc {
 
     ScenarioDesc {
         name: "multipath".to_string(),
-        description: "Router uses Multicast strategy — Interest forwarded on all nexthops".to_string(),
+        description: "Router uses Multicast strategy — Interest forwarded on all nexthops"
+            .to_string(),
         consumer_node: consumer,
         interest_name: "/ndn/stream/live".to_string(),
         nodes: topo.nodes_snapshot(),
@@ -523,7 +552,9 @@ fn scenario_aggregation(topo: &mut SimTopology) -> ScenarioDesc {
 
     ScenarioDesc {
         name: "aggregation".to_string(),
-        description: "Send same Interest from Consumer-1 then Consumer-2 — second collapses in Router PIT".to_string(),
+        description:
+            "Send same Interest from Consumer-1 then Consumer-2 — second collapses in Router PIT"
+                .to_string(),
         consumer_node: consumer1,
         interest_name: "/ndn/shared/data".to_string(),
         nodes: topo.nodes_snapshot(),

@@ -92,12 +92,16 @@ impl ChallengeHandler for TokenChallenge {
             .map(str::to_string);
         Box::pin(async move {
             match token {
-                None => Ok(ChallengeOutcome::Denied("missing 'token' parameter".to_string())),
+                None => Ok(ChallengeOutcome::Denied(
+                    "missing 'token' parameter".to_string(),
+                )),
                 Some(t) => {
                     if self.store.consume(&t) {
                         Ok(ChallengeOutcome::Approved)
                     } else {
-                        Ok(ChallengeOutcome::Denied("invalid or expired token".to_string()))
+                        Ok(ChallengeOutcome::Denied(
+                            "invalid or expired token".to_string(),
+                        ))
                     }
                 }
             }

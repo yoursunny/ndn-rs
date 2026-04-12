@@ -25,10 +25,16 @@ pub struct InterfaceInfo {
 /// - Blacklist is checked first: any match → denied.
 /// - Whitelist is checked next: at least one match required (empty = allow all).
 pub fn interface_allowed(name: &str, whitelist: &[String], blacklist: &[String]) -> bool {
-    if blacklist.iter().any(|p| glob_match(p.as_bytes(), name.as_bytes())) {
+    if blacklist
+        .iter()
+        .any(|p| glob_match(p.as_bytes(), name.as_bytes()))
+    {
         return false;
     }
-    whitelist.is_empty() || whitelist.iter().any(|p| glob_match(p.as_bytes(), name.as_bytes()))
+    whitelist.is_empty()
+        || whitelist
+            .iter()
+            .any(|p| glob_match(p.as_bytes(), name.as_bytes()))
 }
 
 /// Minimal glob matcher supporting `*` (any sequence) and `?` (one char).
@@ -103,8 +109,8 @@ fn list_interfaces_unix() -> Vec<InterfaceInfo> {
                 .into_owned();
 
             let flags = (*ifa).ifa_flags as u32;
-            let is_up = flags & (libc::IFF_UP as u32) != 0
-                && flags & (libc::IFF_RUNNING as u32) != 0;
+            let is_up =
+                flags & (libc::IFF_UP as u32) != 0 && flags & (libc::IFF_RUNNING as u32) != 0;
             let is_multicast = flags & (libc::IFF_MULTICAST as u32) != 0;
             let is_loopback = flags & (libc::IFF_LOOPBACK as u32) != 0;
 
@@ -145,8 +151,7 @@ fn list_interfaces_windows() -> Vec<InterfaceInfo> {
     // Enumerate via GetAdaptersAddresses.
     use std::collections::HashMap;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX,
-        IP_ADAPTER_ADDRESSES_LH,
+        GAA_FLAG_INCLUDE_PREFIX, GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH,
     };
     use windows_sys::Win32::Networking::WinSock::{AF_INET, SOCKADDR_IN};
 
@@ -197,7 +202,9 @@ fn list_interfaces_windows() -> Vec<InterfaceInfo> {
                 // FriendlyName is a PWSTR (UTF-16).
                 let mut len = 0usize;
                 let ptr = (*adapter).FriendlyName;
-                while *ptr.add(len) != 0 { len += 1; }
+                while *ptr.add(len) != 0 {
+                    len += 1;
+                }
                 String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
             };
 
@@ -207,13 +214,15 @@ fn list_interfaces_windows() -> Vec<InterfaceInfo> {
             // treat all non-loopback UP adapters as multicast-capable.
             let is_multicast = is_up && !is_loopback;
 
-            let entry = map.entry(friendly.clone()).or_insert_with(|| InterfaceInfo {
-                name: friendly.clone(),
-                ipv4_addrs: Vec::new(),
-                is_up,
-                is_multicast,
-                is_loopback,
-            });
+            let entry = map
+                .entry(friendly.clone())
+                .or_insert_with(|| InterfaceInfo {
+                    name: friendly.clone(),
+                    ipv4_addrs: Vec::new(),
+                    is_up,
+                    is_multicast,
+                    is_loopback,
+                });
 
             // Walk unicast addresses.
             let mut ua = (*adapter).FirstUnicastAddress;

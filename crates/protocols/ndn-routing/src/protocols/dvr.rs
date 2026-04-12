@@ -255,7 +255,9 @@ impl DvrInner {
                                 cost = Some(match bytes.len() {
                                     1 => bytes[0] as u32,
                                     2 => u16::from_be_bytes([bytes[0], bytes[1]]) as u32,
-                                    4 => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+                                    4 => {
+                                        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+                                    }
                                     _ => return None,
                                 });
                             }
@@ -451,7 +453,11 @@ impl DiscoveryProtocol for DvrProtocol {
             handle.rib.apply_to_fib(prefix, &handle.fib);
         }
         if !removed.is_empty() {
-            debug!(face = face_id.0, routes = removed.len(), "DVR routes withdrawn (face down)");
+            debug!(
+                face = face_id.0,
+                routes = removed.len(),
+                "DVR routes withdrawn (face down)"
+            );
         }
     }
 
@@ -573,9 +579,11 @@ mod tests {
     use super::*;
 
     fn make_name(s: &str) -> Name {
-        Name::from_components(s.split('/').filter(|c| !c.is_empty()).map(|c| {
-            NameComponent::generic(bytes::Bytes::copy_from_slice(c.as_bytes()))
-        }))
+        Name::from_components(
+            s.split('/')
+                .filter(|c| !c.is_empty())
+                .map(|c| NameComponent::generic(bytes::Bytes::copy_from_slice(c.as_bytes()))),
+        )
     }
 
     #[test]

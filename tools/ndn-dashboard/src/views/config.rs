@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use ndn_config::{
-    CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, ForwarderConfig,
-    LoggingConfig, ManagementConfig, RouteConfig, SecurityConfig,
+    CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, ForwarderConfig, LoggingConfig,
+    ManagementConfig, RouteConfig, SecurityConfig,
 };
 
-use crate::app::{AppCtx, DashCmd, RouterCmd, push_toast, ToastLevel, ROUTER_RUNNING};
+use crate::app::{AppCtx, DashCmd, ROUTER_RUNNING, RouterCmd, ToastLevel, push_toast};
 use crate::forwarder_proc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,11 +39,13 @@ pub fn Config() -> Element {
     let mut edu_dismissed = use_signal(|| false);
 
     // Local editable faces/routes — initialized from loaded config, editable until restart
-    let local_faces: Signal<Vec<FaceConfig>> = use_signal(|| {
-        parsed.as_ref().map(|c| c.faces.clone()).unwrap_or_default()
-    });
+    let local_faces: Signal<Vec<FaceConfig>> =
+        use_signal(|| parsed.as_ref().map(|c| c.faces.clone()).unwrap_or_default());
     let local_routes: Signal<Vec<RouteConfig>> = use_signal(|| {
-        parsed.as_ref().map(|c| c.routes.clone()).unwrap_or_default()
+        parsed
+            .as_ref()
+            .map(|c| c.routes.clone())
+            .unwrap_or_default()
     });
 
     rsx! {
@@ -264,7 +266,11 @@ pub fn Config() -> Element {
 
 // ── Section helpers ───────────────────────────────────────────────────────────
 
-fn section_header(title: &str, section: ConfigSection, mut editing: Signal<Option<ConfigSection>>) -> Element {
+fn section_header(
+    title: &str,
+    section: ConfigSection,
+    mut editing: Signal<Option<ConfigSection>>,
+) -> Element {
     let is_open = *editing.read() == Some(section);
     rsx! {
         div { style: "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;",
@@ -406,7 +412,10 @@ fn render_cs_section(cs: CsConfig, editing: Signal<Option<ConfigSection>>) -> El
 
 // ── Management ────────────────────────────────────────────────────────────────
 
-fn render_management_section(mgmt: ManagementConfig, editing: Signal<Option<ConfigSection>>) -> Element {
+fn render_management_section(
+    mgmt: ManagementConfig,
+    editing: Signal<Option<ConfigSection>>,
+) -> Element {
     let is_open = *editing.read() == Some(ConfigSection::Management);
 
     rsx! {
@@ -497,7 +506,10 @@ fn render_security_section(sec: SecurityConfig, editing: Signal<Option<ConfigSec
 
 // ── Discovery ─────────────────────────────────────────────────────────────────
 
-fn render_discovery_section(disc: DiscoveryTomlConfig, editing: Signal<Option<ConfigSection>>) -> Element {
+fn render_discovery_section(
+    disc: DiscoveryTomlConfig,
+    editing: Signal<Option<ConfigSection>>,
+) -> Element {
     let is_open = *editing.read() == Some(ConfigSection::Discovery);
     let enabled = disc.enabled();
 
@@ -600,7 +612,11 @@ fn render_discovery_section(disc: DiscoveryTomlConfig, editing: Signal<Option<Co
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 
-fn render_logging_section(log: LoggingConfig, _ctx: AppCtx, editing: Signal<Option<ConfigSection>>) -> Element {
+fn render_logging_section(
+    log: LoggingConfig,
+    _ctx: AppCtx,
+    editing: Signal<Option<ConfigSection>>,
+) -> Element {
     let is_open = *editing.read() == Some(ConfigSection::Logging);
 
     let mut threads = use_signal(|| log.level.clone());
@@ -670,11 +686,11 @@ impl AddFaceKind {
     #[allow(dead_code)]
     fn label(&self) -> &'static str {
         match self {
-            AddFaceKind::Udp          => "UDP",
-            AddFaceKind::Tcp          => "TCP",
-            AddFaceKind::Multicast    => "UDP Multicast",
-            AddFaceKind::Unix         => "Unix Socket",
-            AddFaceKind::WebSocket    => "WebSocket",
+            AddFaceKind::Udp => "UDP",
+            AddFaceKind::Tcp => "TCP",
+            AddFaceKind::Multicast => "UDP Multicast",
+            AddFaceKind::Unix => "Unix Socket",
+            AddFaceKind::WebSocket => "WebSocket",
             AddFaceKind::EtherMulticast => "Ether Multicast",
         }
     }
@@ -684,32 +700,47 @@ fn face_config_label(face: &FaceConfig) -> (&'static str, String) {
     match face {
         FaceConfig::Udp { bind, remote } => (
             "UDP",
-            format!("bind={} remote={}", bind.as_deref().unwrap_or("any"), remote.as_deref().unwrap_or("(listen)"))
+            format!(
+                "bind={} remote={}",
+                bind.as_deref().unwrap_or("any"),
+                remote.as_deref().unwrap_or("(listen)")
+            ),
         ),
         FaceConfig::Tcp { bind, remote } => (
             "TCP",
-            format!("bind={} remote={}", bind.as_deref().unwrap_or("any"), remote.as_deref().unwrap_or("(listen)"))
+            format!(
+                "bind={} remote={}",
+                bind.as_deref().unwrap_or("any"),
+                remote.as_deref().unwrap_or("(listen)")
+            ),
         ),
-        FaceConfig::Multicast { group, port, interface } => (
+        FaceConfig::Multicast {
+            group,
+            port,
+            interface,
+        } => (
             "Multicast",
-            format!("group={}:{} iface={}", group, port, interface.as_deref().unwrap_or("any"))
+            format!(
+                "group={}:{} iface={}",
+                group,
+                port,
+                interface.as_deref().unwrap_or("any")
+            ),
         ),
         FaceConfig::Unix { path } => (
             "Unix",
-            format!("path={}", path.as_deref().unwrap_or("/tmp/ndn.sock"))
+            format!("path={}", path.as_deref().unwrap_or("/tmp/ndn.sock")),
         ),
         FaceConfig::WebSocket { bind, url } => (
             "WS",
-            format!("bind={} url={}", bind.as_deref().unwrap_or("any"), url.as_deref().unwrap_or(""))
+            format!(
+                "bind={} url={}",
+                bind.as_deref().unwrap_or("any"),
+                url.as_deref().unwrap_or("")
+            ),
         ),
-        FaceConfig::Serial { path, baud } => (
-            "Serial",
-            format!("path={path} baud={baud}")
-        ),
-        FaceConfig::EtherMulticast { interface } => (
-            "EtherMC",
-            format!("iface={interface}")
-        ),
+        FaceConfig::Serial { path, baud } => ("Serial", format!("path={path} baud={baud}")),
+        FaceConfig::EtherMulticast { interface } => ("EtherMC", format!("iface={interface}")),
     }
 }
 

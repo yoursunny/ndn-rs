@@ -10,14 +10,18 @@
 //!   2 — Trust Anchors (chain-of-trust diagram)
 //!   3 — Done (links to next actions)
 
-use dioxus::prelude::*;
 use crate::app::AppCtx;
+use dioxus::prelude::*;
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
 fn onboarded_path() -> std::path::PathBuf {
     std::env::var("HOME")
-        .map(|h| std::path::PathBuf::from(h).join(".ndn").join("dashboard-onboarded"))
+        .map(|h| {
+            std::path::PathBuf::from(h)
+                .join(".ndn")
+                .join("dashboard-onboarded")
+        })
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/.ndn-dashboard-onboarded"))
 }
 

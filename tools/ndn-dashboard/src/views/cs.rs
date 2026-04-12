@@ -7,8 +7,8 @@ pub fn ContentStore() -> Element {
     let ctx = use_context::<AppCtx>();
     let cs = ctx.cs.read();
 
-    let mut new_cap_mb:    Signal<String> = use_signal(String::new);
-    let mut erase_prefix:  Signal<String> = use_signal(String::new);
+    let mut new_cap_mb: Signal<String> = use_signal(String::new);
+    let mut erase_prefix: Signal<String> = use_signal(String::new);
 
     rsx! {
         // ── Stats ────────────────────────────────────────────────────────────

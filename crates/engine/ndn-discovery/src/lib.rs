@@ -70,21 +70,25 @@ pub use config::{
 };
 pub use context::{DiscoveryContext, NeighborTableView};
 pub use gossip::{EpidemicGossip, SvsServiceDiscovery};
+#[cfg(feature = "udp-hello")]
+pub use hello::UdpNeighborDiscovery;
+#[cfg(all(feature = "ether-nd", target_os = "linux"))]
+pub use hello::ether::EtherNeighborDiscovery;
 pub use hello::{
     CAP_CONTENT_STORE, CAP_FRAGMENTATION, CAP_SVS, CAP_VALIDATION, DiffEntry, HelloPayload,
     NeighborDiff, T_ADD_ENTRY, T_CAPABILITIES, T_NEIGHBOR_DIFF, T_NODE_NAME, T_REMOVE_ENTRY,
     T_SERVED_PREFIX,
 };
-pub use hello::{HelloCore, HelloState, HelloProtocol, LinkMedium};
-pub use mac_addr::MacAddr;
-pub use neighbor::{NeighborEntry, NeighborState, NeighborTable, NeighborUpdate};
-pub use no_discovery::NoDiscovery;
-pub use prefix_announce::{ServiceRecord, build_browse_interest, make_record_name};
 pub use hello::{
     DirectProbe, IndirectProbe, build_direct_probe, build_indirect_probe,
     build_indirect_probe_encoded, build_probe_ack, is_probe_ack, parse_direct_probe,
     parse_indirect_probe,
 };
+pub use hello::{HelloCore, HelloProtocol, HelloState, LinkMedium};
+pub use mac_addr::MacAddr;
+pub use neighbor::{NeighborEntry, NeighborState, NeighborTable, NeighborUpdate};
+pub use no_discovery::NoDiscovery;
+pub use prefix_announce::{ServiceRecord, build_browse_interest, make_record_name};
 pub use protocol::{DiscoveryProtocol, InboundMeta, LinkAddr, ProtocolId};
 pub use scope::{
     global_root, gossip_prefix, hello_prefix, is_link_local, is_nd_packet, is_sd_packet,
@@ -97,7 +101,3 @@ pub use strategy::{
     BackoffScheduler, NeighborProbeStrategy, PassiveScheduler, ProbeRequest, ReactiveScheduler,
     SwimScheduler, TriggerEvent, build_strategy,
 };
-#[cfg(feature = "udp-hello")]
-pub use hello::UdpNeighborDiscovery;
-#[cfg(all(feature = "ether-nd", target_os = "linux"))]
-pub use hello::ether::EtherNeighborDiscovery;

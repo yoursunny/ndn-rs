@@ -80,8 +80,7 @@ fn decode_multibase_key(encoded: &str) -> Result<Vec<u8>, String> {
         .strip_prefix('z')
         .ok_or_else(|| format!("unsupported multibase prefix in {encoded}"))?;
 
-    let bytes = bs58_decode(b58)
-        .map_err(|_| format!("invalid base58 in {encoded}"))?;
+    let bytes = bs58_decode(b58).map_err(|_| format!("invalid base58 in {encoded}"))?;
 
     if bytes.len() < 2 {
         return Err("key too short".to_string());

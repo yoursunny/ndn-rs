@@ -8,8 +8,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use bytes::Bytes;

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use dioxus::prelude::*;
 use dioxus::desktop::Config;
+use dioxus::prelude::*;
 
 use crate::app::{
     LOG_FILTER, LOG_SPLIT_MODE, LOG_SPLIT_RATIO, PENDING_LOG_FILTER, ROUTER_LOG, ROUTER_RUNNING,
@@ -13,7 +13,7 @@ use crate::types::{LogEntry, LogLevel};
 #[derive(Clone, PartialEq)]
 struct ModuleGroup {
     prefix: String,
-    subs:   Vec<String>,
+    subs: Vec<String>,
 }
 
 fn build_module_tree(targets: &BTreeSet<String>) -> Vec<ModuleGroup> {
@@ -27,24 +27,43 @@ fn build_module_tree(targets: &BTreeSet<String>) -> Vec<ModuleGroup> {
     }
     by_crate
         .into_iter()
-        .map(|(prefix, subs)| ModuleGroup { prefix, subs: subs.into_iter().collect() })
+        .map(|(prefix, subs)| ModuleGroup {
+            prefix,
+            subs: subs.into_iter().collect(),
+        })
         .collect()
 }
 
 // ── Export format ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq)]
-enum ExportFormat { PlainText, Json, Csv }
+enum ExportFormat {
+    PlainText,
+    Json,
+    Csv,
+}
 
 impl ExportFormat {
     fn ext(self) -> &'static str {
-        match self { Self::PlainText => "log", Self::Json => "json", Self::Csv => "csv" }
+        match self {
+            Self::PlainText => "log",
+            Self::Json => "json",
+            Self::Csv => "csv",
+        }
     }
     fn render(self, entries: &[LogEntry]) -> String {
         match self {
             Self::PlainText => entries
                 .iter()
-                .map(|e| format!("{} {:5} {} {}", e.timestamp, e.level.as_str(), e.target, e.message))
+                .map(|e| {
+                    format!(
+                        "{} {:5} {} {}",
+                        e.timestamp,
+                        e.level.as_str(),
+                        e.target,
+                        e.message
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n"),
             Self::Csv => {
@@ -88,33 +107,48 @@ fn csv_escape(s: &str) -> String {
 }
 
 fn json_str(s: &str) -> String {
-    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n");
     format!("\"{escaped}\"")
 }
 
 // ── Level override panel verbs ─────────────────────────────────────────────────
 
 const LEVEL_OPTIONS: &[(&str, &str)] = &[
-    ("",      "inherit"),
+    ("", "inherit"),
     ("trace", "TRACE"),
     ("debug", "DEBUG"),
-    ("info",  "INFO"),
-    ("warn",  "WARN"),
+    ("info", "INFO"),
+    ("warn", "WARN"),
     ("error", "ERROR"),
-    ("off",   "off"),
+    ("off", "off"),
 ];
 
 // ── Split mode helper ─────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq)]
-enum SplitMode { Single, Horizontal, Vertical }
+enum SplitMode {
+    Single,
+    Horizontal,
+    Vertical,
+}
 
 impl SplitMode {
     fn from_u8(v: u8) -> Self {
-        match v { 1 => Self::Horizontal, 2 => Self::Vertical, _ => Self::Single }
+        match v {
+            1 => Self::Horizontal,
+            2 => Self::Vertical,
+            _ => Self::Single,
+        }
     }
     fn to_u8(self) -> u8 {
-        match self { Self::Single => 0, Self::Horizontal => 1, Self::Vertical => 2 }
+        match self {
+            Self::Single => 0,
+            Self::Horizontal => 1,
+            Self::Vertical => 2,
+        }
     }
 }
 
@@ -165,52 +199,57 @@ tr:last-child td{border-bottom:none}
 #[component]
 pub fn LogPane(pane_id: usize) -> Element {
     // ── Display filters (local to this pane) ─────────────────────────────────
-    let mut threshold  = use_signal(|| LogLevel::Info);
+    let mut threshold = use_signal(|| LogLevel::Info);
     // false = show level ≥ threshold (default); true = exact level only
-    let mut exact_lvl  = use_signal(|| false);
-    let mut search     = use_signal(String::new);
+    let mut exact_lvl = use_signal(|| false);
+    let mut search = use_signal(String::new);
     let mut mod_prefix: Signal<Option<String>> = use_signal(|| None);
-    let mut hide_mgmt  = use_signal(|| true);
+    let mut hide_mgmt = use_signal(|| true);
 
     // ── Column visibility ─────────────────────────────────────────────────────
-    let mut show_ts  = use_signal(|| true);
+    let mut show_ts = use_signal(|| true);
     let mut show_tid = use_signal(|| false);
     let mut show_lvl = use_signal(|| true);
     let mut show_tgt = use_signal(|| true);
 
     // ── Panel state ───────────────────────────────────────────────────────────
-    let mut show_overrides  = use_signal(|| false);
-    let mut show_export     = use_signal(|| false);
-    let mut show_confirm    = use_signal(|| false);   // confirm before sending to router
+    let mut show_overrides = use_signal(|| false);
+    let mut show_export = use_signal(|| false);
+    let mut show_confirm = use_signal(|| false); // confirm before sending to router
 
     // Per-module level overrides (module path → level string, "" = inherit)
     let mut module_overrides: Signal<HashMap<String, String>> = use_signal(HashMap::new);
 
     // Export options
-    let mut export_fmt:    Signal<ExportFormat>       = use_signal(|| ExportFormat::PlainText);
-    let mut export_lvl:    Signal<LogLevel>            = use_signal(|| LogLevel::Trace);
-    let mut export_prefix: Signal<Option<String>>      = use_signal(|| None);
+    let mut export_fmt: Signal<ExportFormat> = use_signal(|| ExportFormat::PlainText);
+    let mut export_lvl: Signal<LogLevel> = use_signal(|| LogLevel::Trace);
+    let mut export_prefix: Signal<Option<String>> = use_signal(|| None);
 
     // ── Module tree (dynamic, from observed targets) ──────────────────────────
     let module_tree = use_memo(move || -> Vec<ModuleGroup> {
         let log = ROUTER_LOG.read();
         let mut targets: BTreeSet<String> = BTreeSet::new();
-        for e in log.iter() { targets.insert(e.target.clone()); }
+        for e in log.iter() {
+            targets.insert(e.target.clone());
+        }
         build_module_tree(&targets)
     });
 
     // ── Filtered entries (main display) ──────────────────────────────────────
     let filtered = use_memo(move || -> Vec<LogEntry> {
-        let log     = ROUTER_LOG.read();
-        let thr     = *threshold.read();
-        let exact   = *exact_lvl.read();
-        let srch    = search.read().to_lowercase();
-        let pfx     = mod_prefix.read().clone();
+        let log = ROUTER_LOG.read();
+        let thr = *threshold.read();
+        let exact = *exact_lvl.read();
+        let srch = search.read().to_lowercase();
+        let pfx = mod_prefix.read().clone();
         let no_mgmt = *hide_mgmt.read();
         log.iter()
             .filter(|e| {
-                (if exact { e.level == thr } else { e.level >= thr })
-                    && pfx.as_deref().is_none_or(|p| e.target.starts_with(p))
+                (if exact {
+                    e.level == thr
+                } else {
+                    e.level >= thr
+                }) && pfx.as_deref().is_none_or(|p| e.target.starts_with(p))
                     && !(no_mgmt
                         && e.target.starts_with("ndn_fwd::mgmt_ndn")
                         && e.level == LogLevel::Debug)
@@ -226,7 +265,7 @@ pub fn LogPane(pane_id: usize) -> Element {
     let list_id = format!("log-list-{pane_id}");
     let list_id2 = list_id.clone();
     use_effect(move || {
-        let _ = filtered.read();   // subscribe — re-run when filtered changes
+        let _ = filtered.read(); // subscribe — re-run when filtered changes
         document::eval(&format!(
             "var el=document.getElementById('{list_id2}');\
              if(el)el.scrollTop=el.scrollHeight;"
@@ -234,15 +273,15 @@ pub fn LogPane(pane_id: usize) -> Element {
     });
 
     // ── Snapshot values for rsx (avoids holding guards across the block) ──────
-    let total    = ROUTER_LOG.read().len();
-    let entries  = filtered.cloned();
-    let shown    = entries.len();
-    let running  = *ROUTER_RUNNING.read();
+    let total = ROUTER_LOG.read().len();
+    let entries = filtered.cloned();
+    let shown = entries.len();
+    let running = *ROUTER_RUNNING.read();
     let cur_filt = LOG_FILTER.read().clone();
-    let col_ts   = *show_ts.read();
-    let col_tid  = *show_tid.read();
-    let col_lvl  = *show_lvl.read();
-    let col_tgt  = *show_tgt.read();
+    let col_ts = *show_ts.read();
+    let col_tid = *show_tid.read();
+    let col_lvl = *show_lvl.read();
+    let col_tgt = *show_tgt.read();
 
     // ── Export content (computed only when export modal is open) ──────────────
     let export_entries: Vec<LogEntry> = if *show_export.read() {
@@ -251,8 +290,7 @@ pub fn LogPane(pane_id: usize) -> Element {
         entries
             .iter()
             .filter(|e| {
-                e.level >= exp_thr
-                    && exp_pfx.as_deref().is_none_or(|p| e.target.starts_with(p))
+                e.level >= exp_thr && exp_pfx.as_deref().is_none_or(|p| e.target.starts_with(p))
             })
             .cloned()
             .collect()
@@ -717,10 +755,10 @@ fn LogWindowApp(pane_id: usize) -> Element {
 #[component]
 pub fn Logs() -> Element {
     // Use GlobalSignals so split layout survives tab switches.
-    let mut div_drag    = use_signal(|| false);
+    let mut div_drag = use_signal(|| false);
     let mut next_pane_id = use_signal(|| 2usize); // pane 0 and 1 are always the split panes
 
-    let split_mode  = SplitMode::from_u8(*LOG_SPLIT_MODE.read());
+    let split_mode = SplitMode::from_u8(*LOG_SPLIT_MODE.read());
     let split_ratio = *LOG_SPLIT_RATIO.read();
 
     rsx! {
@@ -848,7 +886,7 @@ pub fn Logs() -> Element {
 
 fn save_log_to_file(content: &str, ext: &str) {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let ts   = std::time::SystemTime::now()
+    let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();

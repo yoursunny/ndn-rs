@@ -29,7 +29,8 @@ pub struct RibRoute {
 impl RibRoute {
     /// Returns the remaining lifetime as a `Duration`, or `None` if permanent.
     pub fn remaining(&self) -> Option<Duration> {
-        self.expires_at.map(|exp| exp.saturating_duration_since(Instant::now()))
+        self.expires_at
+            .map(|exp| exp.saturating_duration_since(Instant::now()))
     }
 }
 
@@ -288,7 +289,7 @@ mod tests {
     #[test]
     fn multiple_origins_same_face() {
         let rib = Rib::new();
-        rib.add(&name("ndn"), route(1, 128, 5));  // NLSR
+        rib.add(&name("ndn"), route(1, 128, 5)); // NLSR
         rib.add(&name("ndn"), route(1, 255, 100)); // STATIC
         let entries = rib.dump();
         assert_eq!(entries[0].1.len(), 2);
@@ -340,13 +341,16 @@ mod tests {
     fn drain_expired_removes_stale() {
         let rib = Rib::new();
         let past = Instant::now() - Duration::from_secs(1);
-        rib.add(&name("a"), RibRoute {
-            face_id: FaceId(1),
-            origin: 128,
-            cost: 5,
-            flags: 0,
-            expires_at: Some(past),
-        });
+        rib.add(
+            &name("a"),
+            RibRoute {
+                face_id: FaceId(1),
+                origin: 128,
+                cost: 5,
+                flags: 0,
+                expires_at: Some(past),
+            },
+        );
         rib.add(&name("b"), route(2, 128, 10)); // permanent
 
         let affected = rib.drain_expired();

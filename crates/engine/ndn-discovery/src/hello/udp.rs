@@ -50,9 +50,9 @@ use ndn_security::{Ed25519Signer, Ed25519Verifier, Signer, VerifyOutcome};
 use ndn_transport::FaceId;
 use tracing::{debug, error, warn};
 
-use crate::config::{DiscoveryConfig, DiscoveryProfile};
-use super::protocol::HelloProtocol;
 use super::medium::{HelloCore, HelloState, LinkMedium};
+use super::protocol::HelloProtocol;
+use crate::config::{DiscoveryConfig, DiscoveryProfile};
 use crate::wire::parse_raw_interest;
 use crate::{
     DiscoveryContext, HelloPayload, InboundMeta, LinkAddr, MacAddr, NeighborEntry, NeighborUpdate,
@@ -546,7 +546,10 @@ mod tests {
     #[test]
     fn tick_interval_from_config() {
         let nd = make_nd();
-        assert_eq!(nd.core.config.read().unwrap().tick_interval, Duration::from_millis(500));
+        assert_eq!(
+            nd.core.config.read().unwrap().tick_interval,
+            Duration::from_millis(500)
+        );
     }
 
     #[test]

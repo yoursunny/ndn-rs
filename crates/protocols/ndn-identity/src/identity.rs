@@ -6,10 +6,7 @@ use ndn_security::KeyChain;
 use ndn_security::did::{UniversalResolver, name_to_did};
 
 use crate::{
-    device::DeviceConfig,
-    enroll::EnrollConfig,
-    error::IdentityError,
-    renewal::RenewalHandle,
+    device::DeviceConfig, enroll::EnrollConfig, error::IdentityError, renewal::RenewalHandle,
 };
 
 /// A named NDN identity with full lifecycle management.
@@ -52,7 +49,10 @@ impl NdnIdentity {
     /// Suitable for testing and short-lived producers. Keys are not persisted.
     pub fn ephemeral(name: impl AsRef<str>) -> Result<Self, IdentityError> {
         let keychain = KeyChain::ephemeral(name)?;
-        Ok(Self { keychain, renewal: None })
+        Ok(Self {
+            keychain,
+            renewal: None,
+        })
     }
 
     /// Open a persistent identity from a PIB directory, creating it if absent.
@@ -61,7 +61,10 @@ impl NdnIdentity {
     /// On subsequent runs, loads the existing key and certificate.
     pub fn open_or_create(path: &Path, name: impl AsRef<str>) -> Result<Self, IdentityError> {
         let keychain = KeyChain::open_or_create(path, name)?;
-        Ok(Self { keychain, renewal: None })
+        Ok(Self {
+            keychain,
+            renewal: None,
+        })
     }
 
     /// Enroll via NDNCERT using the given configuration.

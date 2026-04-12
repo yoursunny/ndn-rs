@@ -1,32 +1,32 @@
-use dioxus::prelude::*;
 use crate::app::{AppCtx, DashCmd};
+use dioxus::prelude::*;
 
 // ── Challenge type IDs ────────────────────────────────────────────────────────
 
-const CHALLENGE_TOKEN:      &str = "token";
-const CHALLENGE_PIN:        &str = "pin";
+const CHALLENGE_TOKEN: &str = "token";
+const CHALLENGE_PIN: &str = "pin";
 const CHALLENGE_POSSESSION: &str = "possession";
-const CHALLENGE_YUBIKEY:    &str = "yubikey-hotp";
+const CHALLENGE_YUBIKEY: &str = "yubikey-hotp";
 
 // ── Root component ────────────────────────────────────────────────────────────
 
 #[component]
 pub fn Fleet() -> Element {
-    let ctx      = use_context::<AppCtx>();
+    let ctx = use_context::<AppCtx>();
     let neighbors = ctx.neighbors.read();
-    let anchors   = ctx.security_anchors.read();
+    let anchors = ctx.security_anchors.read();
 
     // Bootstrap form state
-    let mut bootstrap_name:   Signal<String> = use_signal(String::new);
-    let mut bootstrap_uri:    Signal<String> = use_signal(String::new);
+    let mut bootstrap_name: Signal<String> = use_signal(String::new);
+    let mut bootstrap_uri: Signal<String> = use_signal(String::new);
     let mut bootstrap_prefix: Signal<String> = use_signal(String::new);
 
     // Enrollment form state
-    let mut enroll_ca:        Signal<String> = use_signal(String::new);
+    let mut enroll_ca: Signal<String> = use_signal(String::new);
     let mut enroll_challenge: Signal<String> = use_signal(|| CHALLENGE_TOKEN.to_string());
-    let mut enroll_param:     Signal<String> = use_signal(String::new);
+    let mut enroll_param: Signal<String> = use_signal(String::new);
     // Enrollment progress: None = idle, Some(0..4) = step, Some(255) = done, Some(254) = error
-    let mut enroll_step:      Signal<Option<u8>> = use_signal(|| None);
+    let mut enroll_step: Signal<Option<u8>> = use_signal(|| None);
     let mut enroll_result_did: Signal<Option<String>> = use_signal(|| None);
 
     // Education card dismissed?
@@ -35,19 +35,29 @@ pub fn Fleet() -> Element {
     // Discovery config form state (initialised from live status when available)
     let disc = ctx.discovery_status.read();
     let mut disc_hello_base: Signal<String> = use_signal(|| {
-        disc.as_ref().map(|d| d.hello_interval_base_ms.to_string()).unwrap_or_default()
+        disc.as_ref()
+            .map(|d| d.hello_interval_base_ms.to_string())
+            .unwrap_or_default()
     });
     let mut disc_hello_max: Signal<String> = use_signal(|| {
-        disc.as_ref().map(|d| d.hello_interval_max_ms.to_string()).unwrap_or_default()
+        disc.as_ref()
+            .map(|d| d.hello_interval_max_ms.to_string())
+            .unwrap_or_default()
     });
     let mut disc_gossip: Signal<String> = use_signal(|| {
-        disc.as_ref().map(|d| d.gossip_fanout.to_string()).unwrap_or_default()
+        disc.as_ref()
+            .map(|d| d.gossip_fanout.to_string())
+            .unwrap_or_default()
     });
     let mut disc_swim: Signal<String> = use_signal(|| {
-        disc.as_ref().map(|d| d.swim_indirect_fanout.to_string()).unwrap_or_default()
+        disc.as_ref()
+            .map(|d| d.swim_indirect_fanout.to_string())
+            .unwrap_or_default()
     });
     let mut disc_miss: Signal<String> = use_signal(|| {
-        disc.as_ref().map(|d| d.liveness_miss_count.to_string()).unwrap_or_default()
+        disc.as_ref()
+            .map(|d| d.liveness_miss_count.to_string())
+            .unwrap_or_default()
     });
     let mut disc_error: Signal<Option<String>> = use_signal(|| None);
     drop(disc);
@@ -544,12 +554,8 @@ pub fn Fleet() -> Element {
 // ── Enrollment progress component ─────────────────────────────────────────────
 
 #[component]
-fn EnrollProgress(
-    step: u8,
-    result_did: Option<String>,
-    on_reset: EventHandler<()>,
-) -> Element {
-    let is_done  = step == 255;
+fn EnrollProgress(step: u8, result_did: Option<String>, on_reset: EventHandler<()>) -> Element {
+    let is_done = step == 255;
     let is_error = step == 254;
 
     rsx! {
@@ -630,11 +636,19 @@ fn EnrollStepDot(
     label: &'static str,
     desc: &'static str,
 ) -> Element {
-    let done_color  = "var(--green)";
-    let idle_color  = "var(--border)";
+    let done_color = "var(--green)";
+    let idle_color = "var(--border)";
 
-    let left_color  = if i > 0 && (i <= current || is_done) { done_color } else { idle_color };
-    let right_color = if i < 3 && (i < current || is_done)  { done_color } else { idle_color };
+    let left_color = if i > 0 && (i <= current || is_done) {
+        done_color
+    } else {
+        idle_color
+    };
+    let right_color = if i < 3 && (i < current || is_done) {
+        done_color
+    } else {
+        idle_color
+    };
 
     let dot_class = if is_done || i < current {
         "enroll-step-dot done"

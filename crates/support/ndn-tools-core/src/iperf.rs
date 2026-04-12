@@ -47,16 +47,13 @@ type FlowSigners = Arc<std::sync::RwLock<HashMap<String, FlowSignMode>>>;
 /// - `"hmac"`:         HMAC-SHA256 keyed by `flow_id`
 /// - `"ed25519"`:      server-wide ephemeral Ed25519 key
 /// - `"digest_sha256"` / `""` / unrecognised: DigestSha256
-fn make_sign_mode(
-    sign_mode: &str,
-    flow_id:   &str,
-    ed25519:   &Arc<Ed25519Signer>,
-) -> FlowSignMode {
+fn make_sign_mode(sign_mode: &str, flow_id: &str, ed25519: &Arc<Ed25519Signer>) -> FlowSignMode {
     match sign_mode {
         "none" => FlowSignMode::None,
         "blake3" => FlowSignMode::DigestBlake3,
         "hmac" => {
-            let kn: ndn_packet::Name = format!("/iperf-key/{flow_id}").parse()
+            let kn: ndn_packet::Name = format!("/iperf-key/{flow_id}")
+                .parse()
                 .unwrap_or_else(|_| "/iperf-key/unknown".parse().unwrap());
             FlowSignMode::Custom(Arc::new(HmacSha256Signer::new(flow_id.as_bytes(), kn)))
         }
@@ -68,13 +65,14 @@ fn make_sign_mode(
 /// Apply per-packet signing to a `DataBuilder` according to the negotiated mode.
 fn sign_data(builder: DataBuilder, mode: &FlowSignMode) -> bytes::Bytes {
     match mode {
-        FlowSignMode::None         => builder.sign_none(),
+        FlowSignMode::None => builder.sign_none(),
         FlowSignMode::DigestSha256 => builder.sign_digest_sha256(),
         FlowSignMode::DigestBlake3 => builder.sign_digest_blake3(),
-        FlowSignMode::Custom(s)    => {
+        FlowSignMode::Custom(s) => {
             let sig_type = s.sig_type();
             builder.sign_sync(sig_type, None, |region| {
-                s.sign_sync(region).unwrap_or_else(|_| bytes::Bytes::from_static(&[0u8; 32]))
+                s.sign_sync(region)
+                    .unwrap_or_else(|_| bytes::Bytes::from_static(&[0u8; 32]))
             })
         }
     }
@@ -136,41 +134,57 @@ fn extract_seq(raw: &Bytes) -> Option<u64> {
 
 fn format_throughput(bytes: u64, duration: Duration) -> String {
     let secs = duration.as_secs_f64();
-    if secs == 0.0 { return "0 bps".into(); }
+    if secs == 0.0 {
+        return "0 bps".into();
+    }
     let bps = bytes as f64 * 8.0 / secs;
-    if bps >= 1_000_000_000.0 { format!("{:.2} Gbps", bps / 1_000_000_000.0) }
-    else if bps >= 1_000_000.0 { format!("{:.2} Mbps", bps / 1_000_000.0) }
-    else if bps >= 1_000.0     { format!("{:.2} Kbps", bps / 1_000.0) }
-    else                       { format!("{:.0} bps", bps) }
+    if bps >= 1_000_000_000.0 {
+        format!("{:.2} Gbps", bps / 1_000_000_000.0)
+    } else if bps >= 1_000_000.0 {
+        format!("{:.2} Mbps", bps / 1_000_000.0)
+    } else if bps >= 1_000.0 {
+        format!("{:.2} Kbps", bps / 1_000.0)
+    } else {
+        format!("{:.0} bps", bps)
+    }
 }
 
 fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1_073_741_824 { format!("{:.2} GB", bytes as f64 / 1_073_741_824.0) }
-    else if bytes >= 1_048_576 { format!("{:.2} MB", bytes as f64 / 1_048_576.0) }
-    else if bytes >= 1024      { format!("{:.2} KB", bytes as f64 / 1024.0) }
-    else                       { format!("{bytes} B") }
+    if bytes >= 1_073_741_824 {
+        format!("{:.2} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.2} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn throughput_bps(bytes: u64, duration: Duration) -> f64 {
     let secs = duration.as_secs_f64();
-    if secs == 0.0 { 0.0 } else { bytes as f64 * 8.0 / secs }
+    if secs == 0.0 {
+        0.0
+    } else {
+        bytes as f64 * 8.0 / secs
+    }
 }
 
 // ── Interval counters (lock-free) ─────────────────────────────────────────────
 
 struct IntervalCounters {
-    bytes:     AtomicU64,
-    pkts:      AtomicU64,
-    rtt_sum:   AtomicU64,
+    bytes: AtomicU64,
+    pkts: AtomicU64,
+    rtt_sum: AtomicU64,
     rtt_count: AtomicU64,
 }
 
 impl IntervalCounters {
     fn new() -> Self {
         Self {
-            bytes:     AtomicU64::new(0),
-            pkts:      AtomicU64::new(0),
-            rtt_sum:   AtomicU64::new(0),
+            bytes: AtomicU64::new(0),
+            pkts: AtomicU64::new(0),
+            rtt_sum: AtomicU64::new(0),
             rtt_count: AtomicU64::new(0),
         }
     }
@@ -197,18 +211,23 @@ impl IntervalCounters {
 
 #[derive(Debug, serde::Deserialize, Default)]
 struct SessionRequest {
-    #[serde(default)] duration: u64,
-    #[serde(default)] signing:  String,
-    #[serde(default)] size:     usize,
-    #[serde(default)] reverse:  bool,
-    #[serde(default)] callback: String,
+    #[serde(default)]
+    duration: u64,
+    #[serde(default)]
+    signing: String,
+    #[serde(default)]
+    size: usize,
+    #[serde(default)]
+    reverse: bool,
+    #[serde(default)]
+    callback: String,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct SessionResponse {
-    signing:    String,
-    size:       usize,
-    reverse:    bool,
+    signing: String,
+    size: usize,
+    reverse: bool,
     session_id: String,
 }
 
@@ -220,21 +239,52 @@ pub async fn run_server(params: IperfServerParams, tx: mpsc::Sender<ToolEvent>) 
     client.register_prefix(&prefix).await?;
 
     match client.mgmt.service_announce(&prefix).await {
-        Ok(_)  => { let _ = tx.send(ToolEvent::info(format!("  service discovery: announced {prefix}"))).await; }
-        Err(e) => { let _ = tx.send(ToolEvent::info(format!("  service discovery: not available ({e}), skipping"))).await; }
+        Ok(_) => {
+            let _ = tx
+                .send(ToolEvent::info(format!(
+                    "  service discovery: announced {prefix}"
+                )))
+                .await;
+        }
+        Err(e) => {
+            let _ = tx
+                .send(ToolEvent::info(format!(
+                    "  service discovery: not available ({e}), skipping"
+                )))
+                .await;
+        }
     }
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
-    let _ = tx.send(ToolEvent::info(format!(
-        "ndn-iperf server: prefix={prefix}  transport={transport}  default-payload={}B",
-        params.payload_size
-    ))).await;
-    let _ = tx.send(ToolEvent::info("  negotiation: enabled — clients may send /<prefix>/<flow-id>/session")).await;
-    let _ = tx.send(ToolEvent::info("  reverse:   enabled — clients may request reverse-mode testing")).await;
+    let _ = tx
+        .send(ToolEvent::info(format!(
+            "ndn-iperf server: prefix={prefix}  transport={transport}  default-payload={}B",
+            params.payload_size
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::info(
+            "  negotiation: enabled — clients may send /<prefix>/<flow-id>/session",
+        ))
+        .await;
+    let _ = tx
+        .send(ToolEvent::info(
+            "  reverse:   enabled — clients may request reverse-mode testing",
+        ))
+        .await;
     if params.freshness_ms > 0 {
-        let _ = tx.send(ToolEvent::info(format!("  freshness: {}ms", params.freshness_ms))).await;
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "  freshness: {}ms",
+                params.freshness_ms
+            )))
+            .await;
     }
-    let _ = tx.send(ToolEvent::info("  waiting for Interests... (Ctrl-C to stop)")).await;
+    let _ = tx
+        .send(ToolEvent::info(
+            "  waiting for Interests... (Ctrl-C to stop)",
+        ))
+        .await;
 
     // Server-wide ephemeral Ed25519 key (benchmark only — key is fixed, not secret).
     let ed25519_signer = Arc::new(Ed25519Signer::from_seed(
@@ -256,19 +306,36 @@ pub async fn run_server(params: IperfServerParams, tx: mpsc::Sender<ToolEvent>) 
             ticker.tick().await;
             loop {
                 ticker.tick().await;
-                if tx2.is_closed() { break; }
+                if tx2.is_closed() {
+                    break;
+                }
                 let (bytes, pkts, rtt_sum, rtt_count) = c2.drain();
                 let elapsed = start.elapsed();
                 let tp = format_throughput(bytes, interval_dur);
                 let bps = throughput_bps(bytes, interval_dur);
-                let rtt_avg_us = if rtt_count > 0 { rtt_sum / rtt_count } else { 0 };
+                let rtt_avg_us = if rtt_count > 0 {
+                    rtt_sum / rtt_count
+                } else {
+                    0
+                };
                 let rtt_str = if rtt_count > 0 {
                     format!("rtt={:.0}us", rtt_sum as f64 / rtt_count as f64)
-                } else { "rtt=n/a".into() };
-                let _ = tx2.send(
-                    ToolEvent::info(format!("[{:>6.1}s]  {tp:>14}  {pkts:>8} pkt/s  {rtt_str}", elapsed.as_secs_f64()))
-                        .with_data(ToolData::IperfInterval { bytes, throughput_bps: bps, rtt_avg_us })
-                ).await;
+                } else {
+                    "rtt=n/a".into()
+                };
+                let _ = tx2
+                    .send(
+                        ToolEvent::info(format!(
+                            "[{:>6.1}s]  {tp:>14}  {pkts:>8} pkt/s  {rtt_str}",
+                            elapsed.as_secs_f64()
+                        ))
+                        .with_data(ToolData::IperfInterval {
+                            bytes,
+                            throughput_bps: bps,
+                            rtt_avg_us,
+                        }),
+                    )
+                    .await;
             }
         });
     }
@@ -276,28 +343,37 @@ pub async fn run_server(params: IperfServerParams, tx: mpsc::Sender<ToolEvent>) 
     let freshness = (params.freshness_ms > 0).then(|| Duration::from_millis(params.freshness_ms));
 
     let mut total_interests: u64 = 0;
-    let mut total_sent:      u64 = 0;
-    let mut non_interest:    u64 = 0;
+    let mut total_sent: u64 = 0;
+    let mut non_interest: u64 = 0;
 
     loop {
-        if tx.is_closed() { break; }
+        if tx.is_closed() {
+            break;
+        }
 
         let raw = match client.recv().await {
             Some(b) => b,
             None => {
-                let _ = tx.send(ToolEvent::info(format!("  connection closed after {total_interests} Interests"))).await;
+                let _ = tx
+                    .send(ToolEvent::info(format!(
+                        "  connection closed after {total_interests} Interests"
+                    )))
+                    .await;
                 break;
             }
         };
 
         let interest = match Interest::decode(raw) {
-            Ok(i)  => i,
-            Err(_) => { non_interest += 1; continue; }
+            Ok(i) => i,
+            Err(_) => {
+                non_interest += 1;
+                continue;
+            }
         };
         total_interests += 1;
 
-        let components  = interest.name.components();
-        let prefix_len  = prefix.components().len();
+        let components = interest.name.components();
+        let prefix_len = prefix.components().len();
 
         // Session negotiation: /<prefix>/<flow-id>/session[/<params-digest>]
         // The Interest carries AppParameters, so a ParametersSha256DigestComponent
@@ -307,40 +383,53 @@ pub async fn run_server(params: IperfServerParams, tx: mpsc::Sender<ToolEvent>) 
             let marker = std::str::from_utf8(&components[prefix_len + 1].value).unwrap_or("");
             if marker == "session" {
                 let res = handle_session_negotiation(
-                    &interest, &client, &prefix,
+                    &interest,
+                    &client,
+                    &prefix,
                     &ServerDefaults {
-                        conn:           &params.conn,
-                        payload_size:   params.payload_size,
-                        freshness_ms:   params.freshness_ms,
-                        flow_signers:   &flow_signers,
+                        conn: &params.conn,
+                        payload_size: params.payload_size,
+                        freshness_ms: params.freshness_ms,
+                        flow_signers: &flow_signers,
                         ed25519_signer: &ed25519_signer,
                     },
                     tx.clone(),
-                ).await;
+                )
+                .await;
                 if let Err(e) = res {
-                    let _ = tx.send(ToolEvent::warn(format!("  session negotiation error: {e}"))).await;
+                    let _ = tx
+                        .send(ToolEvent::warn(format!("  session negotiation error: {e}")))
+                        .await;
                 }
                 continue;
             }
         }
 
         // Normal data serving — look up per-flow signer (set during session negotiation).
-        let flow_id_str = components.get(prefix_len)
+        let flow_id_str = components
+            .get(prefix_len)
             .and_then(|c| std::str::from_utf8(&c.value).ok())
             .unwrap_or("")
             .to_string();
-        let sign_mode = flow_signers.read().unwrap()
-            .get(&flow_id_str).cloned()
+        let sign_mode = flow_signers
+            .read()
+            .unwrap()
+            .get(&flow_id_str)
+            .cloned()
             .unwrap_or(FlowSignMode::DigestSha256);
 
         let payload = vec![0xAAu8; params.payload_size];
         let mut builder = DataBuilder::new((*interest.name).clone(), &payload);
-        if let Some(f) = freshness { builder = builder.freshness(f); }
+        if let Some(f) = freshness {
+            builder = builder.freshness(f);
+        }
         let data = sign_data(builder, &sign_mode);
 
         let data_len = data.len() as u64;
         if let Err(e) = client.send(data).await {
-            let _ = tx.send(ToolEvent::error(format!("  send error: {e}"))).await;
+            let _ = tx
+                .send(ToolEvent::error(format!("  send error: {e}")))
+                .await;
             break;
         }
         total_sent += 1;
@@ -350,21 +439,36 @@ pub async fn run_server(params: IperfServerParams, tx: mpsc::Sender<ToolEvent>) 
     let elapsed = start.elapsed();
     let _ = tx.send(ToolEvent::summary(String::new())).await;
     let _ = tx.send(ToolEvent::summary("--- server summary ---")).await;
-    let _ = tx.send(ToolEvent::summary(format!("  uptime:    {:.1}s", elapsed.as_secs_f64()))).await;
-    let _ = tx.send(ToolEvent::summary(format!("  interests: {total_interests}"))).await;
-    let _ = tx.send(ToolEvent::summary(format!("  data sent: {total_sent}"))).await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  uptime:    {:.1}s",
+            elapsed.as_secs_f64()
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  interests: {total_interests}"
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary(format!("  data sent: {total_sent}")))
+        .await;
     if non_interest > 0 {
-        let _ = tx.send(ToolEvent::summary(format!("  non-interest: {non_interest}"))).await;
+        let _ = tx
+            .send(ToolEvent::summary(format!(
+                "  non-interest: {non_interest}"
+            )))
+            .await;
     }
 
     Ok(())
 }
 
 struct ServerDefaults<'a> {
-    conn:           &'a ConnectConfig,
-    payload_size:   usize,
-    freshness_ms:   u64,
-    flow_signers:   &'a FlowSigners,
+    conn: &'a ConnectConfig,
+    payload_size: usize,
+    freshness_ms: u64,
+    flow_signers: &'a FlowSigners,
     ed25519_signer: &'a Arc<Ed25519Signer>,
 }
 
@@ -375,31 +479,37 @@ async fn handle_session_negotiation(
     defaults: &ServerDefaults<'_>,
     tx: mpsc::Sender<ToolEvent>,
 ) -> Result<()> {
-    let default_size  = defaults.payload_size;
-    let freshness_ms  = defaults.freshness_ms;
+    let default_size = defaults.payload_size;
+    let freshness_ms = defaults.freshness_ms;
     let req: SessionRequest = interest
         .app_parameters()
         .and_then(|b| serde_json::from_slice(b).ok())
         .unwrap_or_default();
 
-    let flow_id = interest.name.components()
+    let flow_id = interest
+        .name
+        .components()
         .get(server_prefix.components().len())
         .map(|c| String::from_utf8_lossy(&c.value).to_string())
         .unwrap_or_default();
 
     let agreed_size = if req.size > 0 { req.size } else { default_size };
     let agreed_sign = match req.signing.as_str() {
-        "ed25519"       => "ed25519",
-        "hmac"          => "hmac",
-        "blake3"        => "blake3",
+        "ed25519" => "ed25519",
+        "hmac" => "hmac",
+        "blake3" => "blake3",
         "digest_sha256" => "digest_sha256",
-        "none"          => "none",
-        _               => "digest_sha256",
+        "none" => "none",
+        _ => "digest_sha256",
     };
 
     // Register per-flow sign mode so the main data loop can sign packets for this flow.
     let sign_mode = make_sign_mode(agreed_sign, &flow_id, defaults.ed25519_signer);
-    defaults.flow_signers.write().unwrap().insert(flow_id.clone(), sign_mode);
+    defaults
+        .flow_signers
+        .write()
+        .unwrap()
+        .insert(flow_id.clone(), sign_mode);
 
     let _ = tx.send(
         ToolEvent::info(format!(
@@ -416,16 +526,18 @@ async fn handle_session_negotiation(
     ).await;
 
     let resp = SessionResponse {
-        signing:    agreed_sign.to_string(),
-        size:       agreed_size,
-        reverse:    req.reverse,
+        signing: agreed_sign.to_string(),
+        size: agreed_size,
+        reverse: req.reverse,
         session_id: flow_id.clone(),
     };
     let resp_json = serde_json::to_vec(&resp)?;
     let freshness = (freshness_ms > 0).then(|| Duration::from_millis(freshness_ms));
 
     let mut builder = DataBuilder::new((*interest.name).clone(), &resp_json);
-    if let Some(f) = freshness { builder = builder.freshness(f); }
+    if let Some(f) = freshness {
+        builder = builder.freshness(f);
+    }
     client.send(builder.build()).await?;
 
     // Reverse mode: spawn a consumer task that fetches from the client.
@@ -438,13 +550,27 @@ async fn handle_session_negotiation(
         let tx2 = tx.clone();
 
         tokio::spawn(async move {
-            let _ = tx2.send(ToolEvent::info(format!(
-                "  reverse session {flow_id}: fetching from {callback_prefix} for {duration}s"
-            ))).await;
+            let _ = tx2
+                .send(ToolEvent::info(format!(
+                    "  reverse session {flow_id}: fetching from {callback_prefix} for {duration}s"
+                )))
+                .await;
             if let Err(e) = run_reverse_consumer(
-                &conn, &callback_prefix, &server_prefix, &flow_id, duration, size, tx2.clone(),
-            ).await {
-                let _ = tx2.send(ToolEvent::warn(format!("  reverse session {flow_id}: error: {e}"))).await;
+                &conn,
+                &callback_prefix,
+                &server_prefix,
+                &flow_id,
+                duration,
+                size,
+                tx2.clone(),
+            )
+            .await
+            {
+                let _ = tx2
+                    .send(ToolEvent::warn(format!(
+                        "  reverse session {flow_id}: error: {e}"
+                    )))
+                    .await;
             }
         });
     }
@@ -480,34 +606,57 @@ async fn run_reverse_consumer(
             let mut idx = 0u64;
             loop {
                 ticker.tick().await;
-                if tx2.is_closed() { break; }
+                if tx2.is_closed() {
+                    break;
+                }
                 idx += 1;
                 let (bytes, pkts, rtt_sum, rtt_count) = c2.drain();
                 let bps = throughput_bps(bytes, interval_dur);
-                let rtt_avg_us = if rtt_count > 0 { rtt_sum / rtt_count } else { 0 };
-                let rtt_str = if rtt_count > 0 { format!("rtt={:.0}us", rtt_sum as f64 / rtt_count as f64) } else { "rtt=n/a".into() };
-                let _ = tx2.send(
-                    ToolEvent::info(format!("  [reverse {idx:>4}s]  {:>14}  {pkts:>8} pkt/s  {rtt_str}", format_throughput(bytes, interval_dur)))
-                        .with_data(ToolData::IperfInterval { bytes, throughput_bps: bps, rtt_avg_us })
-                ).await;
+                let rtt_avg_us = if rtt_count > 0 {
+                    rtt_sum / rtt_count
+                } else {
+                    0
+                };
+                let rtt_str = if rtt_count > 0 {
+                    format!("rtt={:.0}us", rtt_sum as f64 / rtt_count as f64)
+                } else {
+                    "rtt=n/a".into()
+                };
+                let _ = tx2
+                    .send(
+                        ToolEvent::info(format!(
+                            "  [reverse {idx:>4}s]  {:>14}  {pkts:>8} pkt/s  {rtt_str}",
+                            format_throughput(bytes, interval_dur)
+                        ))
+                        .with_data(ToolData::IperfInterval {
+                            bytes,
+                            throughput_bps: bps,
+                            rtt_avg_us,
+                        }),
+                    )
+                    .await;
                 let _ = &flow_id2; // suppress unused warning
             }
         })
     };
 
     let mut timestamps: HashMap<u64, (Instant, u32)> = HashMap::new();
-    let mut next_seq:    u64 = 0;
+    let mut next_seq: u64 = 0;
     let mut total_bytes: u64 = 0;
-    let mut received:    u64 = 0;
+    let mut received: u64 = 0;
     let mut in_flight: usize = 0;
-    let mut rtts:   Vec<u64> = Vec::new();
-    let mut srtt_us: f64     = 50_000.0;
-    let mut past_deadline    = false;
+    let mut rtts: Vec<u64> = Vec::new();
+    let mut srtt_us: f64 = 50_000.0;
+    let mut past_deadline = false;
     let check_interval = Duration::from_millis(100);
     const MAX_RETRIES: u32 = 3;
 
     let sent = loop {
-        let timeout = if past_deadline { Duration::from_millis(500) } else { check_interval };
+        let timeout = if past_deadline {
+            Duration::from_millis(500)
+        } else {
+            check_interval
+        };
         match tokio::time::timeout(timeout, client.recv()).await {
             Ok(Some(data_bytes)) => {
                 let data_len = data_bytes.len() as u64;
@@ -531,34 +680,57 @@ async fn run_reverse_consumer(
                         let allowed = cc.window().floor() as usize;
                         while in_flight < allowed {
                             let name = callback_prefix.clone().append(format!("{next_seq}"));
-                            client.send(InterestBuilder::new(name).lifetime(lifetime).build()).await?;
+                            client
+                                .send(InterestBuilder::new(name).lifetime(lifetime).build())
+                                .await?;
                             timestamps.insert(next_seq, (Instant::now(), 0));
-                            next_seq += 1; in_flight += 1;
+                            next_seq += 1;
+                            in_flight += 1;
                         }
-                    } else { past_deadline = true; }
+                    } else {
+                        past_deadline = true;
+                    }
                 }
-                if past_deadline && timestamps.is_empty() { break next_seq; }
+                if past_deadline && timestamps.is_empty() {
+                    break next_seq;
+                }
             }
             Ok(None) => break next_seq,
-            Err(_)   => {
-                if Instant::now() >= deadline { past_deadline = true; }
-                if past_deadline && timestamps.is_empty() { break next_seq; }
-                let rto = Duration::from_micros((srtt_us * 3.0) as u64).max(Duration::from_millis(200));
-                let now = Instant::now();
-                let stale: Vec<(u64, u32)> = timestamps.iter()
-                    .filter(|(_, (t0, _))| now.duration_since(*t0) >= rto)
-                    .map(|(&sq, &(_, r))| (sq, r)).collect();
-                let mut gave_up = vec![];
-                let mut retx    = vec![];
-                for (seq, retries) in stale {
-                    if retries >= MAX_RETRIES { gave_up.push(seq); } else { retx.push((seq, retries)); }
+            Err(_) => {
+                if Instant::now() >= deadline {
+                    past_deadline = true;
                 }
-                for seq in gave_up { timestamps.remove(&seq); in_flight = in_flight.saturating_sub(1); }
+                if past_deadline && timestamps.is_empty() {
+                    break next_seq;
+                }
+                let rto =
+                    Duration::from_micros((srtt_us * 3.0) as u64).max(Duration::from_millis(200));
+                let now = Instant::now();
+                let stale: Vec<(u64, u32)> = timestamps
+                    .iter()
+                    .filter(|(_, (t0, _))| now.duration_since(*t0) >= rto)
+                    .map(|(&sq, &(_, r))| (sq, r))
+                    .collect();
+                let mut gave_up = vec![];
+                let mut retx = vec![];
+                for (seq, retries) in stale {
+                    if retries >= MAX_RETRIES {
+                        gave_up.push(seq);
+                    } else {
+                        retx.push((seq, retries));
+                    }
+                }
+                for seq in gave_up {
+                    timestamps.remove(&seq);
+                    in_flight = in_flight.saturating_sub(1);
+                }
                 if !retx.is_empty() {
                     cc.on_timeout();
                     for (seq, retries) in retx {
                         let name = callback_prefix.clone().append(format!("{seq}"));
-                        client.send(InterestBuilder::new(name).lifetime(lifetime).build()).await?;
+                        client
+                            .send(InterestBuilder::new(name).lifetime(lifetime).build())
+                            .await?;
                         timestamps.insert(seq, (Instant::now(), retries + 1));
                     }
                 }
@@ -568,9 +740,12 @@ async fn run_reverse_consumer(
             let allowed = cc.window().floor() as usize;
             while in_flight < allowed {
                 let name = callback_prefix.clone().append(format!("{next_seq}"));
-                client.send(InterestBuilder::new(name).lifetime(lifetime).build()).await?;
+                client
+                    .send(InterestBuilder::new(name).lifetime(lifetime).build())
+                    .await?;
                 timestamps.insert(next_seq, (Instant::now(), 0));
-                next_seq += 1; in_flight += 1;
+                next_seq += 1;
+                in_flight += 1;
             }
         }
     };
@@ -578,7 +753,7 @@ async fn run_reverse_consumer(
     interval_task.abort();
 
     let elapsed = start.elapsed();
-    let lost    = sent.saturating_sub(received);
+    let lost = sent.saturating_sub(received);
 
     // Publish result so the client can retrieve it.
     let result_name = server_prefix.clone().append(&flow_id).append("result");
@@ -598,10 +773,14 @@ async fn run_reverse_consumer(
         .build();
     let _ = client.send(result_wire).await;
 
-    let _ = tx.send(ToolEvent::summary(format!(
-        "  reverse session {flow_id}: done — {} in {:.2}s = {}",
-        format_bytes(total_bytes), elapsed.as_secs_f64(), format_throughput(total_bytes, elapsed)
-    ))).await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  reverse session {flow_id}: done — {} in {:.2}s = {}",
+            format_bytes(total_bytes),
+            elapsed.as_secs_f64(),
+            format_throughput(total_bytes, elapsed)
+        )))
+        .await;
 
     Ok(())
 }
@@ -610,43 +789,63 @@ async fn run_reverse_consumer(
 
 pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) -> Result<()> {
     let prefix: Name = params.prefix.parse()?;
-    let client       = connect_client(&params.conn).await?;
+    let client = connect_client(&params.conn).await?;
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
-    let lifetime  = Duration::from_millis(params.lifetime_ms);
+    let lifetime = Duration::from_millis(params.lifetime_ms);
 
     let mut cc = match params.cc.as_str() {
-        "aimd"  => CongestionController::aimd(),
+        "aimd" => CongestionController::aimd(),
         "cubic" => CongestionController::cubic(),
         "fixed" => CongestionController::fixed(params.initial_window as f64),
-        other   => anyhow::bail!("unknown cc: {other}"),
+        other => anyhow::bail!("unknown cc: {other}"),
     };
-    cc = cc.with_window(params.initial_window as f64).with_ssthresh(params.initial_window as f64);
-    if let Some(v) = params.min_window  { cc = cc.with_min_window(v); }
-    if let Some(v) = params.max_window  { cc = cc.with_max_window(v); }
-    if let Some(v) = params.ai          { cc = cc.with_additive_increase(v); }
-    if let Some(v) = params.md          { cc = cc.with_decrease_factor(v); }
-    if let Some(v) = params.cubic_c     { cc = cc.with_cubic_c(v); }
+    cc = cc
+        .with_window(params.initial_window as f64)
+        .with_ssthresh(params.initial_window as f64);
+    if let Some(v) = params.min_window {
+        cc = cc.with_min_window(v);
+    }
+    if let Some(v) = params.max_window {
+        cc = cc.with_max_window(v);
+    }
+    if let Some(v) = params.ai {
+        cc = cc.with_additive_increase(v);
+    }
+    if let Some(v) = params.md {
+        cc = cc.with_decrease_factor(v);
+    }
+    if let Some(v) = params.cubic_c {
+        cc = cc.with_cubic_c(v);
+    }
 
     let cc_name = match &cc {
-        CongestionController::Aimd  { .. } => "aimd",
+        CongestionController::Aimd { .. } => "aimd",
         CongestionController::Cubic { .. } => "cubic",
         CongestionController::Fixed { .. } => "fixed",
     };
 
     // Unique flow ID.
     let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
         .subsec_nanos();
-    let flow_id     = format!("{:016x}", ((std::process::id() as u64) << 32) | ts as u64);
+    let flow_id = format!("{:016x}", ((std::process::id() as u64) << 32) | ts as u64);
     let flow_prefix = prefix.clone().append(&flow_id);
 
     let callback_prefix: Option<Name> = if params.reverse {
-        let np = params.node_prefix.as_ref()
+        let np = params
+            .node_prefix
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("node_prefix required for reverse mode"))?;
-        Some(format!("{np}/iperf-reverse/{flow_id}").parse()
-            .map_err(|e| anyhow::anyhow!("{e}"))?)
-    } else { None };
+        Some(
+            format!("{np}/iperf-reverse/{flow_id}")
+                .parse()
+                .map_err(|e| anyhow::anyhow!("{e}"))?,
+        )
+    } else {
+        None
+    };
 
     // Reverse mode: connect and register the callback prefix BEFORE sending the
     // session negotiation.  The server spawns its consumer immediately after
@@ -655,36 +854,50 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
     let producer_client: Option<ForwarderClient> = if let Some(ref cb_prefix) = callback_prefix {
         let pc = connect_client(&params.conn).await?;
         pc.register_prefix(cb_prefix).await?;
-        let _ = tx.send(ToolEvent::info(format!(
-            "  registered callback prefix: {cb_prefix}"
-        ))).await;
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "  registered callback prefix: {cb_prefix}"
+            )))
+            .await;
         Some(pc)
-    } else { None };
+    } else {
+        None
+    };
 
     // Session negotiation.
     let session_name = flow_prefix.clone().append("session");
-    let session_req  = json!({
+    let session_req = json!({
         "duration": params.duration_secs, "signing": params.sign_mode, "size": 0,
         "reverse": params.reverse,
         "callback": callback_prefix.as_ref().map(|p| p.to_string()).unwrap_or_default(),
     });
-    client.send(
-        InterestBuilder::new(session_name)
-            .app_parameters(session_req.to_string().as_bytes())
-            .lifetime(lifetime).build()
-    ).await?;
+    client
+        .send(
+            InterestBuilder::new(session_name)
+                .app_parameters(session_req.to_string().as_bytes())
+                .lifetime(lifetime)
+                .build(),
+        )
+        .await?;
 
-    let _ = tx.send(ToolEvent::info(format!(
-        "ndn-iperf client: prefix={prefix}  transport={transport}  flow={flow_id}"
-    ))).await;
-    let _ = tx.send(ToolEvent::info(format!(
-        "  duration={}s  window={}  cc={cc_name}  lifetime={}ms",
-        params.duration_secs, params.initial_window, params.lifetime_ms
-    ))).await;
+    let _ = tx
+        .send(ToolEvent::info(format!(
+            "ndn-iperf client: prefix={prefix}  transport={transport}  flow={flow_id}"
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::info(format!(
+            "  duration={}s  window={}  cc={cc_name}  lifetime={}ms",
+            params.duration_secs, params.initial_window, params.lifetime_ms
+        )))
+        .await;
     if params.reverse {
-        let _ = tx.send(ToolEvent::info(format!(
-            "  mode=REVERSE (server fetches from {})", callback_prefix.as_ref().unwrap()
-        ))).await;
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "  mode=REVERSE (server fetches from {})",
+                callback_prefix.as_ref().unwrap()
+            )))
+            .await;
     }
 
     match tokio::time::timeout(lifetime + Duration::from_millis(500), client.recv()).await {
@@ -693,14 +906,22 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
                 && let Some(content) = data.content()
                 && let Ok(resp) = serde_json::from_slice::<serde_json::Value>(content)
             {
-                let _ = tx.send(ToolEvent::info(format!(
-                    "  negotiated: size={}B sign={} reverse={}",
-                    resp["size"], resp["signing"], resp["reverse"]
-                ))).await;
+                let _ = tx
+                    .send(ToolEvent::info(format!(
+                        "  negotiated: size={}B sign={} reverse={}",
+                        resp["size"], resp["signing"], resp["reverse"]
+                    )))
+                    .await;
             }
         }
         Ok(None) => anyhow::bail!("connection closed during negotiation"),
-        Err(_)   => { let _ = tx.send(ToolEvent::warn("  session negotiation timeout — server may not support it, proceeding")).await; }
+        Err(_) => {
+            let _ = tx
+                .send(ToolEvent::warn(
+                    "  session negotiation timeout — server may not support it, proceeding",
+                ))
+                .await;
+        }
     }
 
     if params.reverse
@@ -708,15 +929,21 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
     {
         let pc = producer_client.expect("producer_client must be set when reverse=true");
         return run_reverse_producer(
-            pc, &cb_prefix, &prefix, &flow_id,
-            params.duration_secs, &params.sign_mode, tx,
-        ).await;
+            pc,
+            &cb_prefix,
+            &prefix,
+            &flow_id,
+            params.duration_secs,
+            &params.sign_mode,
+            tx,
+        )
+        .await;
     }
 
     let _ = tx.send(ToolEvent::info("  testing...")).await;
 
     let counters = Arc::new(IntervalCounters::new());
-    let start    = Instant::now();
+    let start = Instant::now();
     let deadline = start + Duration::from_secs(params.duration_secs);
 
     let interval_task = if !params.quiet {
@@ -728,39 +955,62 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
             ticker.tick().await;
             loop {
                 ticker.tick().await;
-                if tx2.is_closed() { break; }
+                if tx2.is_closed() {
+                    break;
+                }
                 let (bytes, pkts, rtt_sum, rtt_count) = c2.drain();
                 let elapsed = start.elapsed();
                 let bps = throughput_bps(bytes, interval_dur);
-                let rtt_avg_us = if rtt_count > 0 { rtt_sum / rtt_count } else { 0 };
-                let rtt_str = if rtt_count > 0 { format!("rtt={:.0}us", rtt_sum as f64 / rtt_count as f64) } else { "rtt=n/a".into() };
-                let _ = tx2.send(
-                    ToolEvent::info(format!("[{:>6.1}s]  {:>14}  {pkts:>8} pkt/s  {rtt_str}", elapsed.as_secs_f64(), format_throughput(bytes, interval_dur)))
-                        .with_data(ToolData::IperfInterval { bytes, throughput_bps: bps, rtt_avg_us })
-                ).await;
+                let rtt_avg_us = if rtt_count > 0 {
+                    rtt_sum / rtt_count
+                } else {
+                    0
+                };
+                let rtt_str = if rtt_count > 0 {
+                    format!("rtt={:.0}us", rtt_sum as f64 / rtt_count as f64)
+                } else {
+                    "rtt=n/a".into()
+                };
+                let _ = tx2
+                    .send(
+                        ToolEvent::info(format!(
+                            "[{:>6.1}s]  {:>14}  {pkts:>8} pkt/s  {rtt_str}",
+                            elapsed.as_secs_f64(),
+                            format_throughput(bytes, interval_dur)
+                        ))
+                        .with_data(ToolData::IperfInterval {
+                            bytes,
+                            throughput_bps: bps,
+                            rtt_avg_us,
+                        }),
+                    )
+                    .await;
             }
         }))
     } else {
         None
     };
 
-    let mut timestamps:   HashMap<u64, (Instant, u32)> = HashMap::new();
-    let mut next_seq:     u64   = 0;
-    let mut total_bytes:  u64   = 0;
-    let mut received:     u64   = 0;
-    let mut retx_count:   u64   = 0;
-    let mut timed_out:    u64   = 0;
-    let mut rtts:      Vec<u64> = Vec::new();
-    let mut in_flight: usize    = 0;
-    let mut srtt_us:   f64      = 50_000.0;
+    let mut timestamps: HashMap<u64, (Instant, u32)> = HashMap::new();
+    let mut next_seq: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    let mut received: u64 = 0;
+    let mut retx_count: u64 = 0;
+    let mut timed_out: u64 = 0;
+    let mut rtts: Vec<u64> = Vec::new();
+    let mut in_flight: usize = 0;
+    let mut srtt_us: f64 = 50_000.0;
     const MAX_RETRIES: u32 = 3;
 
     let window = params.initial_window.min(cc.window().floor() as usize);
     for _ in 0..window {
         let name = flow_prefix.clone().append(format!("{next_seq}"));
-        client.send(InterestBuilder::new(name).lifetime(lifetime).build()).await?;
+        client
+            .send(InterestBuilder::new(name).lifetime(lifetime).build())
+            .await?;
         timestamps.insert(next_seq, (Instant::now(), 0));
-        next_seq += 1; in_flight += 1;
+        next_seq += 1;
+        in_flight += 1;
     }
 
     let drain_timeout = Duration::from_millis(500);
@@ -768,12 +1018,16 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
     let check_interval = Duration::from_millis(100);
 
     let sent = loop {
-        let timeout = if past_deadline { drain_timeout } else { check_interval };
+        let timeout = if past_deadline {
+            drain_timeout
+        } else {
+            check_interval
+        };
         match tokio::time::timeout(timeout, client.recv()).await {
             Ok(Some(data_bytes)) => {
                 let data_len = data_bytes.len() as u64;
                 total_bytes += data_len;
-                received    += 1;
+                received += 1;
                 let rtt_us = extract_seq(&data_bytes).and_then(|seq| {
                     timestamps.remove(&seq).map(|(t0, _)| {
                         in_flight = in_flight.saturating_sub(1);
@@ -792,13 +1046,20 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
                         let allowed = cc.window().floor() as usize;
                         while in_flight < allowed {
                             let name = flow_prefix.clone().append(format!("{next_seq}"));
-                            client.send(InterestBuilder::new(name).lifetime(lifetime).build()).await?;
+                            client
+                                .send(InterestBuilder::new(name).lifetime(lifetime).build())
+                                .await?;
                             timestamps.insert(next_seq, (Instant::now(), 0));
-                            next_seq += 1; in_flight += 1;
+                            next_seq += 1;
+                            in_flight += 1;
                         }
-                    } else { past_deadline = true; }
+                    } else {
+                        past_deadline = true;
+                    }
                 }
-                if past_deadline && timestamps.is_empty() { break next_seq; }
+                if past_deadline && timestamps.is_empty() {
+                    break next_seq;
+                }
             }
             Ok(None) => {
                 let _ = tx.send(ToolEvent::warn("  connection closed")).await;
@@ -806,21 +1067,38 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
             }
             Err(_) => {
                 if past_deadline {
-                    if timestamps.is_empty() { break next_seq; }
+                    if timestamps.is_empty() {
+                        break next_seq;
+                    }
                     let now = Instant::now();
                     timestamps.retain(|_, (t0, _)| now.duration_since(*t0) < drain_timeout);
-                    if timestamps.is_empty() { break next_seq; }
+                    if timestamps.is_empty() {
+                        break next_seq;
+                    }
                     continue;
                 }
-                if Instant::now() >= deadline { past_deadline = true; continue; }
-                let rto = Duration::from_micros((srtt_us * 3.0) as u64).max(Duration::from_millis(200));
+                if Instant::now() >= deadline {
+                    past_deadline = true;
+                    continue;
+                }
+                let rto =
+                    Duration::from_micros((srtt_us * 3.0) as u64).max(Duration::from_millis(200));
                 let now = Instant::now();
                 let max_retx = (cc.window() / 2.0).max(2.0) as usize;
-                let mut stale: Vec<(u64, u32)> = timestamps.iter()
+                let mut stale: Vec<(u64, u32)> = timestamps
+                    .iter()
                     .filter(|(_, (t0, _))| now.duration_since(*t0) >= rto)
-                    .map(|(&sq, &(_, r))| (sq, r)).collect();
+                    .map(|(&sq, &(_, r))| (sq, r))
+                    .collect();
                 let mut gave_up = Vec::new();
-                stale.retain(|&(seq, r)| { if r >= MAX_RETRIES { gave_up.push(seq); false } else { true } });
+                stale.retain(|&(seq, r)| {
+                    if r >= MAX_RETRIES {
+                        gave_up.push(seq);
+                        false
+                    } else {
+                        true
+                    }
+                });
                 for seq in gave_up {
                     timestamps.remove(&seq);
                     in_flight = in_flight.saturating_sub(1);
@@ -831,7 +1109,9 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
                     cc.on_timeout();
                     for (seq, retries) in stale {
                         let name = flow_prefix.clone().append(format!("{seq}"));
-                        client.send(InterestBuilder::new(name).lifetime(lifetime).build()).await?;
+                        client
+                            .send(InterestBuilder::new(name).lifetime(lifetime).build())
+                            .await?;
                         timestamps.insert(seq, (Instant::now(), retries + 1));
                         retx_count += 1;
                     }
@@ -842,48 +1122,109 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
 
     // Drop the interval reporter so its tx2 clone is released, allowing the
     // bridge channel to close and signal completion to the dashboard.
-    if let Some(h) = interval_task { h.abort(); }
+    if let Some(h) = interval_task {
+        h.abort();
+    }
 
-    let actual_elapsed   = start.elapsed();
+    let actual_elapsed = start.elapsed();
     let in_flight_at_end = timestamps.len() as u64;
-    let effective_sent   = sent.saturating_sub(in_flight_at_end);
-    let lost             = effective_sent.saturating_sub(received);
-    let loss_pct         = if effective_sent > 0 { lost as f64 / effective_sent as f64 * 100.0 } else { 0.0 };
-    let bps              = throughput_bps(total_bytes, actual_elapsed);
+    let effective_sent = sent.saturating_sub(in_flight_at_end);
+    let lost = effective_sent.saturating_sub(received);
+    let loss_pct = if effective_sent > 0 {
+        lost as f64 / effective_sent as f64 * 100.0
+    } else {
+        0.0
+    };
+    let bps = throughput_bps(total_bytes, actual_elapsed);
 
     let _ = tx.send(ToolEvent::summary(String::new())).await;
-    let _ = tx.send(ToolEvent::summary("--- ndn-iperf results ---")).await;
-    let _ = tx.send(ToolEvent::summary("  mode:        forward (client→server)")).await;
-    let _ = tx.send(ToolEvent::summary(format!("  duration:    {:.2}s", actual_elapsed.as_secs_f64()))).await;
-    let _ = tx.send(ToolEvent::summary(format!("  transferred: {} ({total_bytes} bytes)", format_bytes(total_bytes)))).await;
-    let _ = tx.send(ToolEvent::summary(format!("  throughput:  {}", format_throughput(total_bytes, actual_elapsed)))).await;
-    let _ = tx.send(ToolEvent::summary(format!("  packets:     {sent} sent, {received} received, {lost} lost ({loss_pct:.1}% loss)"))).await;
-    if in_flight_at_end > 0 { let _ = tx.send(ToolEvent::summary(format!("  in-flight:   {in_flight_at_end} (excluded from loss)"))).await; }
-    if retx_count > 0       { let _ = tx.send(ToolEvent::summary(format!("  retransmits: {retx_count}"))).await; }
-    if timed_out > 0        { let _ = tx.send(ToolEvent::summary(format!("  timed out:   {timed_out} (gave up after {MAX_RETRIES} retries)"))).await; }
+    let _ = tx
+        .send(ToolEvent::summary("--- ndn-iperf results ---"))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary("  mode:        forward (client→server)"))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  duration:    {:.2}s",
+            actual_elapsed.as_secs_f64()
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  transferred: {} ({total_bytes} bytes)",
+            format_bytes(total_bytes)
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  throughput:  {}",
+            format_throughput(total_bytes, actual_elapsed)
+        )))
+        .await;
+    let _ = tx
+        .send(ToolEvent::summary(format!(
+            "  packets:     {sent} sent, {received} received, {lost} lost ({loss_pct:.1}% loss)"
+        )))
+        .await;
+    if in_flight_at_end > 0 {
+        let _ = tx
+            .send(ToolEvent::summary(format!(
+                "  in-flight:   {in_flight_at_end} (excluded from loss)"
+            )))
+            .await;
+    }
+    if retx_count > 0 {
+        let _ = tx
+            .send(ToolEvent::summary(format!("  retransmits: {retx_count}")))
+            .await;
+    }
+    if timed_out > 0 {
+        let _ = tx
+            .send(ToolEvent::summary(format!(
+                "  timed out:   {timed_out} (gave up after {MAX_RETRIES} retries)"
+            )))
+            .await;
+    }
 
     let (rtt_avg_us, rtt_p99_us) = if !rtts.is_empty() {
         rtts.sort_unstable();
         let n = rtts.len();
         let avg = rtts.iter().sum::<u64>() / n as u64;
         let p99 = rtts[n * 99 / 100];
-        let _ = tx.send(ToolEvent::summary(format!("  RTT:         avg={avg}us min={}us max={}us", rtts[0], rtts[n-1]))).await;
-        let _ = tx.send(ToolEvent::summary(format!("               p50={}us p95={}us p99={p99}us", rtts[n/2], rtts[n*95/100]))).await;
+        let _ = tx
+            .send(ToolEvent::summary(format!(
+                "  RTT:         avg={avg}us min={}us max={}us",
+                rtts[0],
+                rtts[n - 1]
+            )))
+            .await;
+        let _ = tx
+            .send(ToolEvent::summary(format!(
+                "               p50={}us p95={}us p99={p99}us",
+                rtts[n / 2],
+                rtts[n * 95 / 100]
+            )))
+            .await;
         (avg, p99)
-    } else { (0, 0) };
+    } else {
+        (0, 0)
+    };
 
-    let _ = tx.send(
-        ToolEvent::summary(String::new()).with_data(ToolData::IperfSummary {
-            duration_secs:    actual_elapsed.as_secs_f64(),
-            transferred_bytes: total_bytes,
-            throughput_bps:   bps,
-            sent:             effective_sent,
-            received,
-            loss_pct,
-            rtt_avg_us,
-            rtt_p99_us,
-        })
-    ).await;
+    let _ = tx
+        .send(
+            ToolEvent::summary(String::new()).with_data(ToolData::IperfSummary {
+                duration_secs: actual_elapsed.as_secs_f64(),
+                transferred_bytes: total_bytes,
+                throughput_bps: bps,
+                sent: effective_sent,
+                received,
+                loss_pct,
+                rtt_avg_us,
+                rtt_p99_us,
+            }),
+        )
+        .await;
 
     Ok(())
 }
@@ -908,14 +1249,19 @@ async fn run_reverse_producer(
     ))).await;
 
     // Build a per-session ephemeral Ed25519 key for the client producer side.
-    let ed25519_signer = Arc::new(Ed25519Signer::from_seed(&[0x52u8; 32], "/iperf-client-key".parse().unwrap()));
+    let ed25519_signer = Arc::new(Ed25519Signer::from_seed(
+        &[0x52u8; 32],
+        "/iperf-client-key".parse().unwrap(),
+    ));
     let sign_mode_val = make_sign_mode(sign_mode, flow_id, &ed25519_signer);
 
-    let payload  = vec![0xAAu8; 8192];
+    let payload = vec![0xAAu8; 8192];
     let deadline = Instant::now() + Duration::from_secs(duration_secs);
 
     loop {
-        if Instant::now() >= deadline { break; }
+        if Instant::now() >= deadline {
+            break;
+        }
         match tokio::time::timeout(Duration::from_millis(100), client.recv()).await {
             Ok(Some(raw)) => {
                 if let Ok(interest) = Interest::decode(raw) {
@@ -925,16 +1271,24 @@ async fn run_reverse_producer(
                 }
             }
             Ok(None) => break,
-            Err(_)   => continue,
+            Err(_) => continue,
         }
     }
 
-    let _ = tx.send(ToolEvent::info("  reverse mode: test complete, fetching result...")).await;
+    let _ = tx
+        .send(ToolEvent::info(
+            "  reverse mode: test complete, fetching result...",
+        ))
+        .await;
 
     let result_name = server_prefix.clone().append(flow_id).append("result");
-    let _ = client.send(
-        InterestBuilder::new(result_name).lifetime(Duration::from_secs(10)).build()
-    ).await;
+    let _ = client
+        .send(
+            InterestBuilder::new(result_name)
+                .lifetime(Duration::from_secs(10))
+                .build(),
+        )
+        .await;
 
     match tokio::time::timeout(Duration::from_secs(12), client.recv()).await {
         Ok(Some(raw)) => {
@@ -942,37 +1296,63 @@ async fn run_reverse_producer(
                 && let Some(content) = data.content()
                 && let Ok(v) = serde_json::from_slice::<serde_json::Value>(content)
             {
-                let dur   = v["duration_s"].as_f64().unwrap_or(0.0);
-                let xfer  = v["transferred_bytes"].as_u64().unwrap_or(0);
-                let sent  = v["sent"].as_u64().unwrap_or(0);
-                let recv  = v["received"].as_u64().unwrap_or(0);
-                let lost  = v["lost"].as_u64().unwrap_or(0);
-                let tp    = v["throughput"].as_str().unwrap_or("n/a");
-                let bps   = xfer as f64 * 8.0 / dur.max(0.001);
+                let dur = v["duration_s"].as_f64().unwrap_or(0.0);
+                let xfer = v["transferred_bytes"].as_u64().unwrap_or(0);
+                let sent = v["sent"].as_u64().unwrap_or(0);
+                let recv = v["received"].as_u64().unwrap_or(0);
+                let lost = v["lost"].as_u64().unwrap_or(0);
+                let tp = v["throughput"].as_str().unwrap_or("n/a");
+                let bps = xfer as f64 * 8.0 / dur.max(0.001);
                 let _ = tx.send(ToolEvent::summary(String::new())).await;
-                let _ = tx.send(ToolEvent::summary("--- ndn-iperf reverse results (server→client) ---")).await;
-                let _ = tx.send(ToolEvent::summary(format!("  duration:    {dur:.2}s"))).await;
-                let _ = tx.send(ToolEvent::summary(format!("  transferred: {}", format_bytes(xfer)))).await;
-                let _ = tx.send(ToolEvent::summary(format!("  throughput:  {tp}"))).await;
-                let _ = tx.send(ToolEvent::summary(format!("  packets:     {sent} sent, {recv} received, {lost} lost"))).await;
-                let loss_pct = if sent > 0 { lost as f64 / sent as f64 * 100.0 } else { 0.0 };
-                let _ = tx.send(
-                    ToolEvent::summary(String::new()).with_data(ToolData::IperfSummary {
-                        duration_secs: dur,
-                        transferred_bytes: xfer,
-                        throughput_bps: bps,
-                        sent,
-                        received: recv,
-                        loss_pct,
-                        rtt_avg_us: 0,
-                        rtt_p99_us: 0,
-                    })
-                ).await;
+                let _ = tx
+                    .send(ToolEvent::summary(
+                        "--- ndn-iperf reverse results (server→client) ---",
+                    ))
+                    .await;
+                let _ = tx
+                    .send(ToolEvent::summary(format!("  duration:    {dur:.2}s")))
+                    .await;
+                let _ = tx
+                    .send(ToolEvent::summary(format!(
+                        "  transferred: {}",
+                        format_bytes(xfer)
+                    )))
+                    .await;
+                let _ = tx
+                    .send(ToolEvent::summary(format!("  throughput:  {tp}")))
+                    .await;
+                let _ = tx
+                    .send(ToolEvent::summary(format!(
+                        "  packets:     {sent} sent, {recv} received, {lost} lost"
+                    )))
+                    .await;
+                let loss_pct = if sent > 0 {
+                    lost as f64 / sent as f64 * 100.0
+                } else {
+                    0.0
+                };
+                let _ = tx
+                    .send(
+                        ToolEvent::summary(String::new()).with_data(ToolData::IperfSummary {
+                            duration_secs: dur,
+                            transferred_bytes: xfer,
+                            throughput_bps: bps,
+                            sent,
+                            received: recv,
+                            loss_pct,
+                            rtt_avg_us: 0,
+                            rtt_p99_us: 0,
+                        }),
+                    )
+                    .await;
             }
         }
-        _ => { let _ = tx.send(ToolEvent::warn("  could not retrieve server result")).await; }
+        _ => {
+            let _ = tx
+                .send(ToolEvent::warn("  could not retrieve server result"))
+                .await;
+        }
     }
 
     Ok(())
 }
-

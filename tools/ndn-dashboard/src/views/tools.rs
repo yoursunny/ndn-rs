@@ -5,12 +5,10 @@ use std::collections::HashSet;
 use dioxus::prelude::*;
 use ndn_tools_core::common::EventLevel;
 
-use crate::app::{AppCtx, ACTIVE_VIEW};
+use crate::app::{ACTIVE_VIEW, AppCtx};
 use crate::tool_runner::{
-    ToolCmd, ToolParams, ToolTab,
-    TOOL_INSTANCES, TOOL_RESULTS,
-    TOOLS_ACTIVE_TAB, PING_IDS, IPERF_IDS, PEEK_IDS, PUT_IDS,
-    next_tool_instance_id, fmt_bps, fmt_bytes_short,
+    IPERF_IDS, PEEK_IDS, PING_IDS, PUT_IDS, TOOL_INSTANCES, TOOL_RESULTS, TOOLS_ACTIVE_TAB,
+    ToolCmd, ToolParams, ToolTab, fmt_bps, fmt_bytes_short, next_tool_instance_id,
 };
 
 // ─── Root component ──────────────────────────────────────────────────────────
@@ -89,17 +87,19 @@ fn PingTab() -> Element {
 
 #[component]
 fn PingCard(panel_id: u32) -> Element {
-    let ctx          = use_context::<AppCtx>();
-    let mut prefix   = use_signal(|| "/ping".to_string());
-    let mut count    = use_signal(|| "20".to_string());
+    let ctx = use_context::<AppCtx>();
+    let mut prefix = use_signal(|| "/ping".to_string());
+    let mut count = use_signal(|| "20".to_string());
     let mut interval = use_signal(|| "1000".to_string());
-    let lifetime     = use_signal(|| "4000".to_string());
+    let lifetime = use_signal(|| "4000".to_string());
 
     let (running, current_rtt) = {
         let insts = TOOL_INSTANCES.read();
         let s = insts.get(&panel_id);
-        (s.map(|x| x.running).unwrap_or(false),
-         s.and_then(|x| x.current_rtt_us))
+        (
+            s.map(|x| x.running).unwrap_or(false),
+            s.and_then(|x| x.current_rtt_us),
+        )
     };
 
     rsx! {
@@ -222,12 +222,12 @@ fn IperfTab() -> Element {
 
 #[component]
 fn IperfCard(panel_id: u32) -> Element {
-    let ctx           = use_context::<AppCtx>();
-    let mut prefix    = use_signal(|| "/iperf".to_string());
-    let mut duration  = use_signal(|| "10".to_string());
-    let mut window    = use_signal(|| "64".to_string());
-    let mut cc        = use_signal(|| "aimd".to_string());
-    let mut reverse   = use_signal(|| false);
+    let ctx = use_context::<AppCtx>();
+    let mut prefix = use_signal(|| "/iperf".to_string());
+    let mut duration = use_signal(|| "10".to_string());
+    let mut window = use_signal(|| "64".to_string());
+    let mut cc = use_signal(|| "aimd".to_string());
+    let mut reverse = use_signal(|| false);
     let mut sign_mode = use_signal(|| "none".to_string());
     let mut face_type = use_signal(|| "shm".to_string());
 
@@ -491,12 +491,16 @@ fn PeekTab() -> Element {
 
 #[component]
 fn PeekCard(panel_id: u32) -> Element {
-    let ctx          = use_context::<AppCtx>();
-    let mut name     = use_signal(String::new);
+    let ctx = use_context::<AppCtx>();
+    let mut name = use_signal(String::new);
     let mut out_file = use_signal(String::new);
     let mut pipeline = use_signal(String::new);
 
-    let running = TOOL_INSTANCES.read().get(&panel_id).map(|s| s.running).unwrap_or(false);
+    let running = TOOL_INSTANCES
+        .read()
+        .get(&panel_id)
+        .map(|s| s.running)
+        .unwrap_or(false);
 
     rsx! {
         div { style: "background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-width:260px;flex:1;max-width:380px;",
@@ -606,15 +610,19 @@ fn PutTab() -> Element {
 
 #[component]
 fn PutCard(panel_id: u32) -> Element {
-    let ctx            = use_context::<AppCtx>();
-    let mut name       = use_signal(String::new);
-    let mut text_data  = use_signal(String::new);
-    let mut file_path  = use_signal(String::new);
-    let mut use_file   = use_signal(|| false);
-    let mut sign       = use_signal(|| false);
-    let mut freshness  = use_signal(|| "0".to_string());
+    let ctx = use_context::<AppCtx>();
+    let mut name = use_signal(String::new);
+    let mut text_data = use_signal(String::new);
+    let mut file_path = use_signal(String::new);
+    let mut use_file = use_signal(|| false);
+    let mut sign = use_signal(|| false);
+    let mut freshness = use_signal(|| "0".to_string());
 
-    let running = TOOL_INSTANCES.read().get(&panel_id).map(|s| s.running).unwrap_or(false);
+    let running = TOOL_INSTANCES
+        .read()
+        .get(&panel_id)
+        .map(|s| s.running)
+        .unwrap_or(false);
 
     rsx! {
         div { style: "background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-width:280px;flex:1;max-width:420px;",
@@ -758,13 +766,14 @@ fn PutCard(panel_id: u32) -> Element {
 
 #[component]
 fn ResultsTable() -> Element {
-    let mut filter       = use_signal(|| "all".to_string());
-    let mut max_show     = use_signal(|| crate::settings::DASH_SETTINGS.peek().results_max_entries);
-    let mut select_mode  = use_signal(|| false);
-    let mut selected:     Signal<HashSet<u64>> = use_signal(HashSet::new);
+    let mut filter = use_signal(|| "all".to_string());
+    let mut max_show = use_signal(|| crate::settings::DASH_SETTINGS.peek().results_max_entries);
+    let mut select_mode = use_signal(|| false);
+    let mut selected: Signal<HashSet<u64>> = use_signal(HashSet::new);
 
     let results = TOOL_RESULTS.read();
-    let filtered: Vec<_> = results.iter()
+    let filtered: Vec<_> = results
+        .iter()
         .filter(|r| *filter.read() == "all" || r.tool == *filter.read())
         .take(*max_show.read())
         .collect();
@@ -882,32 +891,34 @@ fn ResultsTable() -> Element {
 #[component]
 #[allow(clippy::too_many_arguments)]
 fn ResultRow(
-    entry_id:       u64,
-    tool:           &'static str,
-    ts:             String,
-    label:          String,
-    run_summary:    String,
+    entry_id: u64,
+    tool: &'static str,
+    ts: String,
+    label: String,
+    run_summary: String,
     throughput_bps: Option<f64>,
-    rtt_avg_us:     Option<u64>,
-    loss_pct:       Option<f64>,
-    duration_secs:  Option<f64>,
-    bytes:          Option<u64>,
-    intervals:      Vec<f64>,
-    ping_rtts:      Vec<u64>,
-    summary_lines:  Vec<String>,
-    select_mode:    Signal<bool>,
-    selected:       Signal<HashSet<u64>>,
+    rtt_avg_us: Option<u64>,
+    loss_pct: Option<f64>,
+    duration_secs: Option<f64>,
+    bytes: Option<u64>,
+    intervals: Vec<f64>,
+    ping_rtts: Vec<u64>,
+    summary_lines: Vec<String>,
+    select_mode: Signal<bool>,
+    selected: Signal<HashSet<u64>>,
 ) -> Element {
     let mut expanded = use_signal(|| false);
-    let is_selected  = selected.read().contains(&entry_id);
+    let is_selected = selected.read().contains(&entry_id);
 
     let tool_badge_style = match tool {
-        "ping"         => "background:var(--accent-bg);color:var(--accent);",
-        "iperf"        => "background:var(--green-bg);color:var(--green);",
-        "iperf-server" => "background:var(--green-dark);color:var(--green);border:1px solid var(--green);",
-        "peek"         => "background:var(--purple-bg);color:var(--purple);",
-        "put"          => "background:var(--yellow-bg);color:var(--orange);",
-        _              => "background:var(--border-subtle);color:var(--text-muted);",
+        "ping" => "background:var(--accent-bg);color:var(--accent);",
+        "iperf" => "background:var(--green-bg);color:var(--green);",
+        "iperf-server" => {
+            "background:var(--green-dark);color:var(--green);border:1px solid var(--green);"
+        }
+        "peek" => "background:var(--purple-bg);color:var(--purple);",
+        "put" => "background:var(--yellow-bg);color:var(--orange);",
+        _ => "background:var(--border-subtle);color:var(--text-muted);",
     };
 
     rsx! {
@@ -1115,11 +1126,16 @@ fn result_to_json(r: &crate::tool_runner::ToolResultEntry) -> serde_json::Value 
 fn result_to_csv_row(r: &crate::tool_runner::ToolResultEntry) -> String {
     format!(
         "{},{},{},{},{},{},{},{},{}\n",
-        r.id, r.tool, r.ts, r.label,
+        r.id,
+        r.tool,
+        r.ts,
+        r.label,
         r.throughput_bps.map(|v| v.to_string()).unwrap_or_default(),
         r.rtt_avg_us.map(|v| v.to_string()).unwrap_or_default(),
         r.loss_pct.map(|v| format!("{v:.2}")).unwrap_or_default(),
-        r.duration_secs.map(|v| format!("{v:.2}")).unwrap_or_default(),
+        r.duration_secs
+            .map(|v| format!("{v:.2}"))
+            .unwrap_or_default(),
         r.bytes.map(|v| v.to_string()).unwrap_or_default(),
     )
 }

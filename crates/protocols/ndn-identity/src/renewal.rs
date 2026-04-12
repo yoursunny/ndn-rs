@@ -35,7 +35,11 @@ pub fn start_renewal(
             Duration::from_secs(600)
         }
         RenewalPolicy::Every(d) => *d,
-        RenewalPolicy::Manual => return RenewalHandle { task: tokio::spawn(async {}) },
+        RenewalPolicy::Manual => {
+            return RenewalHandle {
+                task: tokio::spawn(async {}),
+            };
+        }
     };
 
     let percent = match policy {
@@ -73,7 +77,10 @@ fn check_renewal_needed(manager: &SecurityManager, key_name: &Name, threshold_pc
         .unwrap_or_default()
         .as_nanos() as u64;
 
-    if let Some(cert) = manager.cert_cache().get(&std::sync::Arc::new(key_name.clone())) {
+    if let Some(cert) = manager
+        .cert_cache()
+        .get(&std::sync::Arc::new(key_name.clone()))
+    {
         let total = cert.valid_until.saturating_sub(cert.valid_from);
         let remaining = cert.valid_until.saturating_sub(now_ns);
         if total == 0 {

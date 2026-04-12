@@ -312,11 +312,10 @@ fn remote_covers_local(
     local_snapshot: &[crate::svs::StateVectorEntry],
     remote_sv: &[(String, u64)],
 ) -> bool {
-    let remote_map: HashMap<&str, u64> =
-        remote_sv.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-    local_snapshot.iter().all(|e| {
-        remote_map.get(e.node.as_str()).copied().unwrap_or(0) >= e.seq
-    })
+    let remote_map: HashMap<&str, u64> = remote_sv.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+    local_snapshot
+        .iter()
+        .all(|e| remote_map.get(e.node.as_str()).copied().unwrap_or(0) >= e.seq)
 }
 
 // ─── TLV helpers ─────────────────────────────────────────────────────────────
@@ -432,17 +431,23 @@ fn read_varnumber(cursor: &[u8]) -> Option<(u64, &[u8])> {
     let (&first, rest) = cursor.split_first()?;
     match first {
         0xFF => {
-            if rest.len() < 8 { return None; }
+            if rest.len() < 8 {
+                return None;
+            }
             let v = u64::from_be_bytes(rest[..8].try_into().ok()?);
             Some((v, &rest[8..]))
         }
         0xFE => {
-            if rest.len() < 4 { return None; }
+            if rest.len() < 4 {
+                return None;
+            }
             let v = u32::from_be_bytes(rest[..4].try_into().ok()?) as u64;
             Some((v, &rest[4..]))
         }
         0xFD => {
-            if rest.len() < 2 { return None; }
+            if rest.len() < 2 {
+                return None;
+            }
             let v = u16::from_be_bytes(rest[..2].try_into().ok()?) as u64;
             Some((v, &rest[2..]))
         }
@@ -499,7 +504,9 @@ fn decode_state_vector(sv_tlv: &[u8]) -> Option<Vec<(String, u64)>> {
         }
         let mut name_bytes = BytesMut::new();
         write_tlv(&mut name_bytes, name_typ, name_val);
-        let Some(node_key) = decode_name_key(&name_bytes) else { continue };
+        let Some(node_key) = decode_name_key(&name_bytes) else {
+            continue;
+        };
 
         entry_body = after_name;
 
@@ -520,31 +527,41 @@ fn decode_state_vector(sv_tlv: &[u8]) -> Option<Vec<(String, u64)>> {
 /// and SeqNo sub-TLVs.
 fn decode_mapping_data(md_tlv: &[u8]) -> HashMap<String, Bytes> {
     let mut result = HashMap::new();
-    let Some((typ, mut body, _)) = read_tlv(md_tlv) else { return result };
+    let Some((typ, mut body, _)) = read_tlv(md_tlv) else {
+        return result;
+    };
     if typ != TLV_MAPPING_DATA {
         return result;
     }
 
     while !body.is_empty() {
-        let Some((entry_typ, mut entry_body, rest)) = read_tlv(body) else { break };
+        let Some((entry_typ, mut entry_body, rest)) = read_tlv(body) else {
+            break;
+        };
         body = rest;
         if entry_typ != TLV_MAPPING_ENTRY {
             continue;
         }
 
         // NodeID.
-        let Some((name_typ, name_val, after_name)) = read_tlv(entry_body) else { continue };
+        let Some((name_typ, name_val, after_name)) = read_tlv(entry_body) else {
+            continue;
+        };
         if name_typ != TLV_NDN_NAME {
             continue;
         }
         let mut name_bytes = BytesMut::new();
         write_tlv(&mut name_bytes, name_typ, name_val);
-        let Some(node_key) = decode_name_key(&name_bytes) else { continue };
+        let Some(node_key) = decode_name_key(&name_bytes) else {
+            continue;
+        };
 
         entry_body = after_name;
 
         // SeqNo — read and discard (we match by node_key, not seq).
-        let Some((seq_typ, _, after_seq)) = read_tlv(entry_body) else { continue };
+        let Some((seq_typ, _, after_seq)) = read_tlv(entry_body) else {
+            continue;
+        };
         if seq_typ != TLV_SV_SEQ_NO {
             continue;
         }
@@ -586,7 +603,9 @@ fn parse_sync_interest(group: &Name, raw: &[u8]) -> Option<ParsedSyncInterest> {
     let mut cursor: &[u8] = app_params;
 
     while !cursor.is_empty() {
-        let Some((typ, _value, rest)) = read_tlv(cursor) else { break };
+        let Some((typ, _value, rest)) = read_tlv(cursor) else {
+            break;
+        };
         // Compute byte length of the full TLV (type header + length header + value).
         let consumed = cursor.len() - rest.len();
         let full_tlv = &cursor[..consumed];
@@ -614,8 +633,14 @@ mod tests {
     #[test]
     fn state_vector_roundtrip() {
         let entries = vec![
-            StateVectorEntry { node: "/alice".to_string(), seq: 5 },
-            StateVectorEntry { node: "/bob".to_string(), seq: 12 },
+            StateVectorEntry {
+                node: "/alice".to_string(),
+                seq: 5,
+            },
+            StateVectorEntry {
+                node: "/bob".to_string(),
+                seq: 12,
+            },
         ];
         let encoded = encode_state_vector(&entries);
         let decoded = decode_state_vector(&encoded).expect("decode should succeed");
@@ -636,7 +661,10 @@ mod tests {
 
     #[test]
     fn encode_uses_tlv_type_201() {
-        let entries = vec![StateVectorEntry { node: "/n".to_string(), seq: 1 }];
+        let entries = vec![StateVectorEntry {
+            node: "/n".to_string(),
+            seq: 1,
+        }];
         let encoded = encode_state_vector(&entries);
         assert_eq!(encoded[0], 0xC9, "StateVector type must be 201 (0xC9)");
     }
@@ -671,8 +699,14 @@ mod tests {
     #[test]
     fn remote_covers_local_true() {
         let local = vec![
-            StateVectorEntry { node: "/a".to_string(), seq: 3 },
-            StateVectorEntry { node: "/b".to_string(), seq: 1 },
+            StateVectorEntry {
+                node: "/a".to_string(),
+                seq: 3,
+            },
+            StateVectorEntry {
+                node: "/b".to_string(),
+                seq: 1,
+            },
         ];
         let remote = vec![("/a".to_string(), 3u64), ("/b".to_string(), 5)];
         assert!(remote_covers_local(&local, &remote));
@@ -680,14 +714,20 @@ mod tests {
 
     #[test]
     fn remote_covers_local_false_when_behind() {
-        let local = vec![StateVectorEntry { node: "/a".to_string(), seq: 5 }];
+        let local = vec![StateVectorEntry {
+            node: "/a".to_string(),
+            seq: 5,
+        }];
         let remote = vec![("/a".to_string(), 3u64)];
         assert!(!remote_covers_local(&local, &remote));
     }
 
     #[test]
     fn remote_covers_local_false_when_missing_node() {
-        let local = vec![StateVectorEntry { node: "/a".to_string(), seq: 1 }];
+        let local = vec![StateVectorEntry {
+            node: "/a".to_string(),
+            seq: 1,
+        }];
         let remote: Vec<(String, u64)> = vec![];
         assert!(!remote_covers_local(&local, &remote));
     }
@@ -703,8 +743,8 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_with_retry_retries_on_failure() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         let calls = Arc::new(AtomicU32::new(0));
         let calls2 = calls.clone();
@@ -814,7 +854,9 @@ mod tests {
         let mut found_mapping = false;
         let mut cursor: &[u8] = ap;
         while !cursor.is_empty() {
-            let Some((typ, _val, rest)) = read_tlv(cursor) else { break };
+            let Some((typ, _val, rest)) = read_tlv(cursor) else {
+                break;
+            };
             let consumed = cursor.len() - rest.len();
             if typ == TLV_MAPPING_DATA {
                 let mappings = decode_mapping_data(&cursor[..consumed]);

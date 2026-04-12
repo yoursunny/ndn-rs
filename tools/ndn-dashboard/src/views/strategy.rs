@@ -4,11 +4,11 @@ use crate::app::{AppCtx, DashCmd};
 
 /// Well-known strategy names for the dropdown.
 const STRATEGIES: &[(&str, &str)] = &[
-    ("/ndn/strategy/best-route/v5",  "Best Route"),
-    ("/ndn/strategy/multicast/v5",   "Multicast"),
-    ("/ndn/strategy/ncc/v1",         "NCC"),
-    ("/ndn/strategy/access/v1",      "Access"),
-    ("/ndn/strategy/self-learning",  "Self-Learning"),
+    ("/ndn/strategy/best-route/v5", "Best Route"),
+    ("/ndn/strategy/multicast/v5", "Multicast"),
+    ("/ndn/strategy/ncc/v1", "NCC"),
+    ("/ndn/strategy/access/v1", "Access"),
+    ("/ndn/strategy/self-learning", "Self-Learning"),
 ];
 
 #[component]
@@ -16,7 +16,7 @@ pub fn Strategy() -> Element {
     let ctx = use_context::<AppCtx>();
     let strategies = ctx.strategies.read();
 
-    let mut set_prefix:   Signal<String> = use_signal(String::new);
+    let mut set_prefix: Signal<String> = use_signal(String::new);
     let mut set_strategy: Signal<String> = use_signal(|| STRATEGIES[0].0.to_string());
     let mut custom_strat: Signal<String> = use_signal(String::new);
 

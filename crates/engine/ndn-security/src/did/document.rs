@@ -93,7 +93,11 @@ pub struct VerificationMethod {
 
 impl VerificationMethod {
     /// Build a `JsonWebKey2020` verification method from raw Ed25519 public key bytes.
-    pub fn ed25519_jwk(id: impl Into<String>, controller: impl Into<String>, key_bytes: &[u8]) -> Self {
+    pub fn ed25519_jwk(
+        id: impl Into<String>,
+        controller: impl Into<String>,
+        key_bytes: &[u8],
+    ) -> Self {
         use base64::Engine;
         let x = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key_bytes);
         let mut jwk = serde_json::Map::new();
@@ -110,7 +114,11 @@ impl VerificationMethod {
     }
 
     /// Build a `X25519KeyAgreementKey2020` verification method from raw X25519 key bytes.
-    pub fn x25519_jwk(id: impl Into<String>, controller: impl Into<String>, key_bytes: &[u8]) -> Self {
+    pub fn x25519_jwk(
+        id: impl Into<String>,
+        controller: impl Into<String>,
+        key_bytes: &[u8],
+    ) -> Self {
         use base64::Engine;
         let x = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key_bytes);
         let mut jwk = serde_json::Map::new();
@@ -134,7 +142,9 @@ impl VerificationMethod {
             return None;
         }
         let x = jwk.get("x")?.as_str()?;
-        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(x).ok()?;
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(x)
+            .ok()?;
         if bytes.len() != 32 {
             return None;
         }
@@ -151,7 +161,9 @@ impl VerificationMethod {
             return None;
         }
         let x = jwk.get("x")?.as_str()?;
-        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(x).ok()?;
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(x)
+            .ok()?;
         if bytes.len() != 32 {
             return None;
         }
@@ -298,17 +310,17 @@ pub struct DidDocument {
 
     /// Alternative identifiers for the same subject (URIs or DID strings).
     /// Used for zone succession: old zone DID lists new zone DID here.
-    #[serde(
-        rename = "alsoKnownAs",
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(rename = "alsoKnownAs", default, skip_serializing_if = "Vec::is_empty")]
     pub also_known_as: Vec<String>,
 }
 
 impl DidDocument {
     /// Build a minimal DID Document with a single Ed25519 verification method.
-    pub fn new_simple(did: impl Into<String>, key_id: impl Into<String>, public_key: &[u8]) -> Self {
+    pub fn new_simple(
+        did: impl Into<String>,
+        key_id: impl Into<String>,
+        public_key: &[u8],
+    ) -> Self {
         let did = did.into();
         let key_id = key_id.into();
         let vm = VerificationMethod::ed25519_jwk(&key_id, &did, public_key);
@@ -372,13 +384,19 @@ impl DidDocument {
 
     /// Find a verification method by its `id`.
     pub fn find_vm(&self, id: &str) -> Option<&VerificationMethod> {
-        self.verification_methods.iter().find(|vm| vm.id == id)
+        self.verification_methods
+            .iter()
+            .find(|vm| vm.id == id)
             .or_else(|| {
                 // Also check fragment-only match.
                 let fragment = id.split_once('#').map(|(_, f)| f).unwrap_or(id);
                 self.verification_methods.iter().find(|vm| {
                     vm.id == id
-                        || vm.id.split_once('#').map(|(_, f)| f == fragment).unwrap_or(false)
+                        || vm
+                            .id
+                            .split_once('#')
+                            .map(|(_, f)| f == fragment)
+                            .unwrap_or(false)
                 })
             })
     }

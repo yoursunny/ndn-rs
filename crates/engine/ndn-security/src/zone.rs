@@ -41,7 +41,11 @@ impl ZoneKey {
         let pub_key_bytes = sk.verifying_key().to_bytes();
         let zone_root = zone_root_from_pubkey(&pub_key_bytes);
         let signer = Ed25519Signer::from_seed(seed, zone_root.clone());
-        Self { signer, zone_root, pub_key_bytes }
+        Self {
+            signer,
+            zone_root,
+            pub_key_bytes,
+        }
     }
 
     /// Derive a `ZoneKey` from raw Ed25519 signing-key bytes (32-byte seed).

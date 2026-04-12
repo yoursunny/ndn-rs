@@ -54,9 +54,9 @@ impl SimNode {
     }
 
     pub fn serves(&self, interest_name: &str) -> bool {
-        self.served_prefixes.iter().any(|p| {
-            interest_name == p.as_str() || interest_name.starts_with(p.as_str())
-        })
+        self.served_prefixes
+            .iter()
+            .any(|p| interest_name == p.as_str() || interest_name.starts_with(p.as_str()))
     }
 }
 
@@ -95,7 +95,7 @@ impl SimLink {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TopologyEvent {
-    pub kind: String,       // "interest", "data", "nack", "cs-hit", "pit-aggregate"
+    pub kind: String, // "interest", "data", "nack", "cs-hit", "pit-aggregate"
     pub from_node: u32,
     pub to_node: u32,
     pub link_id: u32,
@@ -168,7 +168,14 @@ impl SimTopology {
 
     /// Connect two nodes with a bidirectional simulated link.
     /// Returns the link ID.
-    pub fn add_link(&mut self, node_a: u32, node_b: u32, delay_ms: u32, bandwidth_bps: u64, loss_rate: f64) -> u32 {
+    pub fn add_link(
+        &mut self,
+        node_a: u32,
+        node_b: u32,
+        delay_ms: u32,
+        bandwidth_bps: u64,
+        loss_rate: f64,
+    ) -> u32 {
         let link_id = self.next_link_id;
         self.next_link_id += 1;
         let face_a = self.next_face_id;
@@ -176,7 +183,16 @@ impl SimTopology {
         let face_b = self.next_face_id;
         self.next_face_id += 1;
 
-        let link = SimLink { id: link_id, node_a, node_b, face_a, face_b, delay_ms, bandwidth_bps, loss_rate };
+        let link = SimLink {
+            id: link_id,
+            node_a,
+            node_b,
+            face_a,
+            face_b,
+            delay_ms,
+            bandwidth_bps,
+            loss_rate,
+        };
         self.links.insert(link_id, link);
         link_id
     }
@@ -185,7 +201,11 @@ impl SimTopology {
     pub fn add_fib_route(&mut self, node_id: u32, prefix: &str, link_id: u32, cost: u32) {
         if let Some(link) = self.links.get(&link_id) {
             // Determine which face on node_id belongs to this link.
-            let face_id = if link.node_a == node_id { link.face_a } else { link.face_b };
+            let face_id = if link.node_a == node_id {
+                link.face_a
+            } else {
+                link.face_b
+            };
             if let Some(node) = self.nodes.get_mut(&node_id) {
                 node.fib.add_route(prefix, face_id, cost);
             }
@@ -197,7 +217,9 @@ impl SimTopology {
     pub fn auto_configure_fib(&mut self) {
         // For each producer, flood its prefixes backward toward all reachable nodes.
         // This is a simple BFS from producer nodes.
-        let producers: Vec<(u32, Vec<String>)> = self.nodes.values()
+        let producers: Vec<(u32, Vec<String>)> = self
+            .nodes
+            .values()
             .filter(|n| !n.served_prefixes.is_empty())
             .map(|n| (n.id, n.served_prefixes.clone()))
             .collect();
@@ -212,7 +234,9 @@ impl SimTopology {
     /// BFS: propagate a route for `prefix` from `source_node` to all neighbors.
     fn propagate_route(&mut self, source_node: u32, prefix: &str, cost: u32) {
         // Collect links adjacent to source_node.
-        let adjacent: Vec<(u32, u32, u32)> = self.links.values()
+        let adjacent: Vec<(u32, u32, u32)> = self
+            .links
+            .values()
             .filter_map(|l| {
                 if l.node_a == source_node {
                     Some((l.id, l.node_b, l.face_b))
@@ -264,12 +288,21 @@ impl SimTopology {
 
         // Update measurements for the originating link.
         if let Some(node) = self.nodes.get_mut(&from_node) {
-            let first_face = self.links.values()
+            let first_face = self
+                .links
+                .values()
                 .find(|l| l.node_a == from_node || l.node_b == from_node)
-                .map(|l| if l.node_a == from_node { l.face_a } else { l.face_b })
+                .map(|l| {
+                    if l.node_a == from_node {
+                        l.face_a
+                    } else {
+                        l.face_b
+                    }
+                })
                 .unwrap_or(0);
             let prefix = crate::pipeline::find_matching_prefix_in_fib(&node.fib, interest_name);
-            node.measurements.update_rtt(&prefix, first_face, total_rtt_ms);
+            node.measurements
+                .update_rtt(&prefix, first_face, total_rtt_ms);
             node.measurements.update_satisfaction(&prefix, satisfied);
         }
 
@@ -357,9 +390,14 @@ impl SimTopology {
         // Choose the face (BestRoute: lowest cost; exclude in-face to avoid loop).
         let in_face_from_link = in_link_id.map(|lid| {
             let link = &self.links[&lid];
-            if link.node_a == node_id { link.face_a } else { link.face_b }
+            if link.node_a == node_id {
+                link.face_a
+            } else {
+                link.face_b
+            }
         });
-        let chosen = nexthops.iter()
+        let chosen = nexthops
+            .iter()
             .filter(|nh| Some(nh.face_id) != in_face_from_link)
             .min_by_key(|nh| nh.cost);
 
@@ -369,18 +407,30 @@ impl SimTopology {
         };
 
         // Find the link and next hop node for chosen face.
-        let out_link = self.links.values().find(|l| {
-            (l.node_a == node_id && l.face_a == chosen.face_id) ||
-            (l.node_b == node_id && l.face_b == chosen.face_id)
-        }).cloned();
+        let out_link = self
+            .links
+            .values()
+            .find(|l| {
+                (l.node_a == node_id && l.face_a == chosen.face_id)
+                    || (l.node_b == node_id && l.face_b == chosen.face_id)
+            })
+            .cloned();
 
         let link = match out_link {
             Some(l) => l,
             None => return InterestResult::NackNoRoute,
         };
 
-        let next_node_id = if link.node_a == node_id { link.node_b } else { link.node_a };
-        let in_face_next = if link.node_a == node_id { link.face_b } else { link.face_a };
+        let next_node_id = if link.node_a == node_id {
+            link.node_b
+        } else {
+            link.node_a
+        };
+        let in_face_next = if link.node_a == node_id {
+            link.face_b
+        } else {
+            link.face_a
+        };
 
         // Emit Interest forwarding event.
         let delay = link.delay_ms as f64;
@@ -398,7 +448,9 @@ impl SimTopology {
         // Add PIT entry on this node.
         {
             let node_mut = self.nodes.get_mut(&node_id).unwrap();
-            node_mut.pit.insert(name, false, false, in_face, nonce, self.now_ms, lifetime_ms);
+            node_mut
+                .pit
+                .insert(name, false, false, in_face, nonce, self.now_ms, lifetime_ms);
         }
 
         // Recurse to next hop.
@@ -415,7 +467,11 @@ impl SimTopology {
         );
 
         match result {
-            InterestResult::Satisfied { ref content, freshness_ms, ref sig_type } => {
+            InterestResult::Satisfied {
+                ref content,
+                freshness_ms,
+                ref sig_type,
+            } => {
                 // Data return: update CS, satisfy PIT.
                 let content_clone = content.clone();
                 let sig_type_clone = sig_type.clone();
@@ -434,7 +490,14 @@ impl SimTopology {
 
                 // Insert into CS.
                 let node_mut = self.nodes.get_mut(&node_id).unwrap();
-                node_mut.cs.insert(name.to_string(), content_clone, content.len(), freshness_ms, self.now_ms, sig_type_clone);
+                node_mut.cs.insert(
+                    name.to_string(),
+                    content_clone,
+                    content.len(),
+                    freshness_ms,
+                    self.now_ms,
+                    sig_type_clone,
+                );
                 // Satisfy PIT.
                 node_mut.pit.remove_matching(name);
 
@@ -474,7 +537,10 @@ impl SimTopology {
         self.nodes.get(&node_id).map(|n| n.fib.snapshot())
     }
 
-    pub fn measurements_snapshot(&self, node_id: u32) -> Option<crate::measurements::MeasurementsSnapshot> {
+    pub fn measurements_snapshot(
+        &self,
+        node_id: u32,
+    ) -> Option<crate::measurements::MeasurementsSnapshot> {
         self.nodes.get(&node_id).map(|n| n.measurements.snapshot())
     }
 
@@ -487,7 +553,9 @@ impl SimTopology {
 
     /// Snapshot of all nodes for topology display.
     pub fn nodes_snapshot(&self) -> Vec<NodeSnapshot> {
-        let mut nodes: Vec<NodeSnapshot> = self.nodes.values()
+        let mut nodes: Vec<NodeSnapshot> = self
+            .nodes
+            .values()
             .map(|n| NodeSnapshot {
                 id: n.id,
                 kind: n.kind.clone(),
@@ -550,7 +618,11 @@ pub struct NodeSnapshot {
 // ── Internal routing result ───────────────────────────────────────────────────
 
 enum InterestResult {
-    Satisfied { content: String, freshness_ms: u64, sig_type: String },
+    Satisfied {
+        content: String,
+        freshness_ms: u64,
+        sig_type: String,
+    },
     NackNoRoute,
     Loop,
 }

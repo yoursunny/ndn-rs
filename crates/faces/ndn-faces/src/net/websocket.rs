@@ -201,10 +201,18 @@ pub struct TlsWebSocketFace {
 
 #[cfg(feature = "websocket-tls")]
 impl Face for TlsWebSocketFace {
-    fn id(&self) -> FaceId { self.id }
-    fn kind(&self) -> FaceKind { FaceKind::WebSocket }
-    fn remote_uri(&self) -> Option<String> { Some(self.remote_addr.clone()) }
-    fn local_uri(&self) -> Option<String> { Some(self.local_addr.clone()) }
+    fn id(&self) -> FaceId {
+        self.id
+    }
+    fn kind(&self) -> FaceKind {
+        FaceKind::WebSocket
+    }
+    fn remote_uri(&self) -> Option<String> {
+        Some(self.remote_addr.clone())
+    }
+    fn local_uri(&self) -> Option<String> {
+        Some(self.local_addr.clone())
+    }
 
     async fn recv(&self) -> Result<Bytes, FaceError> {
         let mut reader = self.reader.lock().await;
@@ -294,7 +302,9 @@ impl WebSocketFace {
     ) -> Result<WebSocketListener, FaceError> {
         let config = build_tls_server_config(tls).await?;
         let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
-        let inner = tokio::net::TcpListener::bind(addr).await.map_err(FaceError::Io)?;
+        let inner = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(FaceError::Io)?;
         Ok(WebSocketListener { inner, acceptor })
     }
 }

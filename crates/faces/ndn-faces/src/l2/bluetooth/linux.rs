@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use bluer::{
+    Session,
     adv::{Advertisement, Type as AdvType},
     gatt::local::{
         Application, Characteristic, CharacteristicControlEvent, CharacteristicNotify,
         CharacteristicNotifyMethod, CharacteristicWrite, CharacteristicWriteMethod, Service,
         characteristic_control,
     },
-    Session,
 };
 use bytes::Bytes;
 use futures::StreamExt;
@@ -19,8 +19,8 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use super::{BleError, BleFace, CHAN_DEPTH, BLE_RX_CHAR_UUID, BLE_SERVICE_UUID, BLE_TX_CHAR_UUID};
-use super::framing::{Assembler, ATT_OVERHEAD, send_pkt};
+use super::framing::{ATT_OVERHEAD, Assembler, send_pkt};
+use super::{BLE_RX_CHAR_UUID, BLE_SERVICE_UUID, BLE_TX_CHAR_UUID, BleError, BleFace, CHAN_DEPTH};
 
 // ── Server handle (keeps GATT app + advertisement alive) ─────────────────────
 
@@ -34,7 +34,10 @@ pub struct BleServer {
 pub async fn bind(id: ndn_transport::FaceId) -> Result<BleFace, BleError> {
     let session = Session::new().await?;
     let adapter_names = session.adapter_names().await?;
-    let adapter_name = adapter_names.into_iter().next().ok_or(BleError::NoAdapter)?;
+    let adapter_name = adapter_names
+        .into_iter()
+        .next()
+        .ok_or(BleError::NoAdapter)?;
     let adapter = session.adapter(&adapter_name)?;
     adapter.set_powered(true).await?;
     let addr = adapter.address().await?;

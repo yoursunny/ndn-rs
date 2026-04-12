@@ -150,8 +150,7 @@ impl Interest {
                 #[cfg(feature = "std")]
                 {
                     let params_region = inner_bytes.slice(start..params_region_end);
-                    let expected =
-                        ring::digest::digest(&ring::digest::SHA256, &params_region);
+                    let expected = ring::digest::digest(&ring::digest::SHA256, &params_region);
                     if last_comp.value.as_ref() != expected.as_ref() {
                         return Err(PacketError::MalformedPacket(
                             "ParametersSha256DigestComponent does not match ApplicationParameters"

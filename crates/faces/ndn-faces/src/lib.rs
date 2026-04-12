@@ -43,24 +43,29 @@ pub mod l2;
 // ── Crate-root re-exports ────────────────────────────────────────────────────
 
 #[cfg(feature = "net")]
-pub use net::{
-    MulticastUdpFace, TcpFace, UdpFace,
-    tcp_face_connect, tcp_face_from_stream,
-    LpReliability, ReliabilityConfig, RtoStrategy,
-};
-#[cfg(feature = "net")]
 pub use ndn_packet::fragment::DEFAULT_UDP_MTU;
+#[cfg(feature = "net")]
+pub use net::{
+    LpReliability, MulticastUdpFace, ReliabilityConfig, RtoStrategy, TcpFace, UdpFace,
+    tcp_face_connect, tcp_face_from_stream,
+};
 
 #[cfg(feature = "websocket")]
 pub use net::WebSocketFace;
 
 #[cfg(feature = "local")]
-pub use local::{IpcFace, IpcListener, InProcFace, InProcHandle, ipc_face_connect};
+pub use local::{InProcFace, InProcHandle, IpcFace, IpcListener, ipc_face_connect};
 
 #[cfg(all(unix, feature = "local"))]
-pub use local::{UnixFace, unix_face_connect, unix_face_from_stream, unix_management_face_from_stream};
+pub use local::{
+    UnixFace, unix_face_connect, unix_face_from_stream, unix_management_face_from_stream,
+};
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+#[cfg(all(
+    unix,
+    not(any(target_os = "android", target_os = "ios")),
+    feature = "spsc-shm"
+))]
 pub use local::{ShmError, ShmFace, ShmHandle};
 
 #[cfg(feature = "serial")]
@@ -77,10 +82,10 @@ pub use l2::{RadioFaceMetadata, RadioTable};
 
 #[cfg(all(feature = "l2", target_os = "linux"))]
 pub use l2::{
-    MacAddr, EtherNeighborDiscovery, NamedEtherFace, MulticastEtherFace,
-    NeighborDiscovery, WfbFace, BleFace, get_interface_mac,
+    BleFace, EtherNeighborDiscovery, MacAddr, MulticastEtherFace, NamedEtherFace,
+    NeighborDiscovery, WfbFace, get_interface_mac,
 };
 #[cfg(all(feature = "l2", target_os = "macos"))]
-pub use l2::{NamedEtherFace, MulticastEtherFace};
+pub use l2::{MulticastEtherFace, NamedEtherFace};
 #[cfg(all(feature = "l2", target_os = "windows"))]
-pub use l2::{NamedEtherFace, MulticastEtherFace};
+pub use l2::{MulticastEtherFace, NamedEtherFace};

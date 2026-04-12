@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 
-use ndn_packet::Name;
 use crate::pipeline::{ForwardingAction, NackReason};
+use ndn_packet::Name;
 use ndn_strategy::{StrategyContext, StrategyFilter};
 
 use crate::stages::ErasedStrategy;

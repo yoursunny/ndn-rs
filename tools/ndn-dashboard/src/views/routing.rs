@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::app::{AppCtx, DashCmd};
+use dioxus::prelude::*;
 
 // ── Routing view ──────────────────────────────────────────────────────────────
 //
@@ -13,10 +13,16 @@ pub fn Routing() -> Element {
 
     // DVR config form state (initialise from live status when available)
     let mut dvr_update_ms: Signal<String> = use_signal(|| {
-        dvr_status.as_ref().map(|d| d.update_interval_ms.to_string()).unwrap_or_default()
+        dvr_status
+            .as_ref()
+            .map(|d| d.update_interval_ms.to_string())
+            .unwrap_or_default()
     });
     let mut dvr_ttl_ms: Signal<String> = use_signal(|| {
-        dvr_status.as_ref().map(|d| d.route_ttl_ms.to_string()).unwrap_or_default()
+        dvr_status
+            .as_ref()
+            .map(|d| d.route_ttl_ms.to_string())
+            .unwrap_or_default()
     });
     let mut dvr_error: Signal<Option<String>> = use_signal(|| None);
 

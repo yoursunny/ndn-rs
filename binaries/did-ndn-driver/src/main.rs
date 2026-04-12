@@ -23,11 +23,11 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
+    Router,
     extract::{Path, State},
     http::StatusCode,
     response::Json,
     routing::get,
-    Router,
 };
 use ndn_did::{DidError, UniversalResolver};
 use serde::{Deserialize, Serialize};

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::cs::{CsSnapshot, SimCs};
 use crate::fib::{FibEntry, SimFib};
-use crate::pit::{PitSnapshot, SimPit};
 use crate::measurements::SimMeasurements;
+use crate::pit::{PitSnapshot, SimPit};
 
 // ── Strategy type ────────────────────────────────────────────────────────────
 
@@ -153,19 +153,35 @@ impl SimPipeline {
             "wireBytes": estimate_interest_wire_size(name, lifetime_ms),
             "fields": ["Name", "CanBePrefix", "MustBeFresh", "Nonce", "InterestLifetime"]
         });
-        stages.push(StageEvent { stage: "TlvDecode".to_string(), action: "Continue".to_string(), detail });
-        decoded_fields.extend_from_slice(&["CanBePrefix".to_string(), "MustBeFresh".to_string(), "Nonce".to_string(), "Lifetime".to_string()]);
+        stages.push(StageEvent {
+            stage: "TlvDecode".to_string(),
+            action: "Continue".to_string(),
+            detail,
+        });
+        decoded_fields.extend_from_slice(&[
+            "CanBePrefix".to_string(),
+            "MustBeFresh".to_string(),
+            "Nonce".to_string(),
+            "Lifetime".to_string(),
+        ]);
 
         // ── Stage 2: CsLookup ────────────────────────────────────────────────
         let cs_hit = config.cs_enabled
-            && self.cs.lookup(name, can_be_prefix, must_be_fresh, self.now_ms).is_some();
+            && self
+                .cs
+                .lookup(name, can_be_prefix, must_be_fresh, self.now_ms)
+                .is_some();
 
         let cs_occupancy = self.cs.len();
         let cs_capacity = self.cs.capacity;
 
         if cs_hit {
             self.hits += 1;
-            let hit_entry = self.cs.lookup(name, can_be_prefix, must_be_fresh, self.now_ms).unwrap().clone();
+            let hit_entry = self
+                .cs
+                .lookup(name, can_be_prefix, must_be_fresh, self.now_ms)
+                .unwrap()
+                .clone();
             let detail = serde_json::json!({
                 "result": "HIT",
                 "matchedName": hit_entry.name,
@@ -173,7 +189,11 @@ impl SimPipeline {
                 "csCapacity": cs_capacity,
                 "hitRate": self.hit_rate(),
             });
-            stages.push(StageEvent { stage: "CsLookup".to_string(), action: "CsHit".to_string(), detail });
+            stages.push(StageEvent {
+                stage: "CsLookup".to_string(),
+                action: "CsHit".to_string(),
+                detail,
+            });
             decoded_fields.push("→ Satisfied from cache".to_string());
 
             return PipelineTrace {
@@ -195,7 +215,11 @@ impl SimPipeline {
             "csCapacity": cs_capacity,
             "hitRate": self.hit_rate(),
         });
-        stages.push(StageEvent { stage: "CsLookup".to_string(), action: "Continue".to_string(), detail });
+        stages.push(StageEvent {
+            stage: "CsLookup".to_string(),
+            action: "Continue".to_string(),
+            detail,
+        });
 
         // ── Stage 3: PitCheck ────────────────────────────────────────────────
         // Check if we should force-aggregate (scenario: pit_has_entry).
@@ -206,11 +230,21 @@ impl SimPipeline {
         };
 
         // Actually try to insert.
-        let (is_new, did_aggregate) = if config.pit_has_entry && !is_new_entry(&self.pit, name, can_be_prefix, must_be_fresh) {
+        let (is_new, did_aggregate) = if config.pit_has_entry
+            && !is_new_entry(&self.pit, name, can_be_prefix, must_be_fresh)
+        {
             // Already have an entry — simulate aggregation.
             (false, true)
         } else {
-            self.pit.insert(name, can_be_prefix, must_be_fresh, in_face, nonce, self.now_ms, lifetime_ms)
+            self.pit.insert(
+                name,
+                can_be_prefix,
+                must_be_fresh,
+                in_face,
+                nonce,
+                self.now_ms,
+                lifetime_ms,
+            )
         };
         let _ = existing;
 
@@ -222,7 +256,11 @@ impl SimPipeline {
             "pitCount": pit_count,
             "inFace": in_face,
         });
-        stages.push(StageEvent { stage: "PitCheck".to_string(), action: action.to_string(), detail });
+        stages.push(StageEvent {
+            stage: "PitCheck".to_string(),
+            action: action.to_string(),
+            detail,
+        });
 
         if !is_new {
             // Interest was aggregated — do not forward.
@@ -257,7 +295,11 @@ impl SimPipeline {
                     "strategy": "Suppress",
                     "result": "Suppressed",
                 });
-                stages.push(StageEvent { stage: "Strategy".to_string(), action: "Suppress".to_string(), detail });
+                stages.push(StageEvent {
+                    stage: "Strategy".to_string(),
+                    action: "Suppress".to_string(),
+                    detail,
+                });
                 decoded_fields.push("→ Suppressed by strategy".to_string());
                 return PipelineTrace {
                     packet_type: "Interest".to_string(),
@@ -278,7 +320,11 @@ impl SimPipeline {
                         "result": "Nack/NoRoute",
                         "fibMatch": null,
                     });
-                    stages.push(StageEvent { stage: "Strategy".to_string(), action: "Nack".to_string(), detail });
+                    stages.push(StageEvent {
+                        stage: "Strategy".to_string(),
+                        action: "Nack".to_string(),
+                        detail,
+                    });
                     decoded_fields.push("→ Nack (NoRoute)".to_string());
                     return PipelineTrace {
                         packet_type: "Interest".to_string(),
@@ -303,7 +349,11 @@ impl SimPipeline {
                         "strategy": "Multicast",
                         "result": "Nack/NoRoute",
                     });
-                    stages.push(StageEvent { stage: "Strategy".to_string(), action: "Nack".to_string(), detail });
+                    stages.push(StageEvent {
+                        stage: "Strategy".to_string(),
+                        action: "Nack".to_string(),
+                        detail,
+                    });
                     decoded_fields.push("→ Nack (NoRoute)".to_string());
                     return PipelineTrace {
                         packet_type: "Interest".to_string(),
@@ -319,7 +369,11 @@ impl SimPipeline {
                 }
                 // Multicast: send to all nexthops, up to face_count.
                 let max_faces = config.face_count as usize;
-                nexthops.iter().take(max_faces).map(|nh| nh.face_id).collect()
+                nexthops
+                    .iter()
+                    .take(max_faces)
+                    .map(|nh| nh.face_id)
+                    .collect()
             }
         };
 
@@ -331,7 +385,11 @@ impl SimPipeline {
             "fibMatch": fib_consulted.first().map(|e| &e.prefix),
             "simulatedRttMs": config.simulated_rtt_ms,
         });
-        stages.push(StageEvent { stage: "Strategy".to_string(), action: "Forward".to_string(), detail });
+        stages.push(StageEvent {
+            stage: "Strategy".to_string(),
+            action: "Forward".to_string(),
+            detail,
+        });
         decoded_fields.push(format!("→ Forwarded to {} face(s)", forwarded_faces.len()));
 
         PipelineTrace {
@@ -368,19 +426,32 @@ impl SimPipeline {
             "wireBytes": estimate_data_wire_size(name, content),
             "fields": ["Name", "MetaInfo", "Content", "SignatureInfo", "SignatureValue"]
         });
-        stages.push(StageEvent { stage: "TlvDecode".to_string(), action: "Continue".to_string(), detail });
-        decoded_fields.extend_from_slice(&["MetaInfo".to_string(), "Content".to_string(), "SignatureInfo".to_string()]);
+        stages.push(StageEvent {
+            stage: "TlvDecode".to_string(),
+            action: "Continue".to_string(),
+            detail,
+        });
+        decoded_fields.extend_from_slice(&[
+            "MetaInfo".to_string(),
+            "Content".to_string(),
+            "SignatureInfo".to_string(),
+        ]);
 
         // ── Stage 2: PIT match ───────────────────────────────────────────────
         let matched_entries = self.pit.remove_matching(name);
-        let downstream_faces: Vec<u32> = matched_entries.iter().flat_map(|e| e.in_faces()).collect();
+        let downstream_faces: Vec<u32> =
+            matched_entries.iter().flat_map(|e| e.in_faces()).collect();
 
         if matched_entries.is_empty() {
             let detail = serde_json::json!({
                 "result": "Unsolicited",
                 "pitCount": self.pit.len(),
             });
-            stages.push(StageEvent { stage: "PitMatch".to_string(), action: "Drop".to_string(), detail });
+            stages.push(StageEvent {
+                stage: "PitMatch".to_string(),
+                action: "Drop".to_string(),
+                detail,
+            });
             decoded_fields.push("→ Dropped (unsolicited)".to_string());
             return PipelineTrace {
                 packet_type: "Data".to_string(),
@@ -400,7 +471,11 @@ impl SimPipeline {
             "matchedEntries": matched_entries.len(),
             "downstreamFaces": downstream_faces,
         });
-        stages.push(StageEvent { stage: "PitMatch".to_string(), action: "Continue".to_string(), detail });
+        stages.push(StageEvent {
+            stage: "PitMatch".to_string(),
+            action: "Continue".to_string(),
+            detail,
+        });
 
         // ── Stage 3: Validation ───────────────────────────────────────────────
         decoded_fields.push("SignatureValue".to_string());
@@ -410,7 +485,11 @@ impl SimPipeline {
                 "sigType": sig_type,
                 "reason": "Signature verification failed (simulated)",
             });
-            stages.push(StageEvent { stage: "Validation".to_string(), action: "Drop".to_string(), detail });
+            stages.push(StageEvent {
+                stage: "Validation".to_string(),
+                action: "Drop".to_string(),
+                detail,
+            });
             decoded_fields.push("→ Dropped (invalid signature)".to_string());
             // Update measurements: unsatisfied.
             let prefix = find_matching_prefix(&self.fib, name);
@@ -432,7 +511,11 @@ impl SimPipeline {
             "result": "PASS",
             "sigType": sig_type,
         });
-        stages.push(StageEvent { stage: "Validation".to_string(), action: "Continue".to_string(), detail });
+        stages.push(StageEvent {
+            stage: "Validation".to_string(),
+            action: "Continue".to_string(),
+            detail,
+        });
 
         // ── Stage 4: CsInsert + Dispatch ─────────────────────────────────────
         let content_bytes = content.len();
@@ -451,8 +534,15 @@ impl SimPipeline {
             "csCapacity": self.cs.capacity,
             "dispatchFaces": downstream_faces,
         });
-        stages.push(StageEvent { stage: "CsInsert".to_string(), action: "Satisfy".to_string(), detail });
-        decoded_fields.push(format!("→ Dispatched to {} face(s)", downstream_faces.len()));
+        stages.push(StageEvent {
+            stage: "CsInsert".to_string(),
+            action: "Satisfy".to_string(),
+            detail,
+        });
+        decoded_fields.push(format!(
+            "→ Dispatched to {} face(s)",
+            downstream_faces.len()
+        ));
 
         // Update measurements.
         let prefix = find_matching_prefix(&self.fib, name);
@@ -472,7 +562,11 @@ impl SimPipeline {
     }
 
     pub fn hit_rate(&self) -> f64 {
-        if self.total == 0 { 0.0 } else { self.hits as f64 / self.total as f64 }
+        if self.total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / self.total as f64
+        }
     }
 
     /// Force-populate the CS with an entry (for "CS already contains this name" scenario).
@@ -489,7 +583,8 @@ impl SimPipeline {
 
     /// Force-create a PIT entry (for "PIT already has a pending entry" scenario).
     pub fn seed_pit(&mut self, name: &str, in_face: u32) {
-        self.pit.insert(name, false, false, in_face, 0xDEAD, self.now_ms, 4000.0);
+        self.pit
+            .insert(name, false, false, in_face, 0xDEAD, self.now_ms, 4000.0);
     }
 
     pub fn reset(&mut self) {

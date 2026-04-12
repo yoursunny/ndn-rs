@@ -115,7 +115,11 @@ impl Producer {
         content: Bytes,
         chunk_size: usize,
     ) -> Result<(), AppError> {
-        let seg_size = if chunk_size == 0 { NDN_DEFAULT_SEGMENT_SIZE } else { chunk_size };
+        let seg_size = if chunk_size == 0 {
+            NDN_DEFAULT_SEGMENT_SIZE
+        } else {
+            chunk_size
+        };
         let chunked = ChunkedProducer::new(prefix.clone(), content, seg_size);
         let last_seg = chunked.segment_count().saturating_sub(1);
 

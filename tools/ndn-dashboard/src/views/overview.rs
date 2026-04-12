@@ -1,17 +1,17 @@
-use std::collections::HashSet;
-use std::collections::VecDeque;
-use dioxus::prelude::*;
 use crate::app::{AppCtx, DashCmd};
 use crate::tool_runner::fmt_bytes;
 use crate::types::ThroughputSample;
 use crate::views::modals::{FaceCreateModal, RouteAddModal};
-use crate::views::traffic::{render_throughput_bars, render_pps_bars, sum_face_histories};
+use crate::views::traffic::{render_pps_bars, render_throughput_bars, sum_face_histories};
+use dioxus::prelude::*;
+use std::collections::HashSet;
+use std::collections::VecDeque;
 
 const KNOWN_STRATEGIES: &[(&str, &str)] = &[
     ("/ndn/strategy/best-route/v5", "Best Route"),
-    ("/ndn/strategy/multicast/v5",  "Multicast"),
-    ("/ndn/strategy/ncc/v1",        "NCC"),
-    ("/ndn/strategy/access/v1",     "Access"),
+    ("/ndn/strategy/multicast/v5", "Multicast"),
+    ("/ndn/strategy/ncc/v1", "NCC"),
+    ("/ndn/strategy/access/v1", "Access"),
     ("/ndn/strategy/self-learning", "Self-Learning"),
 ];
 
@@ -22,44 +22,45 @@ pub fn Overview() -> Element {
     let ctx = use_context::<AppCtx>();
 
     // Expansion state
-    let mut faces_open   = use_signal(|| false);
-    let mut routes_open  = use_signal(|| false);
-    let mut cs_open      = use_signal(|| false);
+    let mut faces_open = use_signal(|| false);
+    let mut routes_open = use_signal(|| false);
+    let mut cs_open = use_signal(|| false);
     let mut traffic_open = use_signal(|| false);
 
     // Modal state
-    let mut show_face_modal  = use_signal(|| false);
+    let mut show_face_modal = use_signal(|| false);
     let mut show_route_modal = use_signal(|| false);
 
     // Per-face traffic filter (empty = show all)
     let mut monitored: Signal<HashSet<u64>> = use_signal(HashSet::new);
 
     // CS form state (kept here so it persists while expanded)
-    let mut cs_cap_mb:    Signal<String> = use_signal(String::new);
+    let mut cs_cap_mb: Signal<String> = use_signal(String::new);
     let mut cs_erase_pfx: Signal<String> = use_signal(String::new);
 
     // Education card
     let mut edu_dismissed = use_signal(|| false);
 
     // Derived data
-    let status         = ctx.status.read();
-    let faces          = ctx.faces.read();
-    let routes         = ctx.routes.read();
-    let cs             = ctx.cs.read();
-    let counters       = ctx.counters.read();
-    let measurements   = ctx.measurements.read();
-    let throughput     = ctx.throughput.read();
-    let strategies     = ctx.strategies.read();
-    let cs_hit_history    = ctx.cs_hit_history.read();
-    let face_throughput   = ctx.face_throughput.read();
+    let status = ctx.status.read();
+    let faces = ctx.faces.read();
+    let routes = ctx.routes.read();
+    let cs = ctx.cs.read();
+    let counters = ctx.counters.read();
+    let measurements = ctx.measurements.read();
+    let throughput = ctx.throughput.read();
+    let strategies = ctx.strategies.read();
+    let cs_hit_history = ctx.cs_hit_history.read();
+    let face_throughput = ctx.face_throughput.read();
 
-    let n_faces  = status.as_ref().map(|s| s.n_faces).unwrap_or(0);
+    let n_faces = status.as_ref().map(|s| s.n_faces).unwrap_or(0);
     let n_routes = status.as_ref().map(|s| s.n_fib).unwrap_or(0);
-    let n_cs     = status.as_ref().map(|s| s.n_cs).unwrap_or(0);
-    let n_pit    = status.as_ref().map(|s| s.n_pit).unwrap_or(0);
+    let n_cs = status.as_ref().map(|s| s.n_cs).unwrap_or(0);
+    let n_pit = status.as_ref().map(|s| s.n_pit).unwrap_or(0);
 
     // Throughput summary from last sample
-    let (tp_in, tp_out) = throughput.back()
+    let (tp_in, tp_out) = throughput
+        .back()
         .map(|s| (fmt_bytes(s.in_bytes), fmt_bytes(s.out_bytes)))
         .unwrap_or_else(|| ("0 B".to_string(), "0 B".to_string()));
 
@@ -576,20 +577,34 @@ fn render_cs_sparkline(hist: &VecDeque<f64>) -> Element {
     }
     let n = hist.len();
     const LABEL_W: f64 = 36.0;
-    const LINE_W:  f64 = 200.0;
+    const LINE_W: f64 = 200.0;
     let total_w = LABEL_W + LINE_W;
     let h = 40.0f64;
     let mid_h = h / 2.0;
     let last = hist.back().copied().unwrap_or(0.0);
-    let color = if last >= 75.0 { "var(--green)" } else if last >= 40.0 { "var(--yellow)" } else { "var(--red)" };
+    let color = if last >= 75.0 {
+        "var(--green)"
+    } else if last >= 40.0 {
+        "var(--yellow)"
+    } else {
+        "var(--red)"
+    };
 
     let step = LINE_W / (n - 1).max(1) as f64;
-    let points: String = hist.iter().enumerate()
-        .map(|(i, &v)| format!("{:.1},{:.1}", LABEL_W + i as f64 * step, h - (v / 100.0 * h).max(0.0).min(h)))
+    let points: String = hist
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            format!(
+                "{:.1},{:.1}",
+                LABEL_W + i as f64 * step,
+                h - (v / 100.0 * h).max(0.0).min(h)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let first_x = LABEL_W;
-    let last_x  = LABEL_W + (n - 1) as f64 * step;
+    let last_x = LABEL_W + (n - 1) as f64 * step;
     let area_pts = format!("{first_x:.1},{h} {points} {last_x:.1},{h}");
 
     let svg = format!(
@@ -605,7 +620,8 @@ fn render_cs_sparkline(hist: &VecDeque<f64>) -> Element {
           <polyline points=\"{points}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/>\
         </svg>",
         LABEL_W - 3.0,
-        LABEL_W - 3.0, mid_h + 4.0,
+        LABEL_W - 3.0,
+        mid_h + 4.0,
         LABEL_W - 3.0,
     );
 
@@ -618,4 +634,3 @@ fn render_cs_sparkline(hist: &VecDeque<f64>) -> Element {
         }
     }
 }
-

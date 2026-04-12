@@ -68,8 +68,8 @@ pub use connection::NdnConnection;
 pub use consumer::{Consumer, DEFAULT_INTEREST_LIFETIME, DEFAULT_TIMEOUT};
 pub use error::AppError;
 pub use producer::Producer;
-pub use responder::Responder;
 pub use queryable::{Query, Queryable};
+pub use responder::Responder;
 pub use security::KeyChain;
 pub use subscriber::{Sample, Subscriber, SubscriberConfig};
 

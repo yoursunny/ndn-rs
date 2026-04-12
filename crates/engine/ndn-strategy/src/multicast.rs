@@ -2,8 +2,8 @@ use bytes::Bytes;
 use smallvec::{SmallVec, smallvec};
 
 use ndn_packet::{Name, NameComponent};
-use ndn_transport::{ForwardingAction, NackReason};
 use ndn_transport::FaceId;
+use ndn_transport::{ForwardingAction, NackReason};
 
 use crate::{Strategy, StrategyContext};
 

@@ -177,7 +177,9 @@ impl InterestBuilder {
     /// ).await?;
     /// ```
     pub fn build_with_timeout(self) -> (Bytes, std::time::Duration) {
-        let lifetime = self.lifetime.unwrap_or(std::time::Duration::from_millis(4000));
+        let lifetime = self
+            .lifetime
+            .unwrap_or(std::time::Duration::from_millis(4000));
         let timeout = lifetime + std::time::Duration::from_millis(500);
         (self.build(), timeout)
     }
@@ -262,9 +264,8 @@ impl InterestBuilder {
         let sigval_bytes = sigval_w.finish();
 
         // Compute the actual ParametersSha256DigestComponent value.
-        let mut digest_input = Vec::with_capacity(
-            (signed_region.len() - app_params_offset) + sigval_bytes.len(),
-        );
+        let mut digest_input =
+            Vec::with_capacity((signed_region.len() - app_params_offset) + sigval_bytes.len());
         digest_input.extend_from_slice(&signed_region[app_params_offset..]);
         digest_input.extend_from_slice(&sigval_bytes);
         let actual_digest = ring::digest::digest(&ring::digest::SHA256, &digest_input);
@@ -320,9 +321,8 @@ impl InterestBuilder {
         // Compute the actual ParametersSha256DigestComponent value:
         // SHA-256 over ApplicationParameters + InterestSignatureInfo +
         // InterestSignatureValue TLVs (NDN Packet Format v0.3 §5.4).
-        let mut digest_input = Vec::with_capacity(
-            (signed_region.len() - app_params_offset) + sigval_bytes.len(),
-        );
+        let mut digest_input =
+            Vec::with_capacity((signed_region.len() - app_params_offset) + sigval_bytes.len());
         digest_input.extend_from_slice(&signed_region[app_params_offset..]);
         digest_input.extend_from_slice(&sigval_bytes);
         let actual_digest = ring::digest::digest(&ring::digest::SHA256, &digest_input);
@@ -427,7 +427,11 @@ impl InterestBuilder {
             w.write_tlv(tlv_type::SIGNATURE_TIME, &time_buf[..time_len]);
         });
 
-        (inner.finish().to_vec(), digest_value_offset, app_params_offset)
+        (
+            inner.finish().to_vec(),
+            digest_value_offset,
+            app_params_offset,
+        )
     }
 }
 

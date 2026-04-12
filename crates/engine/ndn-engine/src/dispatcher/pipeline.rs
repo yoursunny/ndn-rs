@@ -6,10 +6,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace};
 
-use ndn_packet::encode::encode_nack;
 use crate::pipeline::{
     Action, DecodedPacket, DropReason, ForwardingAction, NackReason, PacketContext,
 };
+use ndn_packet::encode::encode_nack;
 use ndn_store::PitToken;
 use ndn_transport::{FaceId, FaceScope};
 
@@ -144,7 +144,10 @@ impl PacketDispatcher {
             DecodedPacket::Interest(_) => {
                 if let Some(state) = self.face_states.get(&ctx.face_id) {
                     state.counters.in_interests.fetch_add(1, Ordering::Relaxed);
-                    state.counters.in_bytes.fetch_add(ctx.raw_bytes.len() as u64, Ordering::Relaxed);
+                    state
+                        .counters
+                        .in_bytes
+                        .fetch_add(ctx.raw_bytes.len() as u64, Ordering::Relaxed);
                 }
                 trace!(face=%ctx.face_id, name=?ctx.name, "pipeline: Interest → interest_pipeline");
                 self.interest_pipeline(ctx).await;
@@ -152,7 +155,10 @@ impl PacketDispatcher {
             DecodedPacket::Data(_) => {
                 if let Some(state) = self.face_states.get(&ctx.face_id) {
                     state.counters.in_data.fetch_add(1, Ordering::Relaxed);
-                    state.counters.in_bytes.fetch_add(ctx.raw_bytes.len() as u64, Ordering::Relaxed);
+                    state
+                        .counters
+                        .in_bytes
+                        .fetch_add(ctx.raw_bytes.len() as u64, Ordering::Relaxed);
                 }
                 trace!(face=%ctx.face_id, name=?ctx.name, "pipeline: Data → data_pipeline");
                 self.data_pipeline(ctx).await;
@@ -277,7 +283,10 @@ impl PacketDispatcher {
                 for face_id in &faces {
                     if let Some(state) = self.face_states.get(face_id) {
                         state.counters.out_interests.fetch_add(1, Ordering::Relaxed);
-                        state.counters.out_bytes.fetch_add(wire_len, Ordering::Relaxed);
+                        state
+                            .counters
+                            .out_bytes
+                            .fetch_add(wire_len, Ordering::Relaxed);
                     }
                     self.enqueue_send(*face_id, interest_wire.clone());
                 }

@@ -20,7 +20,11 @@ pub mod ipc;
 #[cfg(unix)]
 pub mod unix;
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+#[cfg(all(
+    unix,
+    not(any(target_os = "android", target_os = "ios")),
+    feature = "spsc-shm"
+))]
 pub mod shm;
 
 pub use in_proc::{InProcFace, InProcHandle};
@@ -35,5 +39,9 @@ pub use unix::{
     UnixFace, unix_face_connect, unix_face_from_stream, unix_management_face_from_stream,
 };
 
-#[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+#[cfg(all(
+    unix,
+    not(any(target_os = "android", target_os = "ios")),
+    feature = "spsc-shm"
+))]
 pub use shm::{ShmError, ShmFace, ShmHandle};

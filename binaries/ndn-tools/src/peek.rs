@@ -25,12 +25,15 @@ use anyhow::Result;
 use clap::Parser;
 use tokio::sync::mpsc;
 
-use ndn_tools_core::common::{EventLevel, ToolEvent};
 use ndn_tools_core::common::ConnectConfig;
+use ndn_tools_core::common::{EventLevel, ToolEvent};
 use ndn_tools_core::peek::{PeekParams, run_peek};
 
 #[derive(Parser)]
-#[command(name = "ndn-peek", about = "Fetch a named Data packet from the NDN network")]
+#[command(
+    name = "ndn-peek",
+    about = "Fetch a named Data packet from the NDN network"
+)]
 struct Cli {
     name: String,
 
@@ -73,21 +76,30 @@ async fn main() -> Result<()> {
             match ev.level {
                 EventLevel::Error | EventLevel::Warn => eprintln!("{}", ev.text),
                 _ => {
-                    if !ev.text.is_empty() { println!("{}", ev.text); }
+                    if !ev.text.is_empty() {
+                        println!("{}", ev.text);
+                    }
                 }
             }
         }
     });
 
-    run_peek(PeekParams {
-        conn: ConnectConfig { face_socket: cli.face_socket, use_shm: !cli.no_shm },
-        name: cli.name,
-        lifetime_ms: cli.lifetime,
-        output: cli.output,
-        pipeline: cli.pipeline,
-        hex: cli.hex,
-        meta_only: cli.meta,
-        verbose: cli.verbose,
-        can_be_prefix: cli.can_be_prefix,
-    }, tx).await
+    run_peek(
+        PeekParams {
+            conn: ConnectConfig {
+                face_socket: cli.face_socket,
+                use_shm: !cli.no_shm,
+            },
+            name: cli.name,
+            lifetime_ms: cli.lifetime,
+            output: cli.output,
+            pipeline: cli.pipeline,
+            hex: cli.hex,
+            meta_only: cli.meta,
+            verbose: cli.verbose,
+            can_be_prefix: cli.can_be_prefix,
+        },
+        tx,
+    )
+    .await
 }

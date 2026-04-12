@@ -152,8 +152,13 @@ impl RoutingManager {
             neighbors: Arc::clone(&self.neighbors),
         };
         let task = proto.start(handle, cancel.clone());
-        self.handles
-            .insert(origin, ProtocolHandle { cancel, _task: task });
+        self.handles.insert(
+            origin,
+            ProtocolHandle {
+                cancel,
+                _task: task,
+            },
+        );
         tracing::info!(origin, "routing protocol enabled");
     }
 

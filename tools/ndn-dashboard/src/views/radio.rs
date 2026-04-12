@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
 use crate::app::AppCtx;
 use crate::types::FaceInfo;
+use dioxus::prelude::*;
 
 #[component]
 pub fn Radio() -> Element {
@@ -9,7 +9,8 @@ pub fn Radio() -> Element {
     let counters = ctx.counters.read();
 
     // Show wireless-relevant faces: ether-multicast, WFB (wifibroadcast), multicast UDP
-    let wireless_faces: Vec<&FaceInfo> = faces.iter()
+    let wireless_faces: Vec<&FaceInfo> = faces
+        .iter()
         .filter(|f| {
             let uri = f.remote_uri.as_deref().unwrap_or("");
             let kind = f.kind.as_deref().unwrap_or("");

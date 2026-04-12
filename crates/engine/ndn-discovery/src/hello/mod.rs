@@ -38,7 +38,7 @@ pub mod udp;
 #[cfg(all(feature = "ether-nd", target_os = "linux"))]
 pub mod ether;
 
-pub use medium::{HelloCore, HelloState, LinkMedium, HELLO_PREFIX_DEPTH, HELLO_PREFIX_STR};
+pub use medium::{HELLO_PREFIX_DEPTH, HELLO_PREFIX_STR, HelloCore, HelloState, LinkMedium};
 pub use payload::{
     CAP_CONTENT_STORE, CAP_FRAGMENTATION, CAP_SVS, CAP_VALIDATION, DiffEntry, HelloPayload,
     NeighborDiff, T_ADD_ENTRY, T_CAPABILITIES, T_NEIGHBOR_DIFF, T_NODE_NAME, T_PUBLIC_KEY,

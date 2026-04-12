@@ -124,7 +124,8 @@ impl NdnEngine {
             return Ok(h);
         }
         let engine_guard = self.inner.lock().unwrap();
-        let engine = engine_guard.as_ref()
+        let engine = engine_guard
+            .as_ref()
             .ok_or_else(|| NdnError::engine("engine is shut down"))?;
         let (_, h) = engine.new_app_handle();
         Ok(h)
@@ -133,7 +134,8 @@ impl NdnEngine {
     /// Allocate a fresh InProcHandle for a subscriber or additional consumer.
     pub(crate) fn alloc_app_handle(&self) -> Result<InProcHandle, NdnError> {
         let engine_guard = self.inner.lock().unwrap();
-        let engine = engine_guard.as_ref()
+        let engine = engine_guard
+            .as_ref()
             .ok_or_else(|| NdnError::engine("engine is shut down"))?;
         let (_, h) = engine.new_app_handle();
         Ok(h)
@@ -142,7 +144,8 @@ impl NdnEngine {
     /// Register a FIB route and return a ready Producer.
     pub(crate) fn register_producer_internal(&self, name: Name) -> Result<Producer, NdnError> {
         let engine_guard = self.inner.lock().unwrap();
-        let engine = engine_guard.as_ref()
+        let engine = engine_guard
+            .as_ref()
             .ok_or_else(|| NdnError::engine("engine is shut down"))?;
         Ok(engine.register_producer(name))
     }

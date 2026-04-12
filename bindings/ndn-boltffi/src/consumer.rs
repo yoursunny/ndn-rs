@@ -63,8 +63,7 @@ impl NdnConsumer {
     /// - [`NdnError::Nacked`] — forwarder returned a Nack (e.g. `NoRoute`).
     /// - [`NdnError::Engine`] — connection closed or internal error.
     pub fn fetch(&self, name: String) -> Result<NdnData, NdnError> {
-        let parsed: ndn_packet::Name = name.parse()
-            .map_err(|_| NdnError::invalid_name(&name))?;
+        let parsed: ndn_packet::Name = name.parse().map_err(|_| NdnError::invalid_name(&name))?;
         let mut inner = self.inner.lock().unwrap();
         self.rt
             .block_on(inner.fetch(parsed))
@@ -77,8 +76,7 @@ impl NdnConsumer {
     /// Like [`fetch`](Self::fetch) but returns only the content payload.
     /// Returns [`NdnError::Engine`] if the Data packet has no content field.
     pub fn get(&self, name: String) -> Result<Vec<u8>, NdnError> {
-        let parsed: ndn_packet::Name = name.parse()
-            .map_err(|_| NdnError::invalid_name(&name))?;
+        let parsed: ndn_packet::Name = name.parse().map_err(|_| NdnError::invalid_name(&name))?;
         let mut inner = self.inner.lock().unwrap();
         self.rt
             .block_on(inner.get(parsed))

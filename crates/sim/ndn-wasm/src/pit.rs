@@ -23,13 +23,25 @@ pub struct PitEntry {
 }
 
 impl PitEntry {
-    pub fn new(name: String, can_be_prefix: bool, must_be_fresh: bool, face_id: u32, nonce: u32, now_ms: f64, lifetime_ms: f64) -> Self {
+    pub fn new(
+        name: String,
+        can_be_prefix: bool,
+        must_be_fresh: bool,
+        face_id: u32,
+        nonce: u32,
+        now_ms: f64,
+        lifetime_ms: f64,
+    ) -> Self {
         let expires = now_ms + lifetime_ms;
         Self {
             name,
             can_be_prefix,
             must_be_fresh,
-            in_records: vec![PitInRecord { face_id, nonce, expires_at: expires }],
+            in_records: vec![PitInRecord {
+                face_id,
+                nonce,
+                expires_at: expires,
+            }],
             expires_at: expires,
         }
     }
@@ -41,7 +53,11 @@ impl PitEntry {
         if self.in_records.iter().any(|r| r.nonce == nonce) {
             return false; // duplicate nonce — loop detected
         }
-        self.in_records.push(PitInRecord { face_id, nonce, expires_at });
+        self.in_records.push(PitInRecord {
+            face_id,
+            nonce,
+            expires_at,
+        });
         true
     }
 
@@ -75,8 +91,17 @@ impl SimPit {
 
     /// Check if a PIT entry exists for this Interest (for aggregation).
     #[allow(dead_code)]
-    pub fn get_mut(&mut self, name: &str, can_be_prefix: bool, must_be_fresh: bool) -> Option<&mut PitEntry> {
-        let key = PitKey { name: name.to_string(), can_be_prefix, must_be_fresh };
+    pub fn get_mut(
+        &mut self,
+        name: &str,
+        can_be_prefix: bool,
+        must_be_fresh: bool,
+    ) -> Option<&mut PitEntry> {
+        let key = PitKey {
+            name: name.to_string(),
+            can_be_prefix,
+            must_be_fresh,
+        };
         self.entries.get_mut(&key)
     }
 
@@ -84,7 +109,9 @@ impl SimPit {
     /// Returns the first matching entry's key if found.
     pub fn match_data(&self, data_name: &str) -> Option<String> {
         for entry in self.entries.values() {
-            if data_name == entry.name || (entry.can_be_prefix && data_name.starts_with(&entry.name)) {
+            if data_name == entry.name
+                || (entry.can_be_prefix && data_name.starts_with(&entry.name))
+            {
                 return Some(entry.name.clone());
             }
         }
@@ -103,14 +130,26 @@ impl SimPit {
         now_ms: f64,
         lifetime_ms: f64,
     ) -> (bool, bool) {
-        let key = PitKey { name: name.to_string(), can_be_prefix, must_be_fresh };
+        let key = PitKey {
+            name: name.to_string(),
+            can_be_prefix,
+            must_be_fresh,
+        };
         if let Some(entry) = self.entries.get_mut(&key) {
             let added = entry.add_in_record(face_id, nonce, now_ms + lifetime_ms);
             (false, added) // existing entry, aggregated
         } else {
             self.entries.insert(
                 key,
-                PitEntry::new(name.to_string(), can_be_prefix, must_be_fresh, face_id, nonce, now_ms, lifetime_ms),
+                PitEntry::new(
+                    name.to_string(),
+                    can_be_prefix,
+                    must_be_fresh,
+                    face_id,
+                    nonce,
+                    now_ms,
+                    lifetime_ms,
+                ),
             );
             (true, false) // new entry
         }
@@ -121,11 +160,16 @@ impl SimPit {
     pub fn remove_matching(&mut self, data_name: &str) -> Vec<PitEntry> {
         let mut matched_keys = Vec::new();
         for (key, entry) in &self.entries {
-            if data_name == entry.name || (entry.can_be_prefix && data_name.starts_with(&entry.name)) {
+            if data_name == entry.name
+                || (entry.can_be_prefix && data_name.starts_with(&entry.name))
+            {
                 matched_keys.push(key.clone());
             }
         }
-        matched_keys.into_iter().filter_map(|k| self.entries.remove(&k)).collect()
+        matched_keys
+            .into_iter()
+            .filter_map(|k| self.entries.remove(&k))
+            .collect()
     }
 
     pub fn len(&self) -> usize {

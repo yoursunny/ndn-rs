@@ -63,10 +63,10 @@ pub mod ble;
 
 pub mod cobs;
 
+#[cfg(feature = "ble")]
+pub use ble::{BlePlatform, EmbeddedBleFace};
 pub use clock::{Clock, FnClock, NoOpClock};
 pub use face::{ErasedFace, Face, FaceId};
 pub use fib::{Fib, FibEntry};
 pub use forwarder::Forwarder;
 pub use pit::{Pit, PitEntry};
-#[cfg(feature = "ble")]
-pub use ble::{BlePlatform, EmbeddedBleFace};

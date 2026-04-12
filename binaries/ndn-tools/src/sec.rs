@@ -119,7 +119,12 @@ fn main() -> anyhow::Result<()> {
     let pib_path = resolve_pib_path(cli.pib.as_deref());
 
     match cli.command {
-        Command::Keygen { name, anchor, days, skip_if_exists } => {
+        Command::Keygen {
+            name,
+            anchor,
+            days,
+            skip_if_exists,
+        } => {
             cmd_keygen(&pib_path, &name, anchor, days, skip_if_exists)?;
         }
         Command::Certdump { name } => {

@@ -38,7 +38,10 @@ impl ChallengeParams {
                 m.insert("token".to_string(), token.clone().into());
                 m
             }
-            ChallengeParams::Possession { cert_name, signature } => {
+            ChallengeParams::Possession {
+                cert_name,
+                signature,
+            } => {
                 let mut m = serde_json::Map::new();
                 m.insert("cert_name".to_string(), cert_name.clone().into());
                 m.insert(
@@ -108,16 +111,19 @@ pub struct NdncertClient {
 
 impl NdncertClient {
     pub fn new(consumer: ndn_app::Consumer, ca_prefix: Name) -> Self {
-        Self { consumer, ca_prefix }
+        Self {
+            consumer,
+            ca_prefix,
+        }
     }
 
     /// Fetch the CA profile.
     pub async fn fetch_ca_profile(&mut self) -> Result<ndn_cert::CaProfile, IdentityError> {
         let info_name = self.ca_prefix.clone().append("CA").append("INFO");
         let data = self.consumer.fetch(info_name).await?;
-        let content = data
-            .content()
-            .ok_or_else(|| IdentityError::Enrollment("CA INFO response has no content".to_string()))?;
+        let content = data.content().ok_or_else(|| {
+            IdentityError::Enrollment("CA INFO response has no content".to_string())
+        })?;
         let profile: ndn_cert::CaProfile = serde_json::from_slice(content)
             .map_err(|e| IdentityError::Enrollment(e.to_string()))?;
         Ok(profile)
@@ -171,11 +177,9 @@ impl NdncertClient {
             .consumer
             .fetch_with(InterestBuilder::new(challenge_name).app_parameters(challenge_body))
             .await?;
-        let challenge_content = challenge_data
-            .content()
-            .ok_or_else(|| {
-                IdentityError::Enrollment("CHALLENGE response has no content".to_string())
-            })?;
+        let challenge_content = challenge_data.content().ok_or_else(|| {
+            IdentityError::Enrollment("CHALLENGE response has no content".to_string())
+        })?;
         session.handle_challenge_response(challenge_content)?;
 
         session

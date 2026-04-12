@@ -217,7 +217,9 @@ impl ForwarderClient {
     pub async fn send(&self, pkt: Bytes) -> Result<(), ForwarderError> {
         match &self.transport {
             #[cfg(all(unix, feature = "spsc-shm"))]
-            DataTransport::Shm { handle, .. } => handle.send(pkt).await.map_err(ForwarderError::Shm),
+            DataTransport::Shm { handle, .. } => {
+                handle.send(pkt).await.map_err(ForwarderError::Shm)
+            }
             DataTransport::Unix => self.control.send(pkt).await.map_err(ForwarderError::Face),
         }
     }
@@ -368,7 +370,7 @@ fn next_shm_id() -> u32 {
 ///
 /// Returns the original bytes unchanged if the packet is not LP-wrapped.
 pub(crate) fn strip_lp(raw: Bytes) -> Bytes {
-    use ndn_packet::lp::{is_lp_packet, LpPacket};
+    use ndn_packet::lp::{LpPacket, is_lp_packet};
     if is_lp_packet(&raw)
         && let Ok(lp) = LpPacket::decode(raw.clone())
         && let Some(fragment) = lp.fragment

@@ -146,13 +146,17 @@ pub enum NdnError {
 impl NdnError {
     pub(crate) fn from_app(e: AppError, name: &str) -> Self {
         match e {
-            AppError::Timeout => NdnError::Timeout { name: name.to_string() },
+            AppError::Timeout => NdnError::Timeout {
+                name: name.to_string(),
+            },
             AppError::Nacked { reason } => NdnError::Nacked {
                 name: name.to_string(),
                 reason: format!("{reason:?}"),
             },
             AppError::Connection(e) => NdnError::Engine { msg: e.to_string() },
-            AppError::Closed => NdnError::Engine { msg: "connection closed".into() },
+            AppError::Closed => NdnError::Engine {
+                msg: "connection closed".into(),
+            },
             AppError::Protocol(msg) => NdnError::Engine { msg },
         }
     }

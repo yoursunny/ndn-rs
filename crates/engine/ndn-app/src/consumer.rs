@@ -135,9 +135,9 @@ impl Consumer {
         match validator.validate(&data).await {
             ValidationResult::Valid(safe) => Ok(*safe),
             ValidationResult::Invalid(e) => Err(AppError::Protocol(e.to_string())),
-            ValidationResult::Pending => Err(AppError::Protocol(
-                "certificate chain not resolved".into(),
-            )),
+            ValidationResult::Pending => {
+                Err(AppError::Protocol("certificate chain not resolved".into()))
+            }
         }
     }
 

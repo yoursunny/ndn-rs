@@ -13,39 +13,39 @@ use serde::{Deserialize, Serialize};
 pub fn type_name(t: u64) -> &'static str {
     use tlv_type::*;
     match t {
-        INTEREST                  => "Interest",
-        DATA                      => "Data",
-        NAME                      => "Name",
-        NAME_COMPONENT            => "GenericNameComponent",
-        IMPLICIT_SHA256           => "ImplicitSha256DigestComponent",
-        PARAMETERS_SHA256         => "ParametersSha256DigestComponent",
-        CAN_BE_PREFIX             => "CanBePrefix",
-        MUST_BE_FRESH             => "MustBeFresh",
-        FORWARDING_HINT           => "ForwardingHint",
-        NONCE                     => "Nonce",
-        INTEREST_LIFETIME         => "InterestLifetime",
-        HOP_LIMIT                 => "HopLimit",
-        APP_PARAMETERS            => "ApplicationParameters",
-        META_INFO                 => "MetaInfo",
-        CONTENT                   => "Content",
-        SIGNATURE_INFO            => "SignatureInfo",
-        SIGNATURE_VALUE           => "SignatureValue",
-        CONTENT_TYPE              => "ContentType",
-        FRESHNESS_PERIOD          => "FreshnessPeriod",
-        FINAL_BLOCK_ID            => "FinalBlockId",
-        SIGNATURE_TYPE            => "SignatureType",
-        KEY_LOCATOR               => "KeyLocator",
-        KEY_DIGEST                => "KeyDigest",
-        SIGNATURE_NONCE           => "SignatureNonce",
-        SIGNATURE_TIME            => "SignatureTime",
-        SIGNATURE_SEQ_NUM         => "SignatureSeqNum",
-        INTEREST_SIGNATURE_INFO   => "InterestSignatureInfo",
-        INTEREST_SIGNATURE_VALUE  => "InterestSignatureValue",
-        NACK                      => "Nack",
-        NACK_REASON               => "NackReason",
-        LP_PACKET                 => "LpPacket",
-        LP_FRAGMENT               => "LpFragment",
-        LP_PIT_TOKEN              => "LpPitToken",
+        INTEREST => "Interest",
+        DATA => "Data",
+        NAME => "Name",
+        NAME_COMPONENT => "GenericNameComponent",
+        IMPLICIT_SHA256 => "ImplicitSha256DigestComponent",
+        PARAMETERS_SHA256 => "ParametersSha256DigestComponent",
+        CAN_BE_PREFIX => "CanBePrefix",
+        MUST_BE_FRESH => "MustBeFresh",
+        FORWARDING_HINT => "ForwardingHint",
+        NONCE => "Nonce",
+        INTEREST_LIFETIME => "InterestLifetime",
+        HOP_LIMIT => "HopLimit",
+        APP_PARAMETERS => "ApplicationParameters",
+        META_INFO => "MetaInfo",
+        CONTENT => "Content",
+        SIGNATURE_INFO => "SignatureInfo",
+        SIGNATURE_VALUE => "SignatureValue",
+        CONTENT_TYPE => "ContentType",
+        FRESHNESS_PERIOD => "FreshnessPeriod",
+        FINAL_BLOCK_ID => "FinalBlockId",
+        SIGNATURE_TYPE => "SignatureType",
+        KEY_LOCATOR => "KeyLocator",
+        KEY_DIGEST => "KeyDigest",
+        SIGNATURE_NONCE => "SignatureNonce",
+        SIGNATURE_TIME => "SignatureTime",
+        SIGNATURE_SEQ_NUM => "SignatureSeqNum",
+        INTEREST_SIGNATURE_INFO => "InterestSignatureInfo",
+        INTEREST_SIGNATURE_VALUE => "InterestSignatureValue",
+        NACK => "Nack",
+        NACK_REASON => "NackReason",
+        LP_PACKET => "LpPacket",
+        LP_FRAGMENT => "LpFragment",
+        LP_PIT_TOKEN => "LpPitToken",
         _ => "Unknown",
     }
 }
@@ -66,17 +66,34 @@ pub fn encode_nonneg_integer(value: u64) -> Vec<u8> {
     } else if value <= 0xFFFF {
         vec![(value >> 8) as u8, value as u8]
     } else if value <= 0xFFFF_FFFF {
-        vec![(value >> 24) as u8, (value >> 16) as u8, (value >> 8) as u8, value as u8]
+        vec![
+            (value >> 24) as u8,
+            (value >> 16) as u8,
+            (value >> 8) as u8,
+            value as u8,
+        ]
     } else {
         vec![
-            (value >> 56) as u8, (value >> 48) as u8, (value >> 40) as u8, (value >> 32) as u8,
-            (value >> 24) as u8, (value >> 16) as u8, (value >> 8) as u8, value as u8,
+            (value >> 56) as u8,
+            (value >> 48) as u8,
+            (value >> 40) as u8,
+            (value >> 32) as u8,
+            (value >> 24) as u8,
+            (value >> 16) as u8,
+            (value >> 8) as u8,
+            value as u8,
         ]
     }
 }
 
 /// Encode a synthetic Interest packet using `ndn_tlv::TlvWriter`.
-pub fn encode_interest(name: &str, can_be_prefix: bool, must_be_fresh: bool, nonce: u32, lifetime_ms: u64) -> Vec<u8> {
+pub fn encode_interest(
+    name: &str,
+    can_be_prefix: bool,
+    must_be_fresh: bool,
+    nonce: u32,
+    lifetime_ms: u64,
+) -> Vec<u8> {
     let mut w = TlvWriter::new();
     w.write_nested(tlv_type::INTEREST, |w| {
         w.write_nested(tlv_type::NAME, |w| write_name_components(w, name));
@@ -88,7 +105,10 @@ pub fn encode_interest(name: &str, can_be_prefix: bool, must_be_fresh: bool, non
         }
         w.write_tlv(tlv_type::NONCE, &nonce.to_be_bytes());
         if lifetime_ms != 4000 {
-            w.write_tlv(tlv_type::INTEREST_LIFETIME, &encode_nonneg_integer(lifetime_ms));
+            w.write_tlv(
+                tlv_type::INTEREST_LIFETIME,
+                &encode_nonneg_integer(lifetime_ms),
+            );
         }
     });
     w.finish().to_vec()
@@ -101,7 +121,10 @@ pub fn encode_data(name: &str, content: &[u8], freshness_ms: u64) -> Vec<u8> {
         w.write_nested(tlv_type::NAME, |w| write_name_components(w, name));
         w.write_nested(tlv_type::META_INFO, |w| {
             if freshness_ms > 0 {
-                w.write_tlv(tlv_type::FRESHNESS_PERIOD, &encode_nonneg_integer(freshness_ms));
+                w.write_tlv(
+                    tlv_type::FRESHNESS_PERIOD,
+                    &encode_nonneg_integer(freshness_ms),
+                );
             }
         });
         w.write_tlv(tlv_type::CONTENT, content);
@@ -189,12 +212,17 @@ fn decode_tlv_range(buf: &[u8], mut pos: usize, end: usize) -> Vec<TlvNode> {
         }
 
         let value_bytes = &buf[value_start..value_end];
-        let value_hex: String = value_bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
-        let value_text = if !value_bytes.is_empty() && value_bytes.iter().all(|&b| (32u8..127).contains(&b)) {
-            Some(String::from_utf8_lossy(value_bytes).to_string())
-        } else {
-            None
-        };
+        let value_hex: String = value_bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let value_text =
+            if !value_bytes.is_empty() && value_bytes.iter().all(|&b| (32u8..127).contains(&b)) {
+                Some(String::from_utf8_lossy(value_bytes).to_string())
+            } else {
+                None
+            };
 
         // Recursively decode known container types.
         let children = if is_container(typ) {
@@ -246,5 +274,9 @@ pub fn parse_hex(hex: &str) -> Result<Vec<u8>, String> {
 
 /// Encode bytes as a hex string (space-separated, uppercase-style groups).
 pub fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

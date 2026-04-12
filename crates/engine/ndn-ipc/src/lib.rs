@@ -21,15 +21,15 @@
 pub mod blocking;
 pub mod chunked;
 pub mod client;
+pub mod forwarder_client;
 pub mod mgmt_client;
 pub mod registry;
-pub mod forwarder_client;
 pub mod server;
 
 pub use blocking::BlockingForwarderClient;
 pub use chunked::{ChunkedConsumer, ChunkedProducer, NDN_DEFAULT_SEGMENT_SIZE};
 pub use client::IpcClient;
+pub use forwarder_client::{ForwarderClient, ForwarderError};
 pub use mgmt_client::MgmtClient;
 pub use registry::ServiceRegistry;
-pub use forwarder_client::{ForwarderClient, ForwarderError};
 pub use server::IpcServer;

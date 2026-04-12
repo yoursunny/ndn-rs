@@ -199,8 +199,10 @@ impl MobileEngineBuilder {
         // Persistent CS (fjall feature).
         #[cfg(feature = "fjall")]
         if let Some(ref path) = self.persistent_cs_path {
-            let cs = ndn_store::FjallCs::open(path, self.cs_capacity_mb * 1024 * 1024)
-                .map_err(|e| anyhow::anyhow!("failed to open persistent CS at {}: {e}", path.display()))?;
+            let cs =
+                ndn_store::FjallCs::open(path, self.cs_capacity_mb * 1024 * 1024).map_err(|e| {
+                    anyhow::anyhow!("failed to open persistent CS at {}: {e}", path.display())
+                })?;
             builder = builder.content_store(Arc::new(cs));
         }
 
@@ -315,10 +317,7 @@ impl MobileEngine {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn register_producer(
-        &self,
-        prefix: impl Into<Name>,
-    ) -> Producer {
+    pub fn register_producer(&self, prefix: impl Into<Name>) -> Producer {
         let prefix: Name = prefix.into();
         let (face_id, handle) = self.new_app_handle();
         self.engine.fib().add_nexthop(&prefix, face_id, 0);

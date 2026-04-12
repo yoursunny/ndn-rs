@@ -7,11 +7,11 @@ use tracing::trace;
 
 use crate::Fib;
 use crate::enricher::ContextEnricher;
-use ndn_discovery::scope::is_link_local;
-use ndn_packet::Name;
 use crate::pipeline::{
     Action, AnyMap, DecodedPacket, DropReason, ForwardingAction, NackReason, PacketContext,
 };
+use ndn_discovery::scope::is_link_local;
+use ndn_packet::Name;
 use ndn_store::{Pit, StrategyTable};
 use ndn_strategy::{MeasurementsTable, Strategy, StrategyContext};
 use ndn_transport::face::FaceScope;

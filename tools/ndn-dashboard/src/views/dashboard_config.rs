@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 
-use crate::app::{ROUTER_RUNNING, push_toast, ToastLevel};
+use crate::app::{ROUTER_RUNNING, ToastLevel, push_toast};
 use crate::settings::{DASH_SETTINGS, save_settings};
 
 #[component]

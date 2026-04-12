@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing::{debug, trace};
 
-use ndn_packet::Name;
 use crate::pipeline::{Action, DecodedPacket, DropReason, PacketContext};
+use ndn_packet::Name;
 use ndn_security::{CertFetcher, ValidationResult, Validator};
 
 /// A queued packet awaiting certificate resolution.

@@ -64,12 +64,7 @@ impl Face for ComputeFace {
     /// Blocks until a `send()` call completes computation and enqueues a
     /// response, or returns `FaceError::Closed` if all senders are dropped.
     async fn recv(&self) -> Result<Bytes, FaceError> {
-        self.rx
-            .lock()
-            .await
-            .recv()
-            .await
-            .ok_or(FaceError::Closed)
+        self.rx.lock().await.recv().await.ok_or(FaceError::Closed)
     }
 
     /// Dispatch an incoming Interest to the matching compute handler.
@@ -96,7 +91,9 @@ impl Face for ComputeFace {
                 Some(Ok(data)) => {
                     let wire = data.raw().clone();
                     if tx.send(wire).await.is_err() {
-                        warn!("ComputeFace: pipeline receiver dropped before Data could be injected");
+                        warn!(
+                            "ComputeFace: pipeline receiver dropped before Data could be injected"
+                        );
                     }
                 }
                 Some(Err(e)) => {

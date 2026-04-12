@@ -13,8 +13,7 @@ use aes_gcm::{
 use bytes::Bytes;
 use hkdf::Hkdf;
 use p256::{
-    EncodedPoint, NistP256, PublicKey,
-    ecdh::EphemeralSecret,
+    EncodedPoint, NistP256, PublicKey, ecdh::EphemeralSecret,
     elliptic_curve::sec1::FromEncodedPoint,
 };
 use sha2::Sha256;
@@ -158,9 +157,7 @@ impl SessionKey {
                     aad,
                 },
             )
-            .map_err(|_| {
-                CertError::InvalidRequest("AES-GCM decryption failed (bad tag)".into())
-            })?;
+            .map_err(|_| CertError::InvalidRequest("AES-GCM decryption failed (bad tag)".into()))?;
 
         Ok(plaintext)
     }

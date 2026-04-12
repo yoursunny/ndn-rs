@@ -115,9 +115,19 @@ impl MeasurementsTable {
     /// Intended for management dataset queries (`measurements/list`).
     pub fn dump(&self) -> Vec<(Arc<Name>, MeasurementsEntry)> {
         #[cfg(not(target_arch = "wasm32"))]
-        return self.entries.iter().map(|r| (Arc::clone(r.key()), r.value().clone())).collect();
+        return self
+            .entries
+            .iter()
+            .map(|r| (Arc::clone(r.key()), r.value().clone()))
+            .collect();
         #[cfg(target_arch = "wasm32")]
-        return self.entries.lock().unwrap().iter().map(|(k, v)| (Arc::clone(k), v.clone())).collect();
+        return self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (Arc::clone(k), v.clone()))
+            .collect();
     }
 
     /// Record an Interest satisfaction outcome, updating the EWMA satisfaction rate.

@@ -95,7 +95,7 @@ impl ChallengeHandler for PossessionChallenge {
                 None => {
                     return Ok(ChallengeOutcome::Denied(format!(
                         "certificate not trusted: {cert_name_str}"
-                    )))
+                    )));
                 }
             };
 

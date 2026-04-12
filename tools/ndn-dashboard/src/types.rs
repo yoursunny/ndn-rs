@@ -17,8 +17,8 @@ impl LogLevel {
         match s.to_ascii_uppercase().as_str() {
             "TRACE" => Some(Self::Trace),
             "DEBUG" => Some(Self::Debug),
-            "INFO"  => Some(Self::Info),
-            "WARN"  => Some(Self::Warn),
+            "INFO" => Some(Self::Info),
+            "WARN" => Some(Self::Warn),
             "ERROR" => Some(Self::Error),
             _ => None,
         }
@@ -28,8 +28,8 @@ impl LogLevel {
         match self {
             Self::Trace => "TRACE",
             Self::Debug => "DEBUG",
-            Self::Info  => "INFO",
-            Self::Warn  => "WARN",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
             Self::Error => "ERROR",
         }
     }
@@ -39,8 +39,8 @@ impl LogLevel {
         match self {
             Self::Trace => "#8b949e",
             Self::Debug => "#58a6ff",
-            Self::Info  => "#3fb950",
-            Self::Warn  => "#d29922",
+            Self::Info => "#3fb950",
+            Self::Warn => "#d29922",
             Self::Error => "#f85149",
         }
     }
@@ -50,8 +50,8 @@ impl LogLevel {
         match self {
             Self::Trace => "#1c2128",
             Self::Debug => "#0c2d6b",
-            Self::Info  => "#1a4731",
-            Self::Warn  => "#3d3000",
+            Self::Info => "#1a4731",
+            Self::Warn => "#3d3000",
             Self::Error => "#4e1717",
         }
     }
@@ -61,10 +61,10 @@ impl LogLevel {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogEntry {
     pub timestamp: String,
-    pub level:     LogLevel,
+    pub level: LogLevel,
     pub thread_id: Option<String>,
-    pub target:    String,
-    pub message:   String,
+    pub target: String,
+    pub message: String,
 }
 
 /// Strip ANSI escape sequences from `s` (e.g. `\x1b[32m`, `\x1b[0m`).
@@ -108,10 +108,10 @@ impl LogEntry {
     fn parse_line_inner(s: &str) -> Self {
         let raw_fallback = || Self {
             timestamp: String::new(),
-            level:     LogLevel::Info,
+            level: LogLevel::Info,
             thread_id: None,
-            target:    String::new(),
-            message:   s.to_owned(),
+            target: String::new(),
+            message: s.to_owned(),
         };
 
         // Split off timestamp (first space-separated token)
@@ -145,7 +145,7 @@ impl LogEntry {
         // Split "target: message" on the first ": "
         let (target, message) = match rest.find(": ") {
             Some(i) => (&rest[..i], &rest[i + 2..]),
-            None    => ("", rest),
+            None => ("", rest),
         };
 
         Self {
@@ -179,9 +179,9 @@ impl ForwarderStatus {
             if let Some((k, v)) = token.split_once('=') {
                 match k {
                     "faces" => s.n_faces = v.parse().unwrap_or(0),
-                    "fib"   => s.n_fib   = v.parse().unwrap_or(0),
-                    "pit"   => s.n_pit   = v.parse().unwrap_or(0),
-                    "cs"    => s.n_cs    = v.parse().unwrap_or(0),
+                    "fib" => s.n_fib = v.parse().unwrap_or(0),
+                    "pit" => s.n_pit = v.parse().unwrap_or(0),
+                    "cs" => s.n_cs = v.parse().unwrap_or(0),
                     _ => {}
                 }
             }
@@ -226,11 +226,11 @@ impl FaceInfo {
             for token in line.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "faceid"      => f.face_id   = v.parse().unwrap_or(0),
-                        "remote"      => f.remote_uri = Some(v.into()),
-                        "local"       => f.local_uri  = Some(v.into()),
+                        "faceid" => f.face_id = v.parse().unwrap_or(0),
+                        "remote" => f.remote_uri = Some(v.into()),
+                        "local" => f.local_uri = Some(v.into()),
                         "persistency" => f.persistency = v.into(),
-                        "kind"        => f.kind = Some(v.into()),
+                        "kind" => f.kind = Some(v.into()),
                         _ => {}
                     }
                 }
@@ -245,14 +245,18 @@ impl FaceInfo {
         if let Some(k) = &self.kind {
             return k.as_str();
         }
-        let uri = self.remote_uri.as_deref().or(self.local_uri.as_deref()).unwrap_or("");
+        let uri = self
+            .remote_uri
+            .as_deref()
+            .or(self.local_uri.as_deref())
+            .unwrap_or("");
         match uri {
             u if u.starts_with("udp4://") || u.starts_with("udp://") => "UDP",
             u if u.starts_with("tcp4://") || u.starts_with("tcp://") => "TCP",
-            u if u.starts_with("ws://")   || u.starts_with("wss://") => "WS",
-            u if u.starts_with("ether://")                            => "Ether",
-            u if u.starts_with("shm://")                              => "SHM",
-            u if u.starts_with("unix://")                             => "Unix",
+            u if u.starts_with("ws://") || u.starts_with("wss://") => "WS",
+            u if u.starts_with("ether://") => "Ether",
+            u if u.starts_with("shm://") => "SHM",
+            u if u.starts_with("unix://") => "Unix",
             _ => "?",
         }
     }
@@ -260,12 +264,12 @@ impl FaceInfo {
     /// CSS class for the kind badge colour.
     pub fn kind_badge_class(&self) -> &str {
         match self.kind_label() {
-            "UDP"   => "badge badge-green",
-            "TCP"   => "badge badge-blue",
-            "WS"    => "badge badge-yellow",
+            "UDP" => "badge badge-green",
+            "TCP" => "badge badge-blue",
+            "WS" => "badge badge-yellow",
             "Ether" => "badge badge-yellow",
-            "SHM"   => "badge badge-gray",
-            _       => "badge badge-gray",
+            "SHM" => "badge badge-gray",
+            _ => "badge badge-gray",
         }
     }
 }
@@ -300,7 +304,7 @@ impl FibEntry {
             }
             let (prefix, nexthops_text) = match line.find(" nexthops=") {
                 Some(i) => (&line[..i], &line[i + " nexthops=".len()..]),
-                None    => (line, "[]"),
+                None => (line, "[]"),
             };
             entries.push(FibEntry {
                 prefix: prefix.trim().to_string(),
@@ -313,16 +317,22 @@ impl FibEntry {
 
 fn parse_nexthops(text: &str) -> Vec<NextHop> {
     let inner = text.trim_matches(|c| c == '[' || c == ']');
-    inner.split(',')
+    inner
+        .split(',')
         .filter_map(|part| {
             let part = part.trim();
-            if part.is_empty() { return None; }
-            let mut nh = NextHop { face_id: 0, cost: 0 };
+            if part.is_empty() {
+                return None;
+            }
+            let mut nh = NextHop {
+                face_id: 0,
+                cost: 0,
+            };
             for token in part.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
                         "faceid" => nh.face_id = v.parse().unwrap_or(0),
-                        "cost"   => nh.cost    = v.parse().unwrap_or(0),
+                        "cost" => nh.cost = v.parse().unwrap_or(0),
                         _ => {}
                     }
                 }
@@ -365,11 +375,11 @@ impl CsInfo {
                 let v = v.trim_end_matches('B');
                 match k {
                     "capacity" => info.capacity_bytes = v.parse().unwrap_or(0),
-                    "entries"  => info.n_entries      = v.parse().unwrap_or(0),
-                    "used"     => info.used_bytes      = v.parse().unwrap_or(0),
-                    "hits"     => info.hits            = v.parse().unwrap_or(0),
-                    "misses"   => info.misses          = v.parse().unwrap_or(0),
-                    "variant"  => info.variant         = v.to_string(),
+                    "entries" => info.n_entries = v.parse().unwrap_or(0),
+                    "used" => info.used_bytes = v.parse().unwrap_or(0),
+                    "hits" => info.hits = v.parse().unwrap_or(0),
+                    "misses" => info.misses = v.parse().unwrap_or(0),
+                    "variant" => info.variant = v.to_string(),
                     _ => {}
                 }
             }
@@ -379,7 +389,11 @@ impl CsInfo {
 
     pub fn hit_rate_pct(&self) -> f64 {
         let total = self.hits + self.misses;
-        if total == 0 { 0.0 } else { self.hits as f64 / total as f64 * 100.0 }
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64 * 100.0
+        }
     }
 
     pub fn capacity_mb(&self) -> f64 {
@@ -395,13 +409,13 @@ impl CsInfo {
 
 #[derive(Debug, Clone, Default)]
 pub struct FaceCounter {
-    pub face_id:       u64,
-    pub in_interests:  u64,
-    pub in_data:       u64,
+    pub face_id: u64,
+    pub in_interests: u64,
+    pub in_data: u64,
     pub out_interests: u64,
-    pub out_data:      u64,
-    pub in_bytes:      u64,
-    pub out_bytes:     u64,
+    pub out_data: u64,
+    pub in_bytes: u64,
+    pub out_bytes: u64,
 }
 
 impl FaceCounter {
@@ -423,13 +437,13 @@ impl FaceCounter {
                 if let Some((k, v)) = token.split_once('=') {
                     let n: u64 = v.parse().unwrap_or(0);
                     match k {
-                        "faceid"        => c.face_id       = n,
-                        "in_interests"  => c.in_interests  = n,
-                        "in_data"       => c.in_data       = n,
+                        "faceid" => c.face_id = n,
+                        "in_interests" => c.in_interests = n,
+                        "in_data" => c.in_data = n,
                         "out_interests" => c.out_interests = n,
-                        "out_data"      => c.out_data      = n,
-                        "in_bytes"      => c.in_bytes      = n,
-                        "out_bytes"     => c.out_bytes     = n,
+                        "out_data" => c.out_data = n,
+                        "in_bytes" => c.in_bytes = n,
+                        "out_bytes" => c.out_bytes = n,
                         _ => {}
                     }
                 }
@@ -475,14 +489,14 @@ impl MeasurementEntry {
 
             // Extract rtt=[...] block first to avoid splitting on its contents
             let (main_part, rtt_part) = match line.find(" rtt=[") {
-                Some(i) => (&line[..i], &line[i + " rtt=[".len()..line.len()-1]),
-                None    => (line, ""),
+                Some(i) => (&line[..i], &line[i + " rtt=[".len()..line.len() - 1]),
+                None => (line, ""),
             };
 
             for token in main_part.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "prefix"   => prefix   = v.to_string(),
+                        "prefix" => prefix = v.to_string(),
                         "sat_rate" => sat_rate = v.parse().unwrap_or(0.0),
                         _ => {}
                     }
@@ -499,7 +513,11 @@ impl MeasurementEntry {
             }
 
             if !prefix.is_empty() {
-                out.push(MeasurementEntry { prefix, satisfaction_rate: sat_rate, face_rtts });
+                out.push(MeasurementEntry {
+                    prefix,
+                    satisfaction_rate: sat_rate,
+                    face_rtts,
+                });
             }
         }
         out
@@ -507,9 +525,13 @@ impl MeasurementEntry {
 
     /// Satisfaction rate as a CSS color class.
     pub fn sat_rate_class(&self) -> &'static str {
-        if self.satisfaction_rate >= 0.9 { "badge badge-green" }
-        else if self.satisfaction_rate >= 0.5 { "badge badge-yellow" }
-        else { "badge badge-red" }
+        if self.satisfaction_rate >= 0.9 {
+            "badge badge-green"
+        } else if self.satisfaction_rate >= 0.5 {
+            "badge badge-yellow"
+        } else {
+            "badge badge-red"
+        }
     }
 }
 
@@ -518,31 +540,37 @@ impl MeasurementEntry {
 /// One sample of aggregated traffic (summed across all faces).
 #[derive(Debug, Clone, Default)]
 pub struct ThroughputSample {
-    pub in_bytes:      u64,
-    pub out_bytes:     u64,
-    pub in_interests:  u64,
+    pub in_bytes: u64,
+    pub out_bytes: u64,
+    pub in_interests: u64,
     pub out_interests: u64,
 }
 
 impl ThroughputSample {
     /// Compute per-second rate between two cumulative counter snapshots.
     /// `elapsed_secs` is the poll interval (typically 3.0).
-    pub fn rate_from_delta(prev: &ThroughputSample, curr: &ThroughputSample, elapsed_secs: f64) -> ThroughputSample {
+    pub fn rate_from_delta(
+        prev: &ThroughputSample,
+        curr: &ThroughputSample,
+        elapsed_secs: f64,
+    ) -> ThroughputSample {
         let delta = |a: u64, b: u64| b.saturating_sub(a);
         ThroughputSample {
-            in_bytes:      (delta(prev.in_bytes,      curr.in_bytes)      as f64 / elapsed_secs) as u64,
-            out_bytes:     (delta(prev.out_bytes,     curr.out_bytes)     as f64 / elapsed_secs) as u64,
-            in_interests:  (delta(prev.in_interests,  curr.in_interests)  as f64 / elapsed_secs) as u64,
-            out_interests: (delta(prev.out_interests, curr.out_interests) as f64 / elapsed_secs) as u64,
+            in_bytes: (delta(prev.in_bytes, curr.in_bytes) as f64 / elapsed_secs) as u64,
+            out_bytes: (delta(prev.out_bytes, curr.out_bytes) as f64 / elapsed_secs) as u64,
+            in_interests: (delta(prev.in_interests, curr.in_interests) as f64 / elapsed_secs)
+                as u64,
+            out_interests: (delta(prev.out_interests, curr.out_interests) as f64 / elapsed_secs)
+                as u64,
         }
     }
 
     /// Sum all face counters into a single aggregate snapshot.
     pub fn from_counters(counters: &[FaceCounter]) -> ThroughputSample {
         ThroughputSample {
-            in_bytes:      counters.iter().map(|c| c.in_bytes).sum(),
-            out_bytes:     counters.iter().map(|c| c.out_bytes).sum(),
-            in_interests:  counters.iter().map(|c| c.in_interests).sum(),
+            in_bytes: counters.iter().map(|c| c.in_bytes).sum(),
+            out_bytes: counters.iter().map(|c| c.out_bytes).sum(),
+            in_interests: counters.iter().map(|c| c.in_interests).sum(),
             out_interests: counters.iter().map(|c| c.out_interests).sum(),
         }
     }
@@ -550,9 +578,9 @@ impl ThroughputSample {
     /// Cumulative snapshot from a single face counter (raw values, not rates).
     pub fn from_face_counter(c: &FaceCounter) -> ThroughputSample {
         ThroughputSample {
-            in_bytes:      c.in_bytes,
-            out_bytes:     c.out_bytes,
-            in_interests:  c.in_interests,
+            in_bytes: c.in_bytes,
+            out_bytes: c.out_bytes,
+            in_interests: c.in_interests,
             out_interests: c.out_interests,
         }
     }
@@ -562,7 +590,7 @@ impl ThroughputSample {
 
 #[derive(Debug, Clone)]
 pub struct SessionEntry {
-    pub kind:   String,
+    pub kind: String,
     pub params: String,
 }
 
@@ -570,11 +598,11 @@ pub struct SessionEntry {
 
 #[derive(Debug, Clone)]
 pub struct NeighborInfo {
-    pub node_name:   String,
-    pub state:       String,   // "Established", "Stale", "Probing", "Absent"
+    pub node_name: String,
+    pub state: String, // "Established", "Stale", "Probing", "Absent"
     pub last_seen_s: Option<f64>,
-    pub rtt_us:      Option<u32>,
-    pub face_ids:    Vec<u64>,
+    pub rtt_us: Option<u32>,
+    pub face_ids: Vec<u64>,
 }
 
 impl NeighborInfo {
@@ -603,7 +631,7 @@ impl NeighborInfo {
 
             let (main_part, faces_part) = match rest_str.find("faces=[") {
                 Some(i) => (&rest_str[..i], &rest_str[i + "faces=[".len()..]),
-                None    => (rest_str.as_str(), ""),
+                None => (rest_str.as_str(), ""),
             };
             let faces_part = faces_part.trim_end_matches(']');
 
@@ -619,7 +647,7 @@ impl NeighborInfo {
             for token in main_part.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "state"     => state = v.to_string(),
+                        "state" => state = v.to_string(),
                         "last_seen" => {
                             // "2.5s" — strip trailing 's'
                             last_seen_s = v.trim_end_matches('s').parse().ok();
@@ -634,7 +662,13 @@ impl NeighborInfo {
                 }
             }
 
-            out.push(NeighborInfo { node_name, state, last_seen_s, rtt_us, face_ids });
+            out.push(NeighborInfo {
+                node_name,
+                state,
+                last_seen_s,
+                rtt_us,
+                face_ids,
+            });
         }
         out
     }
@@ -642,9 +676,9 @@ impl NeighborInfo {
     pub fn state_badge_class(&self) -> &'static str {
         match self.state.as_str() {
             "Established" => "badge badge-green",
-            "Stale"       => "badge badge-yellow",
-            "Probing"     => "badge badge-blue",
-            _             => "badge badge-gray",
+            "Stale" => "badge badge-yellow",
+            "Probing" => "badge badge-blue",
+            _ => "badge badge-gray",
         }
     }
 }
@@ -653,8 +687,8 @@ impl NeighborInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecurityKeyInfo {
-    pub name:        String,
-    pub has_cert:    bool,
+    pub name: String,
+    pub has_cert: bool,
     pub valid_until: String,
 }
 
@@ -713,15 +747,19 @@ impl SecurityKeyInfo {
             for token in line.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "name"        => name = v.to_string(),
-                        "has_cert"    => has_cert = v == "true",
+                        "name" => name = v.to_string(),
+                        "has_cert" => has_cert = v == "true",
                         "valid_until" => valid_until = v.to_string(),
                         _ => {}
                     }
                 }
             }
             if !name.is_empty() {
-                out.push(SecurityKeyInfo { name, has_cert, valid_until });
+                out.push(SecurityKeyInfo {
+                    name,
+                    has_cert,
+                    valid_until,
+                });
             }
         }
         out
@@ -740,7 +778,9 @@ impl AnchorInfo {
         for line in text.lines() {
             let line = line.trim();
             if let Some(name) = line.strip_prefix("name=") {
-                out.push(AnchorInfo { name: name.to_string() });
+                out.push(AnchorInfo {
+                    name: name.to_string(),
+                });
             }
         }
         out
@@ -774,7 +814,7 @@ impl StrategyEntry {
             for token in line.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
                     match k {
-                        "prefix"   => prefix   = v.to_string(),
+                        "prefix" => prefix = v.to_string(),
                         "strategy" => strategy = v.to_string(),
                         _ => {}
                     }
@@ -827,17 +867,17 @@ impl DiscoveryStatus {
                 found = true;
                 let v = v.trim();
                 match k.trim() {
-                    "discovery"                => s.enabled               = v == "enabled",
-                    "hello_strategy"           => s.strategy              = v.to_string(),
-                    "hello_interval_base_ms"   => s.hello_interval_base_ms  = v.parse().unwrap_or(0),
-                    "hello_interval_max_ms"    => s.hello_interval_max_ms   = v.parse().unwrap_or(0),
-                    "tick_interval_ms"         => s.tick_interval_ms        = v.parse().unwrap_or(0),
-                    "liveness_timeout_s"       => s.liveness_timeout_s      = v.parse().unwrap_or(0),
-                    "liveness_miss_count"      => s.liveness_miss_count     = v.parse().unwrap_or(0),
-                    "gossip_fanout"            => s.gossip_fanout           = v.parse().unwrap_or(0),
-                    "swim_indirect_fanout"     => s.swim_indirect_fanout    = v.parse().unwrap_or(0),
-                    "probe_timeout_ms"         => s.probe_timeout_ms        = v.parse().unwrap_or(0),
-                    "prefix_announcement"      => s.prefix_announcement     = v == "true",
+                    "discovery" => s.enabled = v == "enabled",
+                    "hello_strategy" => s.strategy = v.to_string(),
+                    "hello_interval_base_ms" => s.hello_interval_base_ms = v.parse().unwrap_or(0),
+                    "hello_interval_max_ms" => s.hello_interval_max_ms = v.parse().unwrap_or(0),
+                    "tick_interval_ms" => s.tick_interval_ms = v.parse().unwrap_or(0),
+                    "liveness_timeout_s" => s.liveness_timeout_s = v.parse().unwrap_or(0),
+                    "liveness_miss_count" => s.liveness_miss_count = v.parse().unwrap_or(0),
+                    "gossip_fanout" => s.gossip_fanout = v.parse().unwrap_or(0),
+                    "swim_indirect_fanout" => s.swim_indirect_fanout = v.parse().unwrap_or(0),
+                    "probe_timeout_ms" => s.probe_timeout_ms = v.parse().unwrap_or(0),
+                    "prefix_announcement" => s.prefix_announcement = v == "true",
                     _ => {}
                 }
             }
@@ -868,8 +908,8 @@ impl DvrStatus {
                 let v = v.trim();
                 match k.trim() {
                     "update_interval_ms" => s.update_interval_ms = v.parse().unwrap_or(0),
-                    "route_ttl_ms"       => s.route_ttl_ms       = v.parse().unwrap_or(0),
-                    "route_count"        => s.route_count         = v.parse().unwrap_or(0),
+                    "route_ttl_ms" => s.route_ttl_ms = v.parse().unwrap_or(0),
+                    "route_count" => s.route_count = v.parse().unwrap_or(0),
                     _ => {}
                 }
             }
@@ -905,10 +945,19 @@ impl CaInfo {
             let line = line.trim();
             if let Some((k, v)) = line.split_once('=') {
                 match k {
-                    "ca_prefix" => { s.ca_prefix = v.to_string(); found = true; }
-                    "ca_info"   => s.ca_info = v.to_string(),
+                    "ca_prefix" => {
+                        s.ca_prefix = v.to_string();
+                        found = true;
+                    }
+                    "ca_info" => s.ca_info = v.to_string(),
                     "max_validity_days" => s.max_validity_days = v.parse().unwrap_or(365),
-                    "challenges" => s.challenges = v.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect(),
+                    "challenges" => {
+                        s.challenges = v
+                            .split(',')
+                            .map(|c| c.trim().to_string())
+                            .filter(|c| !c.is_empty())
+                            .collect()
+                    }
                     _ => {}
                 }
             }
@@ -922,9 +971,9 @@ impl CaInfo {
 /// A single trust schema rule returned by `security/schema-list`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaRuleInfo {
-    pub index:        usize,
+    pub index: usize,
     pub data_pattern: String,
-    pub key_pattern:  String,
+    pub key_pattern: String,
 }
 
 impl SchemaRuleInfo {
@@ -949,7 +998,7 @@ impl SchemaRuleInfo {
                 out.push(SchemaRuleInfo {
                     index,
                     data_pattern: data.trim().to_string(),
-                    key_pattern:  key.trim().to_string(),
+                    key_pattern: key.trim().to_string(),
                 });
             }
         }

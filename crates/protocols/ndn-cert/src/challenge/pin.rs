@@ -50,7 +50,10 @@ impl PinChallenge {
         let hash = digest(&SHA256, pin.as_bytes());
         let mut pin_hash = [0u8; 32];
         pin_hash.copy_from_slice(hash.as_ref());
-        Self { pin_hash, max_tries }
+        Self {
+            pin_hash,
+            max_tries,
+        }
     }
 }
 
@@ -93,7 +96,11 @@ impl ChallengeHandler for PinChallenge {
         Box::pin(async move {
             let code = match code {
                 Some(c) => c,
-                None => return Ok(ChallengeOutcome::Denied("missing 'code' parameter".to_string())),
+                None => {
+                    return Ok(ChallengeOutcome::Denied(
+                        "missing 'code' parameter".to_string(),
+                    ));
+                }
             };
 
             let submitted_hash = digest(&SHA256, code.as_bytes());
@@ -102,7 +109,9 @@ impl ChallengeHandler for PinChallenge {
             if matches {
                 Ok(ChallengeOutcome::Approved)
             } else if remaining_tries <= 1 {
-                Ok(ChallengeOutcome::Denied("PIN verification failed: no attempts remaining".to_string()))
+                Ok(ChallengeOutcome::Denied(
+                    "PIN verification failed: no attempts remaining".to_string(),
+                ))
             } else {
                 let new_tries = remaining_tries - 1;
                 Ok(ChallengeOutcome::Pending {

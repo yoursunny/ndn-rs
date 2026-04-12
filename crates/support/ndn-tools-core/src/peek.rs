@@ -50,7 +50,9 @@ async fn fetch_one(
     can_be_prefix: bool,
 ) -> Result<Data> {
     let mut b = InterestBuilder::new(name.clone()).lifetime(lifetime);
-    if can_be_prefix { b = b.can_be_prefix(); }
+    if can_be_prefix {
+        b = b.can_be_prefix();
+    }
     client.send(b.build()).await?;
     let timeout = lifetime + Duration::from_millis(500);
     let raw = tokio::time::timeout(timeout, client.recv())
@@ -88,7 +90,12 @@ async fn fetch_segmented(
     let first = Data::decode(raw).map_err(|e| anyhow::anyhow!("decode: {e}"))?;
 
     if verbose {
-        let _ = tx.send(ToolEvent::info(format!("ndn-peek: discovered name: {}", first.name))).await;
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "ndn-peek: discovered name: {}",
+                first.name
+            )))
+            .await;
     }
 
     // The response name should end with a SegmentNameComponent (type 0x32).
@@ -110,13 +117,21 @@ async fn fetch_segmented(
         .unwrap_or(1);
 
     if verbose {
-        let _ = tx.send(ToolEvent::info(format!(
-            "ndn-peek: versioned prefix: {versioned_prefix}  total segments: {total_segs}"
-        ))).await;
-        let _ = tx.send(
-            ToolEvent::info(format!("ndn-peek: {total_segs} segment(s) to fetch"))
-                .with_data(ToolData::FetchProgress { received: 1, total: total_segs })
-        ).await;
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "ndn-peek: versioned prefix: {versioned_prefix}  total segments: {total_segs}"
+            )))
+            .await;
+        let _ = tx
+            .send(
+                ToolEvent::info(format!("ndn-peek: {total_segs} segment(s) to fetch")).with_data(
+                    ToolData::FetchProgress {
+                        received: 1,
+                        total: total_segs,
+                    },
+                ),
+            )
+            .await;
     }
 
     let seg0_content = first.content().cloned().unwrap_or_else(Bytes::new);
@@ -132,34 +147,53 @@ async fn fetch_segmented(
     let mut segments: Vec<Option<Bytes>> = vec![None; total_segs];
     segments[seg0_idx] = Some(seg0_content);
     let mut in_flight: HashMap<u64, (usize, Instant)> = HashMap::new();
-    let mut next_seg: usize  = if seg0_idx == 0 { 1 } else { 0 };
-    let mut received: usize  = 1;
-    let mut seq:      u64    = 0;
+    let mut next_seg: usize = if seg0_idx == 0 { 1 } else { 0 };
+    let mut received: usize = 1;
+    let mut seq: u64 = 0;
 
     loop {
         while in_flight.len() < pipeline && next_seg < total_segs {
-            if next_seg == seg0_idx { next_seg += 1; continue; }
+            if next_seg == seg0_idx {
+                next_seg += 1;
+                continue;
+            }
             client.send(make_interest(next_seg)).await?;
             in_flight.insert(seq, (next_seg, Instant::now()));
-            seq += 1; next_seg += 1;
+            seq += 1;
+            next_seg += 1;
         }
-        if received == total_segs { break; }
+        if received == total_segs {
+            break;
+        }
 
         let drain = lifetime + Duration::from_millis(500);
         match tokio::time::timeout(drain, client.recv()).await {
             Ok(Some(raw)) => {
                 if let Ok(data) = Data::decode(raw) {
-                    let seg_idx = data.name.components().last()
+                    let seg_idx = data
+                        .name
+                        .components()
+                        .last()
                         .and_then(|c| c.as_segment())
                         .map(|s| s as usize);
-                    if let Some(idx) = seg_idx.filter(|&i| i < total_segs && segments[i].is_none()) {
+                    if let Some(idx) = seg_idx.filter(|&i| i < total_segs && segments[i].is_none())
+                    {
                         segments[idx] = Some(data.content().cloned().unwrap_or_else(Bytes::new));
                         received += 1;
                         if verbose {
-                            let _ = tx.send(
-                                ToolEvent::info(format!("ndn-peek: {received}/{total_segs} segments"))
-                                    .with_data(ToolData::FetchProgress { received, total: total_segs })
-                            ).await;
+                            let _ = tx
+                                .send(
+                                    ToolEvent::info(format!(
+                                        "ndn-peek: {received}/{total_segs} segments"
+                                    ))
+                                    .with_data(
+                                        ToolData::FetchProgress {
+                                            received,
+                                            total: total_segs,
+                                        },
+                                    ),
+                                )
+                                .await;
                         }
                         in_flight.retain(|_, (s, _)| *s != idx);
                     }
@@ -187,11 +221,17 @@ async fn fetch_segmented(
 
 /// Decode FinalBlockId as a SegmentNameComponent (TLV 0x32, big-endian integer).
 fn decode_final_block_id_segment(fb: &[u8]) -> Option<usize> {
-    if fb.len() < 2 { return None; }
+    if fb.len() < 2 {
+        return None;
+    }
     // Expect TLV type 0x32 (SegmentNameComponent).
-    if fb[0] != 0x32 { return None; }
+    if fb[0] != 0x32 {
+        return None;
+    }
     let len = fb[1] as usize;
-    if fb.len() < 2 + len { return None; }
+    if fb.len() < 2 + len {
+        return None;
+    }
     let value = &fb[2..2 + len];
     let mut n = 0usize;
     for &b in value {
@@ -201,12 +241,16 @@ fn decode_final_block_id_segment(fb: &[u8]) -> Option<usize> {
 }
 
 fn reassemble(segments: Vec<Option<Bytes>>) -> Result<Bytes> {
-    let total: usize = segments.iter().filter_map(|s| s.as_ref()).map(|s| s.len()).sum();
+    let total: usize = segments
+        .iter()
+        .filter_map(|s| s.as_ref())
+        .map(|s| s.len())
+        .sum();
     let mut out = BytesMut::with_capacity(total);
     for seg in &segments {
         match seg {
             Some(b) => out.extend_from_slice(b),
-            None    => anyhow::bail!("incomplete transfer: missing segment(s)"),
+            None => anyhow::bail!("incomplete transfer: missing segment(s)"),
         }
     }
     Ok(out.freeze())
@@ -216,34 +260,49 @@ fn reassemble(segments: Vec<Option<Bytes>>) -> Result<Bytes> {
 
 /// Fetch a named Data packet (single) or segmented object, emitting events to `tx`.
 pub async fn run_peek(params: PeekParams, tx: mpsc::Sender<ToolEvent>) -> Result<()> {
-    let name     = params.name.parse::<Name>().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let name = params
+        .name
+        .parse::<Name>()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let lifetime = Duration::from_millis(params.lifetime_ms);
-    let client   = if params.conn.use_shm {
+    let client = if params.conn.use_shm {
         ForwarderClient::connect(&params.conn.face_socket).await?
     } else {
         ForwarderClient::connect_unix_only(&params.conn.face_socket).await?
     };
 
     let transport = if client.is_shm() { "SHM" } else { "Unix" };
-    let _ = tx.send(ToolEvent::info(format!(
-        "ndn-peek: fetching {name}  [{transport}]  lifetime={}ms", params.lifetime_ms
-    ))).await;
+    let _ = tx
+        .send(ToolEvent::info(format!(
+            "ndn-peek: fetching {name}  [{transport}]  lifetime={}ms",
+            params.lifetime_ms
+        )))
+        .await;
 
     if let Some(pipeline) = params.pipeline {
         let pipeline = pipeline.max(1);
-        let _ = tx.send(ToolEvent::info(format!(
-            "ndn-peek: segmented pipeline={pipeline}  mode=ndn-cxx"
-        ))).await;
-        let t0       = Instant::now();
-        let assembled = fetch_segmented(&client, &name, pipeline, lifetime, params.verbose, &tx).await?;
-        let elapsed  = t0.elapsed();
-        let rate     = if elapsed.as_secs_f64() > 0.0 {
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "ndn-peek: segmented pipeline={pipeline}  mode=ndn-cxx"
+            )))
+            .await;
+        let t0 = Instant::now();
+        let assembled =
+            fetch_segmented(&client, &name, pipeline, lifetime, params.verbose, &tx).await?;
+        let elapsed = t0.elapsed();
+        let rate = if elapsed.as_secs_f64() > 0.0 {
             assembled.len() as f64 / elapsed.as_secs_f64() / 1024.0
-        } else { 0.0 };
-        let _ = tx.send(ToolEvent::info(format!(
-            "ndn-peek: {} bytes in {:.2}s ({:.1} KB/s)",
-            assembled.len(), elapsed.as_secs_f64(), rate
-        ))).await;
+        } else {
+            0.0
+        };
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "ndn-peek: {} bytes in {:.2}s ({:.1} KB/s)",
+                assembled.len(),
+                elapsed.as_secs_f64(),
+                rate
+            )))
+            .await;
         emit_content(&assembled, &name, &params, &tx).await?;
     } else {
         let data = fetch_one(&client, &name, lifetime, params.can_be_prefix).await?;
@@ -267,7 +326,12 @@ async fn emit_content(
     let saved_to;
     if let Some(ref path) = params.output {
         tokio::fs::write(path, data).await?;
-        let _ = tx.send(ToolEvent::info(format!("ndn-peek: saved {} bytes to {path}", data.len()))).await;
+        let _ = tx
+            .send(ToolEvent::info(format!(
+                "ndn-peek: saved {} bytes to {path}",
+                data.len()
+            )))
+            .await;
         saved_to = Some(path.clone());
     } else if params.hex {
         let hex: String = data.iter().map(|b| format!("{b:02x}")).collect();
@@ -275,44 +339,62 @@ async fn emit_content(
         saved_to = None;
     } else {
         match std::str::from_utf8(data) {
-            Ok(s) => { let _ = tx.send(ToolEvent::info(s.trim_end())).await; }
+            Ok(s) => {
+                let _ = tx.send(ToolEvent::info(s.trim_end())).await;
+            }
             Err(_) => {
-                let _ = tx.send(ToolEvent::warn(format!(
-                    "ndn-peek: binary content ({} bytes); use output path or hex mode",
-                    data.len()
-                ))).await;
+                let _ = tx
+                    .send(ToolEvent::warn(format!(
+                        "ndn-peek: binary content ({} bytes); use output path or hex mode",
+                        data.len()
+                    )))
+                    .await;
             }
         }
         saved_to = None;
     }
 
-    let _ = tx.send(
-        ToolEvent::info(String::new())
-            .with_data(ToolData::PeekResult {
+    let _ = tx
+        .send(
+            ToolEvent::info(String::new()).with_data(ToolData::PeekResult {
                 name: name.to_string(),
                 bytes_received: data.len() as u64,
                 saved_to,
-            })
-    ).await;
+            }),
+        )
+        .await;
 
     Ok(())
 }
 
 async fn emit_meta(data: &Data, tx: &mpsc::Sender<ToolEvent>) {
-    let _ = tx.send(ToolEvent::info(format!("  name:     {}", data.name))).await;
+    let _ = tx
+        .send(ToolEvent::info(format!("  name:     {}", data.name)))
+        .await;
     if let Some(mi) = data.meta_info() {
         if let Some(fp) = mi.freshness_period {
-            let _ = tx.send(ToolEvent::info(format!("  freshness: {}ms", fp.as_millis()))).await;
+            let _ = tx
+                .send(ToolEvent::info(format!(
+                    "  freshness: {}ms",
+                    fp.as_millis()
+                )))
+                .await;
         }
         if let Some(ref fb) = mi.final_block_id {
             let last = decode_final_block_id_segment(fb);
-            let _ = tx.send(ToolEvent::info(format!("  final-block-id: {last:?}"))).await;
+            let _ = tx
+                .send(ToolEvent::info(format!("  final-block-id: {last:?}")))
+                .await;
         }
     }
     let content_len = data.content().map(|b| b.len()).unwrap_or(0);
-    let _ = tx.send(ToolEvent::info(format!("  content:  {content_len} bytes"))).await;
+    let _ = tx
+        .send(ToolEvent::info(format!("  content:  {content_len} bytes")))
+        .await;
     if let Some(si) = data.sig_info() {
-        let _ = tx.send(ToolEvent::info(format!("  sig-type: {:?}", si.sig_type))).await;
+        let _ = tx
+            .send(ToolEvent::info(format!("  sig-type: {:?}", si.sig_type)))
+            .await;
         if let Some(ref kl) = si.key_locator {
             let _ = tx.send(ToolEvent::info(format!("  key:      {kl}"))).await;
         }

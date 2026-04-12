@@ -32,8 +32,8 @@ impl NdncertCaBuilder {
             identity: None,
             challenges: Vec::new(),
             policy: Box::new(HierarchicalPolicy),
-            default_validity: Duration::from_secs(86400),    // 24h
-            max_validity: Duration::from_secs(365 * 86400),  // 1 year
+            default_validity: Duration::from_secs(86400), // 24h
+            max_validity: Duration::from_secs(365 * 86400), // 1 year
         }
     }
 
@@ -157,9 +157,7 @@ async fn handle_interest(
 
     debug!(name = %name_str, "NDNCERT: received Interest");
 
-    let suffix = name_str
-        .strip_prefix(&ca_prefix_str)
-        .unwrap_or(&name_str);
+    let suffix = name_str.strip_prefix(&ca_prefix_str).unwrap_or(&name_str);
 
     if suffix == "/CA/INFO" || suffix.ends_with("/CA/INFO") {
         let body = state.handle_info();
@@ -167,10 +165,7 @@ async fn handle_interest(
     }
 
     if suffix.contains("/CA/NEW") {
-        let body = interest
-            .app_parameters()
-            .cloned()
-            .unwrap_or_default();
+        let body = interest.app_parameters().cloned().unwrap_or_default();
         match state.handle_new(&body).await {
             Ok(resp) => return Some(bytes::Bytes::from(resp)),
             Err(e) => {
@@ -188,10 +183,7 @@ async fn handle_interest(
             .and_then(|c| std::str::from_utf8(&c.value).ok())
             .map(|s| s.to_string())?;
 
-        let body = interest
-            .app_parameters()
-            .cloned()
-            .unwrap_or_default();
+        let body = interest.app_parameters().cloned().unwrap_or_default();
         match state.handle_challenge(&request_id, &body).await {
             Ok(resp) => return Some(bytes::Bytes::from(resp)),
             Err(e) => {

@@ -136,7 +136,11 @@ impl CaState {
                 reason: Some(format!("invalid NDN name: {requested_name}")),
                 max_suffix_length: None,
             },
-            Ok(name) => match self.config.policy.evaluate(&name, None, &self.config.prefix) {
+            Ok(name) => match self
+                .config
+                .policy
+                .evaluate(&name, None, &self.config.prefix)
+            {
                 PolicyDecision::Allow => ProbeResponseTlv {
                     allowed: true,
                     reason: None,
@@ -172,7 +176,11 @@ impl CaState {
             .parse()
             .map_err(|_| CertError::Name(format!("invalid name: {}", req.name)))?;
 
-        match self.config.policy.evaluate(&name, None, &self.config.prefix) {
+        match self
+            .config
+            .policy
+            .evaluate(&name, None, &self.config.prefix)
+        {
             PolicyDecision::Allow => {}
             PolicyDecision::Deny(reason) => return Err(CertError::PolicyDenied(reason)),
         }
@@ -285,9 +293,7 @@ impl CaState {
             .iter()
             .find(|h| h.challenge_type() == challenge_type)
             .ok_or_else(|| {
-                CertError::InvalidRequest(format!(
-                    "unsupported challenge type: {challenge_type}",
-                ))
+                CertError::InvalidRequest(format!("unsupported challenge type: {challenge_type}",))
             })?;
 
         // On first CHALLENGE: call begin() to initialize state, lock in challenge type.
@@ -385,7 +391,12 @@ impl CaState {
     /// Returns TLV-encoded [`RevokeResponseTlv`].
     pub async fn handle_revoke(&self, body: &[u8]) -> Vec<u8> {
         let status = self.do_revoke(body).await;
-        RevokeResponseTlv { status, reason: None }.encode().to_vec()
+        RevokeResponseTlv {
+            status,
+            reason: None,
+        }
+        .encode()
+        .to_vec()
     }
 
     async fn do_revoke(&self, body: &[u8]) -> u8 {
@@ -407,7 +418,7 @@ impl CaState {
         };
 
         // Verify: requester signed cert_name with the cert's private key.
-        use ndn_security::{Ed25519Verifier, VerifyOutcome, Verifier};
+        use ndn_security::{Ed25519Verifier, Verifier, VerifyOutcome};
         let outcome = Ed25519Verifier
             .verify(req.cert_name.as_bytes(), &req.signature, &public_key)
             .await;
@@ -502,8 +513,7 @@ pub fn deserialize_cert(data: &[u8]) -> Option<Certificate> {
         return None;
     }
     let public_key = bytes::Bytes::copy_from_slice(&data[20..20 + pk_len]);
-    let name_len =
-        u32::from_be_bytes(data[20 + pk_len..24 + pk_len].try_into().ok()?) as usize;
+    let name_len = u32::from_be_bytes(data[20 + pk_len..24 + pk_len].try_into().ok()?) as usize;
     let name_bytes = data.get(24 + pk_len..24 + pk_len + name_len)?;
     let name_str = std::str::from_utf8(name_bytes).ok()?;
     let name: ndn_packet::Name = name_str.parse().ok()?;
@@ -541,9 +551,7 @@ pub(crate) fn decode_cert_request_bytes_pub(data: &[u8]) -> Result<CertRequest, 
 
 fn decode_cert_request_bytes(data: &[u8]) -> Result<CertRequest, CertError> {
     if data.len() < 20 {
-        return Err(CertError::InvalidRequest(
-            "cert request too short".into(),
-        ));
+        return Err(CertError::InvalidRequest("cert request too short".into()));
     }
     let not_before = u64::from_be_bytes(data[0..8].try_into().unwrap());
     let not_after = u64::from_be_bytes(data[8..16].try_into().unwrap());
@@ -553,10 +561,9 @@ fn decode_cert_request_bytes(data: &[u8]) -> Result<CertRequest, CertError> {
             "cert request truncated at pubkey".into(),
         ));
     }
-    let public_key = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(&data[20..20 + pk_len]);
-    let name_len =
-        u32::from_be_bytes(data[20 + pk_len..24 + pk_len].try_into().unwrap()) as usize;
+    let public_key =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&data[20..20 + pk_len]);
+    let name_len = u32::from_be_bytes(data[20 + pk_len..24 + pk_len].try_into().unwrap()) as usize;
     if data.len() < 24 + pk_len + name_len {
         return Err(CertError::InvalidRequest(
             "cert request truncated at name".into(),
@@ -565,7 +572,12 @@ fn decode_cert_request_bytes(data: &[u8]) -> Result<CertRequest, CertError> {
     let name = std::str::from_utf8(&data[24 + pk_len..24 + pk_len + name_len])
         .map_err(|_| CertError::InvalidRequest("invalid name UTF-8 in cert request".into()))?
         .to_string();
-    Ok(CertRequest { name, public_key, not_before, not_after })
+    Ok(CertRequest {
+        name,
+        public_key,
+        not_before,
+        not_after,
+    })
 }
 
 fn now_secs() -> u64 {

@@ -152,7 +152,10 @@ fn build_challenge(credential: &FactoryCredential, _key_name: &Name) -> Challeng
                 m
             })
         }
-        FactoryCredential::Existing { cert_name, key_seed } => {
+        FactoryCredential::Existing {
+            cert_name,
+            key_seed,
+        } => {
             // Sign the cert name (used as nonce by possession challenge).
             use ndn_security::{Ed25519Signer, Signer};
             let signer = Ed25519Signer::from_seed(
@@ -161,9 +164,7 @@ fn build_challenge(credential: &FactoryCredential, _key_name: &Name) -> Challeng
                     .parse()
                     .unwrap_or_else(|_| ndn_packet::Name::root()),
             );
-            let sig = signer
-                .sign_sync(cert_name.as_bytes())
-                .unwrap_or_default();
+            let sig = signer.sign_sync(cert_name.as_bytes()).unwrap_or_default();
             ChallengeParams::Possession {
                 cert_name: cert_name.clone(),
                 signature: sig.to_vec(),

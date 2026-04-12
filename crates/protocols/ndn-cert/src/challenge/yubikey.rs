@@ -191,21 +191,27 @@ impl ChallengeHandler for YubikeyHotpChallenge {
             // Decode OTP string to u32.
             let otp_str = match otp_str {
                 Some(s) => s,
-                None => return Ok(ChallengeOutcome::Denied("missing 'otp' parameter".to_string())),
+                None => {
+                    return Ok(ChallengeOutcome::Denied(
+                        "missing 'otp' parameter".to_string(),
+                    ));
+                }
             };
             let otp: u32 = match otp_str.trim().parse() {
                 Ok(n) => n,
                 Err(_) => {
                     return Ok(ChallengeOutcome::Denied(
                         "invalid OTP format — expected a numeric code".to_string(),
-                    ))
+                    ));
                 }
             };
 
             // Decode stored seed.
             let seed = hex_decode(&seed_hex).unwrap_or_default();
             if seed.is_empty() {
-                return Err(CertError::InvalidRequest("corrupt HOTP challenge state".into()));
+                return Err(CertError::InvalidRequest(
+                    "corrupt HOTP challenge state".into(),
+                ));
             }
 
             // Verify against the HOTP counter window.
@@ -268,9 +274,15 @@ mod tests {
     #[test]
     fn hotp_rfc4226_test_vectors() {
         // RFC 4226 Appendix D test vectors with seed "12345678901234567890".
-        let expected = [755224, 287082, 359152, 969429, 338314, 254676, 287922, 162583, 399871, 520489];
+        let expected = [
+            755224, 287082, 359152, 969429, 338314, 254676, 287922, 162583, 399871, 520489,
+        ];
         for (counter, &expected_code) in expected.iter().enumerate() {
-            assert_eq!(hotp(TEST_SEED, counter as u64), expected_code, "counter={counter}");
+            assert_eq!(
+                hotp(TEST_SEED, counter as u64),
+                expected_code,
+                "counter={counter}"
+            );
         }
     }
 
@@ -333,7 +345,10 @@ mod tests {
         let state = challenge.begin(&req).await.unwrap();
 
         let mut params = serde_json::Map::new();
-        params.insert("otp".to_string(), serde_json::Value::String(otp.to_string()));
+        params.insert(
+            "otp".to_string(),
+            serde_json::Value::String(otp.to_string()),
+        );
 
         let outcome = challenge.verify(&state, &params).await.unwrap();
         assert!(matches!(outcome, ChallengeOutcome::Approved));
@@ -351,10 +366,19 @@ mod tests {
         let state = challenge.begin(&req).await.unwrap();
 
         let mut params = serde_json::Map::new();
-        params.insert("otp".to_string(), serde_json::Value::String("000000".to_string()));
+        params.insert(
+            "otp".to_string(),
+            serde_json::Value::String("000000".to_string()),
+        );
 
         let outcome = challenge.verify(&state, &params).await.unwrap();
-        assert!(matches!(outcome, ChallengeOutcome::Pending { remaining_tries: 2, .. }));
+        assert!(matches!(
+            outcome,
+            ChallengeOutcome::Pending {
+                remaining_tries: 2,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -369,7 +393,10 @@ mod tests {
         let state = challenge.begin(&req).await.unwrap();
 
         let mut params = serde_json::Map::new();
-        params.insert("otp".to_string(), serde_json::Value::String("000000".to_string()));
+        params.insert(
+            "otp".to_string(),
+            serde_json::Value::String("000000".to_string()),
+        );
 
         let outcome = challenge.verify(&state, &params).await.unwrap();
         assert!(matches!(outcome, ChallengeOutcome::Denied(_)));

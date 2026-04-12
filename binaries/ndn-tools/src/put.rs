@@ -15,7 +15,10 @@ use ndn_tools_core::common::{ConnectConfig, EventLevel, ToolEvent};
 use ndn_tools_core::put::{PutParams, run_producer};
 
 #[derive(Parser)]
-#[command(name = "ndn-put", about = "Publish a file as named Data segments (ndn-cxx format)")]
+#[command(
+    name = "ndn-put",
+    about = "Publish a file as named Data segments (ndn-cxx format)"
+)]
 struct Cli {
     /// Name prefix.
     name: String,
@@ -61,20 +64,31 @@ async fn main() -> Result<()> {
         while let Some(ev) = rx.recv().await {
             match ev.level {
                 EventLevel::Error | EventLevel::Warn => eprintln!("{}", ev.text),
-                _ => { if !ev.text.is_empty() { eprintln!("{}", ev.text); } }
+                _ => {
+                    if !ev.text.is_empty() {
+                        eprintln!("{}", ev.text);
+                    }
+                }
             }
         }
     });
 
-    run_producer(PutParams {
-        conn: ConnectConfig { face_socket: cli.face_socket, use_shm: !cli.no_shm },
-        name: cli.name,
-        data: Bytes::from(payload),
-        chunk_size: cli.chunk_size,
-        sign: cli.sign,
-        hmac: cli.hmac,
-        freshness_ms: cli.freshness,
-        timeout_secs: cli.timeout,
-        quiet: cli.quiet,
-    }, tx).await
+    run_producer(
+        PutParams {
+            conn: ConnectConfig {
+                face_socket: cli.face_socket,
+                use_shm: !cli.no_shm,
+            },
+            name: cli.name,
+            data: Bytes::from(payload),
+            chunk_size: cli.chunk_size,
+            sign: cli.sign,
+            hmac: cli.hmac,
+            freshness_ms: cli.freshness,
+            timeout_secs: cli.timeout,
+            quiet: cli.quiet,
+        },
+        tx,
+    )
+    .await
 }

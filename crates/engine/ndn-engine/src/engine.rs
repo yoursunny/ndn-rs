@@ -18,10 +18,10 @@ use crate::discovery_context::EngineDiscoveryContext;
 
 use crate::stages::ErasedStrategy;
 
-use crate::rib::Rib;
-use crate::routing::RoutingManager;
 use crate::Fib;
 use crate::dispatcher::InboundPacket;
+use crate::rib::Rib;
+use crate::routing::RoutingManager;
 
 /// Default outbound send queue capacity per face.
 ///
@@ -40,12 +40,12 @@ pub const DEFAULT_SEND_QUEUE_CAP: usize = 2048;
 /// the pipeline without holding any lock.
 #[derive(Default)]
 pub struct FaceCounters {
-    pub in_interests:  AtomicU64,
-    pub in_data:       AtomicU64,
+    pub in_interests: AtomicU64,
+    pub in_data: AtomicU64,
     pub out_interests: AtomicU64,
-    pub out_data:      AtomicU64,
-    pub in_bytes:      AtomicU64,
-    pub out_bytes:     AtomicU64,
+    pub out_data: AtomicU64,
+    pub in_bytes: AtomicU64,
+    pub out_bytes: AtomicU64,
 }
 
 /// Per-face lifecycle state stored alongside the cancellation token.
@@ -243,7 +243,9 @@ impl ForwarderEngine {
         );
         self.inner
             .pit
-            .with_entry(&token, |entry| entry.in_records.first().map(|r| FaceId(r.face_id)))
+            .with_entry(&token, |entry| {
+                entry.in_records.first().map(|r| FaceId(r.face_id))
+            })
             .flatten()
     }
 

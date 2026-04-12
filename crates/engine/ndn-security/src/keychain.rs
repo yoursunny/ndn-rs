@@ -8,9 +8,7 @@ use ndn_packet::Name;
 use ndn_packet::SignatureType;
 use ndn_packet::encode::{DataBuilder, InterestBuilder};
 
-use crate::{
-    CertCache, Certificate, SecurityManager, Signer, TrustError, TrustSchema, Validator,
-};
+use crate::{CertCache, Certificate, SecurityManager, Signer, TrustError, TrustSchema, Validator};
 
 /// A named NDN identity with an associated signing key and trust anchors.
 ///
@@ -115,7 +113,11 @@ impl KeyChain {
     /// [`ephemeral`]: Self::ephemeral
     /// [`open_or_create`]: Self::open_or_create
     pub fn from_parts(mgr: Arc<SecurityManager>, name: Name, key_name: Name) -> Self {
-        Self { mgr, name, key_name }
+        Self {
+            mgr,
+            name,
+            key_name,
+        }
     }
 
     // ── Identity accessors ────────────────────────────────────────────────────
@@ -185,10 +187,9 @@ impl KeyChain {
     /// Uses [`TrustSchema::hierarchical`] so the Data name must be a sub-name
     /// of the signing certificate prefix.
     pub fn trust_only(anchor_prefix: impl AsRef<str>) -> Result<Validator, TrustError> {
-        let prefix: Name = anchor_prefix
-            .as_ref()
-            .parse()
-            .map_err(|_| TrustError::KeyStore(format!("invalid prefix: {}", anchor_prefix.as_ref())))?;
+        let prefix: Name = anchor_prefix.as_ref().parse().map_err(|_| {
+            TrustError::KeyStore(format!("invalid prefix: {}", anchor_prefix.as_ref()))
+        })?;
         let kc = Self::ephemeral(anchor_prefix.as_ref())?;
         let v = Validator::new(TrustSchema::hierarchical());
         // Register the self-signed certificate as the trust anchor.
@@ -213,15 +214,11 @@ impl KeyChain {
     pub fn sign_data(&self, builder: DataBuilder) -> Result<bytes::Bytes, TrustError> {
         let signer = self.signer()?;
         let key_name = self.key_name.clone();
-        Ok(builder.sign_sync(
-            SignatureType::SignatureEd25519,
-            Some(&key_name),
-            |region| {
-                signer
-                    .sign_sync(region)
-                    .unwrap_or_default()
-            },
-        ))
+        Ok(
+            builder.sign_sync(SignatureType::SignatureEd25519, Some(&key_name), |region| {
+                signer.sign_sync(region).unwrap_or_default()
+            }),
+        )
     }
 
     /// Sign an Interest using this KeyChain's signing key.
@@ -235,15 +232,11 @@ impl KeyChain {
     pub fn sign_interest(&self, builder: InterestBuilder) -> Result<bytes::Bytes, TrustError> {
         let signer = self.signer()?;
         let key_name = self.key_name.clone();
-        Ok(builder.sign_sync(
-            SignatureType::SignatureEd25519,
-            Some(&key_name),
-            |region| {
-                signer
-                    .sign_sync(region)
-                    .unwrap_or_default()
-            },
-        ))
+        Ok(
+            builder.sign_sync(SignatureType::SignatureEd25519, Some(&key_name), |region| {
+                signer.sign_sync(region).unwrap_or_default()
+            }),
+        )
     }
 
     /// Build a [`Validator`] pre-configured with this identity's trust anchors.
@@ -318,10 +311,7 @@ mod tests {
 
         // Second call reloads, does not regenerate.
         let kc2 = KeyChain::open_or_create(&pib_path, "/test/router1").unwrap();
-        assert_eq!(
-            kc.key_name().to_string(),
-            kc2.key_name().to_string(),
-        );
+        assert_eq!(kc.key_name().to_string(), kc2.key_name().to_string(),);
     }
 
     #[test]

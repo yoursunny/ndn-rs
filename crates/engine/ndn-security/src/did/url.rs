@@ -180,10 +180,7 @@ pub enum DereferencedResource<'a> {
 /// }
 /// # }
 /// ```
-pub fn deref_did_url<'a>(
-    url: &DidUrl,
-    doc: &'a DidDocument,
-) -> Option<DereferencedResource<'a>> {
+pub fn deref_did_url<'a>(url: &DidUrl, doc: &'a DidDocument) -> Option<DereferencedResource<'a>> {
     let fragment = url.fragment.as_deref()?;
 
     // Try verification methods first: match by full `id` or by `#fragment`.

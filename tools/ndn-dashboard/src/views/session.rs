@@ -89,8 +89,12 @@ pub fn Session() -> Element {
 }
 
 fn session_to_json(log: &[crate::types::SessionEntry]) -> String {
-    let entries: Vec<String> = log.iter().map(|e| {
-        format!("  {{\"cmd\": {:?}, \"params\": {:?}}}", e.kind, e.params)
-    }).collect();
-    format!("{{\n  \"version\": 1,\n  \"commands\": [\n{}\n  ]\n}}", entries.join(",\n"))
+    let entries: Vec<String> = log
+        .iter()
+        .map(|e| format!("  {{\"cmd\": {:?}, \"params\": {:?}}}", e.kind, e.params))
+        .collect();
+    format!(
+        "{{\n  \"version\": 1,\n  \"commands\": [\n{}\n  ]\n}}",
+        entries.join(",\n")
+    )
 }

@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use std::collections::{HashMap, HashSet, VecDeque};
-use dioxus::prelude::*;
 use crate::app::AppCtx;
 use crate::tool_runner::fmt_bytes;
 use crate::types::ThroughputSample;
+use dioxus::prelude::*;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -13,12 +13,15 @@ pub fn sum_face_histories(
     face_throughput: &HashMap<u64, VecDeque<ThroughputSample>>,
     filter: Option<&HashSet<u64>>,
 ) -> VecDeque<ThroughputSample> {
-    let sources: Vec<&VecDeque<ThroughputSample>> = face_throughput.iter()
+    let sources: Vec<&VecDeque<ThroughputSample>> = face_throughput
+        .iter()
         .filter(|(fid, _)| filter.is_none_or(|f| f.contains(fid)))
         .map(|(_, h)| h)
         .collect();
 
-    if sources.is_empty() { return VecDeque::new(); }
+    if sources.is_empty() {
+        return VecDeque::new();
+    }
 
     let max_len = sources.iter().map(|h| h.len()).max().unwrap_or(0);
     let mut result = VecDeque::with_capacity(max_len);
@@ -28,9 +31,9 @@ pub fn sum_face_histories(
             let offset = max_len.saturating_sub(hist.len());
             if i >= offset {
                 let s = &hist[i - offset];
-                sample.in_bytes      = sample.in_bytes.saturating_add(s.in_bytes);
-                sample.out_bytes     = sample.out_bytes.saturating_add(s.out_bytes);
-                sample.in_interests  = sample.in_interests.saturating_add(s.in_interests);
+                sample.in_bytes = sample.in_bytes.saturating_add(s.in_bytes);
+                sample.out_bytes = sample.out_bytes.saturating_add(s.out_bytes);
+                sample.in_interests = sample.in_interests.saturating_add(s.in_interests);
                 sample.out_interests = sample.out_interests.saturating_add(s.out_interests);
             }
         }
@@ -41,17 +44,26 @@ pub fn sum_face_histories(
 
 /// Determine a human-friendly unit label and byte divisor for a bytes/s max value.
 pub fn bytes_unit(max_val: u64) -> (&'static str, f64) {
-    if max_val >= 1_073_741_824 { ("GB/s", 1_073_741_824.0) }
-    else if max_val >= 1_048_576 { ("MB/s", 1_048_576.0) }
-    else if max_val >= 1024      { ("KB/s", 1024.0) }
-    else                         { ("B/s",  1.0) }
+    if max_val >= 1_073_741_824 {
+        ("GB/s", 1_073_741_824.0)
+    } else if max_val >= 1_048_576 {
+        ("MB/s", 1_048_576.0)
+    } else if max_val >= 1024 {
+        ("KB/s", 1024.0)
+    } else {
+        ("B/s", 1.0)
+    }
 }
 
 /// Determine a human-friendly unit label and divisor for a packets/s max value.
 pub fn pkt_unit(max_val: u64) -> (&'static str, f64) {
-    if max_val >= 1_000_000 { ("Mpkt/s", 1_000_000.0) }
-    else if max_val >= 1_000 { ("Kpkt/s", 1_000.0) }
-    else                     { ("pkt/s",  1.0) }
+    if max_val >= 1_000_000 {
+        ("Mpkt/s", 1_000_000.0)
+    } else if max_val >= 1_000 {
+        ("Kpkt/s", 1_000.0)
+    } else {
+        ("pkt/s", 1.0)
+    }
 }
 
 /// Render an in/out bytes-per-second bar chart with a Y-axis showing the scale.
@@ -62,16 +74,19 @@ pub fn render_throughput_bars(hist: &VecDeque<ThroughputSample>, height_px: u32)
         };
     }
 
-    let max_bytes = hist.iter()
+    let max_bytes = hist
+        .iter()
         .map(|s| s.in_bytes.max(s.out_bytes))
-        .max().unwrap_or(1).max(1);
+        .max()
+        .unwrap_or(1)
+        .max(1);
 
     let (unit, divisor) = bytes_unit(max_bytes);
     let max_label = format!("{:.1} {unit}", max_bytes as f64 / divisor);
     let mid_label = format!("{:.1}", (max_bytes as f64 / divisor) / 2.0);
 
     const LABEL_W: f64 = 48.0;
-    const BAR_W:   f64 = 320.0;
+    const BAR_W: f64 = 320.0;
     let total_w = LABEL_W + BAR_W;
     let h = height_px as f64;
     let mid_h = h / 2.0;
@@ -79,14 +94,16 @@ pub fn render_throughput_bars(hist: &VecDeque<ThroughputSample>, height_px: u32)
     let n = hist.len();
     let slot_w = BAR_W / n as f64;
 
-    let color_in  = "var(--accent-solid)";
+    let color_in = "var(--accent-solid)";
     let color_out = "var(--green)";
     let mut bars = String::new();
     for (i, s) in hist.iter().enumerate() {
         let x = LABEL_W + i as f64 * slot_w;
         let hw = ((slot_w - 1.5) / 2.0).max(0.5);
-        let in_h  = ((s.in_bytes  as f64 / max_bytes as f64) * h).ceil().max(1.0);
-        let out_h = ((s.out_bytes as f64 / max_bytes as f64) * h).ceil().max(1.0);
+        let in_h = ((s.in_bytes as f64 / max_bytes as f64) * h).ceil().max(1.0);
+        let out_h = ((s.out_bytes as f64 / max_bytes as f64) * h)
+            .ceil()
+            .max(1.0);
         bars.push_str(&format!(
             "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{hw:.1}\" height=\"{in_h:.1}\" fill=\"{color_in}\"/>\
              <rect x=\"{:.1}\" y=\"{:.1}\" width=\"{hw:.1}\" height=\"{out_h:.1}\" fill=\"{color_out}\"/>",
@@ -107,7 +124,8 @@ pub fn render_throughput_bars(hist: &VecDeque<ThroughputSample>, height_px: u32)
           {bars}\
         </svg>",
         LABEL_W - 3.0,
-        LABEL_W - 3.0, mid_h + 4.0,
+        LABEL_W - 3.0,
+        mid_h + 4.0,
         LABEL_W - 3.0,
     );
 
@@ -135,16 +153,19 @@ pub fn render_pps_bars(hist: &VecDeque<ThroughputSample>, height_px: u32) -> Ele
         return rsx! { div { class: "empty", "Collecting packet rate data…" } };
     }
 
-    let max_pps = hist.iter()
+    let max_pps = hist
+        .iter()
         .map(|s| s.in_interests.max(s.out_interests))
-        .max().unwrap_or(1).max(1);
+        .max()
+        .unwrap_or(1)
+        .max(1);
 
     let (unit, divisor) = pkt_unit(max_pps);
     let max_label = format!("{:.1} {unit}", max_pps as f64 / divisor);
     let mid_label = format!("{:.1}", (max_pps as f64 / divisor) / 2.0);
 
     const LABEL_W: f64 = 48.0;
-    const BAR_W:   f64 = 320.0;
+    const BAR_W: f64 = 320.0;
     let total_w = LABEL_W + BAR_W;
     let h = height_px as f64;
     let mid_h = h / 2.0;
@@ -152,14 +173,18 @@ pub fn render_pps_bars(hist: &VecDeque<ThroughputSample>, height_px: u32) -> Ele
     let n = hist.len();
     let slot_w = BAR_W / n as f64;
 
-    let color_in  = "var(--purple)";  // purple for in interests
-    let color_out = "var(--orange)";  // orange-red for out interests
+    let color_in = "var(--purple)"; // purple for in interests
+    let color_out = "var(--orange)"; // orange-red for out interests
     let mut bars = String::new();
     for (i, s) in hist.iter().enumerate() {
         let x = LABEL_W + i as f64 * slot_w;
         let hw = ((slot_w - 1.5) / 2.0).max(0.5);
-        let in_h  = ((s.in_interests  as f64 / max_pps as f64) * h).ceil().max(1.0);
-        let out_h = ((s.out_interests as f64 / max_pps as f64) * h).ceil().max(1.0);
+        let in_h = ((s.in_interests as f64 / max_pps as f64) * h)
+            .ceil()
+            .max(1.0);
+        let out_h = ((s.out_interests as f64 / max_pps as f64) * h)
+            .ceil()
+            .max(1.0);
         bars.push_str(&format!(
             "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{hw:.1}\" height=\"{in_h:.1}\" fill=\"{color_in}\"/>\
              <rect x=\"{:.1}\" y=\"{:.1}\" width=\"{hw:.1}\" height=\"{out_h:.1}\" fill=\"{color_out}\"/>",
@@ -180,7 +205,8 @@ pub fn render_pps_bars(hist: &VecDeque<ThroughputSample>, height_px: u32) -> Ele
           {bars}\
         </svg>",
         LABEL_W - 3.0,
-        LABEL_W - 3.0, mid_h + 4.0,
+        LABEL_W - 3.0,
+        mid_h + 4.0,
         LABEL_W - 3.0,
     );
 
@@ -204,37 +230,45 @@ pub fn render_pps_bars(hist: &VecDeque<ThroughputSample>, height_px: u32) -> Ele
 // ── Traffic view ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
-enum MonitorMode { All, Faces, Prefix }
+enum MonitorMode {
+    All,
+    Faces,
+    Prefix,
+}
 
 #[component]
 pub fn Traffic() -> Element {
     let ctx = use_context::<AppCtx>();
 
-    let counters        = ctx.counters.read();
-    let measurements    = ctx.measurements.read();
+    let counters = ctx.counters.read();
+    let measurements = ctx.measurements.read();
     let face_throughput = ctx.face_throughput.read();
-    let throughput      = ctx.throughput.read();
-    let routes          = ctx.routes.read();
-    let faces           = ctx.faces.read();
+    let throughput = ctx.throughput.read();
+    let routes = ctx.routes.read();
+    let faces = ctx.faces.read();
 
-    let mut mode:        Signal<MonitorMode>   = use_signal(|| MonitorMode::All);
-    let mut sel_faces:   Signal<HashSet<u64>>  = use_signal(HashSet::new);
+    let mut mode: Signal<MonitorMode> = use_signal(|| MonitorMode::All);
+    let mut sel_faces: Signal<HashSet<u64>> = use_signal(HashSet::new);
     let mut sel_prefixes: Signal<HashSet<String>> = use_signal(HashSet::new);
 
     // Compute the filtered history to display
     let plot_history: VecDeque<ThroughputSample> = match *mode.read() {
-        MonitorMode::All   => throughput.clone(),
+        MonitorMode::All => throughput.clone(),
         MonitorMode::Faces => {
             let f = sel_faces.read();
-            if f.is_empty() { throughput.clone() }
-            else { sum_face_histories(&face_throughput, Some(&f)) }
+            if f.is_empty() {
+                throughput.clone()
+            } else {
+                sum_face_histories(&face_throughput, Some(&f))
+            }
         }
         MonitorMode::Prefix => {
             let pfxs = sel_prefixes.read();
             if pfxs.is_empty() {
                 throughput.clone()
             } else {
-                let filter: HashSet<u64> = routes.iter()
+                let filter: HashSet<u64> = routes
+                    .iter()
                     .filter(|r| pfxs.contains(&r.prefix))
                     .flat_map(|r| r.nexthops.iter().map(|nh| nh.face_id))
                     .collect();
@@ -246,11 +280,11 @@ pub fn Traffic() -> Element {
     let last = plot_history.back();
     let (in_str, out_str) = match last {
         Some(s) => (fmt_bytes(s.in_bytes), fmt_bytes(s.out_bytes)),
-        None    => ("0 B".to_string(), "0 B".to_string()),
+        None => ("0 B".to_string(), "0 B".to_string()),
     };
     let (in_pps, out_pps) = match last {
         Some(s) => (s.in_interests, s.out_interests),
-        None    => (0, 0),
+        None => (0, 0),
     };
 
     rsx! {

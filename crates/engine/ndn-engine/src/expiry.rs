@@ -9,9 +9,9 @@ use ndn_store::Pit;
 use ndn_transport::{FaceId, FaceKind, FacePersistency, FaceTable};
 
 use crate::Fib;
-use crate::rib::Rib;
 use crate::discovery_context::EngineDiscoveryContext;
 use crate::engine::FaceState;
+use crate::rib::Rib;
 
 /// Background task that drains expired PIT entries every millisecond.
 ///

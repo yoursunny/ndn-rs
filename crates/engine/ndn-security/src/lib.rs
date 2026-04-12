@@ -33,36 +33,38 @@ pub mod signer;
 pub mod trust_schema;
 pub mod validator;
 pub mod verifier;
-pub mod zone;
 #[cfg(feature = "yubikey-piv")]
 pub mod yubikey;
+pub mod zone;
 
 pub use cert_cache::{CertCache, Certificate};
 pub use cert_fetcher::{CertFetcher, FetchFn};
 pub use error::TrustError;
 pub use key_store::{KeyAlgorithm, KeyStore, MemKeyStore};
 pub use keychain::KeyChain;
-#[cfg(feature = "yubikey-piv")]
-pub use yubikey::{YubikeyKeyStore, YubikeySlot};
 pub use manager::SecurityManager;
 pub use pib::{FilePib, PibError};
 pub use profile::SecurityProfile;
 pub use safe_data::SafeData;
 pub use sign_ext::SignWith;
 pub use signer::{
-    Blake3KeyedSigner, Blake3Signer, Ed25519Signer, HmacSha256Signer, Signer,
-    SIGNATURE_TYPE_DIGEST_BLAKE3,
+    Blake3KeyedSigner, Blake3Signer, Ed25519Signer, HmacSha256Signer, SIGNATURE_TYPE_DIGEST_BLAKE3,
+    Signer,
 };
 pub use trust_schema::{NamePattern, PatternComponent, PatternParseError, SchemaRule, TrustSchema};
 pub use validator::{ValidationResult, Validator};
-pub use verifier::{Blake3DigestVerifier, Blake3KeyedVerifier, Ed25519Verifier, Verifier, VerifyOutcome};
+pub use verifier::{
+    Blake3DigestVerifier, Blake3KeyedVerifier, Ed25519Verifier, Verifier, VerifyOutcome,
+};
+#[cfg(feature = "yubikey-piv")]
+pub use yubikey::{YubikeyKeyStore, YubikeySlot};
 pub use zone::{ZoneKey, verify_zone_root, zone_root_from_pubkey, zone_root_to_did};
 
 // DID convenience re-exports (use `ndn_security::did::...` for the full API)
 pub use did::{
-    DereferencedResource, DidController, DidDocument, DidDocumentMetadata, DidError, DidResolver,
-    DidResolutionResult, DidUrl, KeyDidResolver, NdnDidResolver, Service, ServiceEndpoint,
-    UniversalResolver, VerificationMethod, VerificationRef, build_zone_did_document,
-    build_zone_succession_document, cert_to_did_document, deref_did_url, did_to_name,
-    name_to_did,
+    DereferencedResource, DidController, DidDocument, DidDocumentMetadata, DidError,
+    DidResolutionResult, DidResolver, DidUrl, KeyDidResolver, NdnDidResolver, Service,
+    ServiceEndpoint, UniversalResolver, VerificationMethod, VerificationRef,
+    build_zone_did_document, build_zone_succession_document, cert_to_did_document, deref_did_url,
+    did_to_name, name_to_did,
 };

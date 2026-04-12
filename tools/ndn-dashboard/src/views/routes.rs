@@ -6,11 +6,11 @@ use crate::app::{AppCtx, DashCmd};
 pub fn Routes() -> Element {
     let ctx = use_context::<AppCtx>();
     let routes = ctx.routes.read();
-    let faces  = ctx.faces.read();
+    let faces = ctx.faces.read();
 
-    let mut new_prefix:  Signal<String> = use_signal(String::new);
+    let mut new_prefix: Signal<String> = use_signal(String::new);
     let mut new_face_id: Signal<String> = use_signal(String::new);
-    let mut new_cost:    Signal<String> = use_signal(|| "10".to_string());
+    let mut new_cost: Signal<String> = use_signal(|| "10".to_string());
 
     rsx! {
         div { class: "section",

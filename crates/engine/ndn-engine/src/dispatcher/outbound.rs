@@ -4,9 +4,9 @@ use bytes::Bytes;
 use tokio::sync::mpsc;
 use tracing::{debug, trace};
 
+use crate::pipeline::{Action, NackReason, PacketContext};
 use ndn_packet::Name;
 use ndn_packet::encode::encode_nack;
-use crate::pipeline::{Action, NackReason, PacketContext};
 use ndn_store::CsEntry;
 use ndn_transport::{FaceId, FaceScope};
 
@@ -49,7 +49,10 @@ impl PacketDispatcher {
                     }
                     if let Some(state) = self.face_states.get(face_id) {
                         state.counters.out_interests.fetch_add(1, Ordering::Relaxed);
-                        state.counters.out_bytes.fetch_add(raw_len, Ordering::Relaxed);
+                        state
+                            .counters
+                            .out_bytes
+                            .fetch_add(raw_len, Ordering::Relaxed);
                     }
                     self.enqueue_send(*face_id, ctx.raw_bytes.clone());
                 }
@@ -97,7 +100,10 @@ impl PacketDispatcher {
             }
             if let Some(state) = self.face_states.get(face_id) {
                 state.counters.out_data.fetch_add(1, Ordering::Relaxed);
-                state.counters.out_bytes.fetch_add(data_len, Ordering::Relaxed);
+                state
+                    .counters
+                    .out_bytes
+                    .fetch_add(data_len, Ordering::Relaxed);
             }
             self.enqueue_send(*face_id, data_bytes.clone());
         }

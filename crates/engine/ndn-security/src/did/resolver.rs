@@ -71,7 +71,9 @@ pub struct UniversalResolver {
 impl UniversalResolver {
     /// Create a resolver with [`KeyDidResolver`] and [`NdnDidResolver`] registered.
     pub fn new() -> Self {
-        let mut r = Self { resolvers: HashMap::new() };
+        let mut r = Self {
+            resolvers: HashMap::new(),
+        };
         r.register(KeyDidResolver);
         r.register(NdnDidResolver::default());
         r

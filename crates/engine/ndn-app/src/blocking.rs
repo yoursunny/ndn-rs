@@ -73,13 +73,14 @@ impl BlockingProducer {
     where
         F: Fn(ndn_packet::Interest) -> Option<Bytes> + Send + Sync + 'static,
     {
-        self.rt.block_on(self.inner.serve(move |interest, responder| {
-            let result = handler(interest);
-            async move {
-                if let Some(wire) = result {
-                    responder.respond_bytes(wire).await.ok();
+        self.rt
+            .block_on(self.inner.serve(move |interest, responder| {
+                let result = handler(interest);
+                async move {
+                    if let Some(wire) = result {
+                        responder.respond_bytes(wire).await.ok();
+                    }
                 }
-            }
-        }))
+            }))
     }
 }

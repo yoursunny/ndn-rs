@@ -39,7 +39,13 @@ impl SimCs {
     /// Check if the CS contains a Data packet satisfying `interest_name`.
     /// `can_be_prefix`: if true, any entry whose name starts with `interest_name` qualifies.
     /// `must_be_fresh`: if true, check freshness.
-    pub fn lookup(&self, interest_name: &str, can_be_prefix: bool, must_be_fresh: bool, now_ms: f64) -> Option<&CsEntry> {
+    pub fn lookup(
+        &self,
+        interest_name: &str,
+        can_be_prefix: bool,
+        must_be_fresh: bool,
+        now_ms: f64,
+    ) -> Option<&CsEntry> {
         // Exact match first.
         if let Some(entry) = self.entries.get(interest_name)
             && (!must_be_fresh || is_fresh(entry, now_ms))
@@ -58,7 +64,15 @@ impl SimCs {
     }
 
     /// Insert a Data packet into the CS, evicting the oldest entry if at capacity.
-    pub fn insert(&mut self, name: String, content: String, content_bytes: usize, freshness_ms: u64, now_ms: f64, sig_type: String) {
+    pub fn insert(
+        &mut self,
+        name: String,
+        content: String,
+        content_bytes: usize,
+        freshness_ms: u64,
+        now_ms: f64,
+        sig_type: String,
+    ) {
         // Remove existing entry if updating.
         if self.entries.contains_key(&name) {
             self.insertion_order.retain(|n| n != &name);
@@ -68,7 +82,14 @@ impl SimCs {
             let oldest = self.insertion_order.remove(0);
             self.entries.remove(&oldest);
         }
-        let entry = CsEntry { name: name.clone(), content, content_bytes, freshness_ms, inserted_at: now_ms, sig_type };
+        let entry = CsEntry {
+            name: name.clone(),
+            content,
+            content_bytes,
+            freshness_ms,
+            inserted_at: now_ms,
+            sig_type,
+        };
         self.entries.insert(name.clone(), entry);
         self.insertion_order.push(name);
     }
@@ -87,7 +108,11 @@ impl SimCs {
     pub fn hit_rate(&self) -> f64 {
         // Placeholder — in real engine this tracks per-request stats.
         // Here we return the CS occupancy ratio as a proxy.
-        if self.capacity == 0 { 0.0 } else { self.entries.len() as f64 / self.capacity as f64 }
+        if self.capacity == 0 {
+            0.0
+        } else {
+            self.entries.len() as f64 / self.capacity as f64
+        }
     }
 
     #[allow(dead_code)]
@@ -97,7 +122,8 @@ impl SimCs {
 
     /// Snapshot of all CS entries for JS display (most-recently-inserted first).
     pub fn snapshot(&self) -> CsSnapshot {
-        let mut entries: Vec<CsEntry> = self.insertion_order
+        let mut entries: Vec<CsEntry> = self
+            .insertion_order
             .iter()
             .rev()
             .filter_map(|name| self.entries.get(name).cloned())

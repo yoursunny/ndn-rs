@@ -177,7 +177,10 @@ impl MgmtClient {
     ///
     /// If `capacity` is `Some`, sets the new max capacity in bytes.
     /// Always returns the current capacity.
-    pub async fn cs_config(&self, capacity: Option<u64>) -> Result<ControlParameters, ForwarderError> {
+    pub async fn cs_config(
+        &self,
+        capacity: Option<u64>,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             capacity,
             ..Default::default()
@@ -217,7 +220,10 @@ impl MgmtClient {
     }
 
     /// Announce a service prefix at runtime: `service/announce`.
-    pub async fn service_announce(&self, prefix: &Name) -> Result<ControlParameters, ForwarderError> {
+    pub async fn service_announce(
+        &self,
+        prefix: &Name,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             name: Some(prefix.clone()),
             ..Default::default()
@@ -226,7 +232,10 @@ impl MgmtClient {
     }
 
     /// Withdraw a previously announced service prefix: `service/withdraw`.
-    pub async fn service_withdraw(&self, prefix: &Name) -> Result<ControlParameters, ForwarderError> {
+    pub async fn service_withdraw(
+        &self,
+        prefix: &Name,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             name: Some(prefix.clone()),
             ..Default::default()
@@ -305,12 +314,16 @@ impl MgmtClient {
     }
 
     /// Generate a new Ed25519 identity key: `security/identity-generate`.
-    pub async fn security_identity_generate(&self, name: &Name) -> Result<ControlParameters, ForwarderError> {
+    pub async fn security_identity_generate(
+        &self,
+        name: &Name,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             name: Some(name.clone()),
             ..Default::default()
         };
-        self.command(module::SECURITY, verb::IDENTITY_GENERATE, &params).await
+        self.command(module::SECURITY, verb::IDENTITY_GENERATE, &params)
+            .await
     }
 
     /// List all trust anchors in the PIB: `security/anchor-list`.
@@ -319,18 +332,25 @@ impl MgmtClient {
     }
 
     /// Delete a key from the PIB: `security/key-delete`.
-    pub async fn security_key_delete(&self, name: &Name) -> Result<ControlParameters, ForwarderError> {
+    pub async fn security_key_delete(
+        &self,
+        name: &Name,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             name: Some(name.clone()),
             ..Default::default()
         };
-        self.command(module::SECURITY, verb::KEY_DELETE, &params).await
+        self.command(module::SECURITY, verb::KEY_DELETE, &params)
+            .await
     }
 
     /// Get the `did:ndn:` DID for a named identity: `security/identity-did`.
     ///
     /// The response `status_text` contains the DID string.
-    pub async fn security_identity_did(&self, name: &Name) -> Result<ControlResponse, ForwarderError> {
+    pub async fn security_identity_did(
+        &self,
+        name: &Name,
+    ) -> Result<ControlResponse, ForwarderError> {
         let params = ControlParameters {
             name: Some(name.clone()),
             ..Default::default()
@@ -367,18 +387,23 @@ impl MgmtClient {
             uri: Some(format!("{challenge_type}:{challenge_param}")),
             ..Default::default()
         };
-        self.command(module::SECURITY, verb::CA_ENROLL, &params).await
+        self.command(module::SECURITY, verb::CA_ENROLL, &params)
+            .await
     }
 
     /// Add a Zero-Touch-Provisioning token to the CA: `security/ca-token-add`.
     ///
     /// Returns the generated token in `ControlParameters::uri`.
-    pub async fn security_ca_token_add(&self, description: &str) -> Result<ControlParameters, ForwarderError> {
+    pub async fn security_ca_token_add(
+        &self,
+        description: &str,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             uri: Some(description.to_owned()),
             ..Default::default()
         };
-        self.command(module::SECURITY, verb::CA_TOKEN_ADD, &params).await
+        self.command(module::SECURITY, verb::CA_TOKEN_ADD, &params)
+            .await
     }
 
     /// List pending NDNCERT CA enrollment requests: `security/ca-requests`.
@@ -398,12 +423,16 @@ impl MgmtClient {
     ///
     /// On success the response `body.uri` contains the base64url-encoded 65-byte
     /// uncompressed public key.
-    pub async fn security_yubikey_generate(&self, name: &Name) -> Result<ControlParameters, ForwarderError> {
+    pub async fn security_yubikey_generate(
+        &self,
+        name: &Name,
+    ) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
             name: Some(name.clone()),
             ..Default::default()
         };
-        self.command(module::SECURITY, verb::YUBIKEY_GENERATE, &params).await
+        self.command(module::SECURITY, verb::YUBIKEY_GENERATE, &params)
+            .await
     }
 
     // ─── Trust schema ───────────────────────────────────────────────────────
@@ -420,7 +449,10 @@ impl MgmtClient {
     ///
     /// `rule` must be in the form `"<data_pattern> => <key_pattern>"`, e.g.:
     /// `"/sensor/<node>/<type> => /sensor/<node>/KEY/<id>"`.
-    pub async fn security_schema_rule_add(&self, rule: &str) -> Result<ControlResponse, ForwarderError> {
+    pub async fn security_schema_rule_add(
+        &self,
+        rule: &str,
+    ) -> Result<ControlResponse, ForwarderError> {
         let params = ControlParameters {
             uri: Some(rule.to_owned()),
             ..Default::default()
@@ -432,7 +464,10 @@ impl MgmtClient {
     /// Remove a trust schema rule by index: `security/schema-rule-remove`.
     ///
     /// `index` is the 0-based position from `security_schema_list()`.
-    pub async fn security_schema_rule_remove(&self, index: u64) -> Result<ControlResponse, ForwarderError> {
+    pub async fn security_schema_rule_remove(
+        &self,
+        index: u64,
+    ) -> Result<ControlResponse, ForwarderError> {
         let params = ControlParameters {
             count: Some(index),
             ..Default::default()
@@ -446,7 +481,10 @@ impl MgmtClient {
     /// `rules` is a newline-separated list of rule strings. Each line must be in
     /// the form `"<data_pattern> => <key_pattern>"`. Pass an empty string to
     /// clear all rules (schema rejects everything).
-    pub async fn security_schema_set(&self, rules: &str) -> Result<ControlResponse, ForwarderError> {
+    pub async fn security_schema_set(
+        &self,
+        rules: &str,
+    ) -> Result<ControlResponse, ForwarderError> {
         let params = ControlParameters {
             uri: Some(rules.to_owned()),
             ..Default::default()
@@ -471,7 +509,10 @@ impl MgmtClient {
     /// `hello_jitter`, `liveness_timeout_ms`, `liveness_miss_count`,
     /// `probe_timeout_ms`, `swim_indirect_fanout`, `gossip_fanout`,
     /// `auto_create_faces`.
-    pub async fn discovery_config_set(&self, params: &str) -> Result<ControlResponse, ForwarderError> {
+    pub async fn discovery_config_set(
+        &self,
+        params: &str,
+    ) -> Result<ControlResponse, ForwarderError> {
         let cp = ControlParameters {
             uri: Some(params.to_owned()),
             ..Default::default()
@@ -489,7 +530,10 @@ impl MgmtClient {
     ///
     /// Pass parameters as a URL query string:
     /// `"update_interval_ms=30000&route_ttl_ms=90000"`.
-    pub async fn routing_dvr_config_set(&self, params: &str) -> Result<ControlResponse, ForwarderError> {
+    pub async fn routing_dvr_config_set(
+        &self,
+        params: &str,
+    ) -> Result<ControlResponse, ForwarderError> {
         let cp = ControlParameters {
             uri: Some(params.to_owned()),
             ..Default::default()
@@ -580,7 +624,11 @@ impl MgmtClient {
 
         self.face.send(interest_wire).await?;
 
-        let data_wire = self.face.recv().await.map(crate::forwarder_client::strip_lp)?;
+        let data_wire = self
+            .face
+            .recv()
+            .await
+            .map(crate::forwarder_client::strip_lp)?;
         let data =
             ndn_packet::Data::decode(data_wire).map_err(|_| ForwarderError::MalformedResponse)?;
 

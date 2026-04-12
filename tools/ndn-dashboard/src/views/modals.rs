@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use ndn_config::{
-    CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, ForwarderConfig,
-    LoggingConfig, ManagementConfig, RouteConfig, SecurityConfig,
+    CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, ForwarderConfig, LoggingConfig,
+    ManagementConfig, RouteConfig, SecurityConfig,
 };
 
-use crate::app::{AppCtx, DashCmd, RouterCmd, push_toast, ToastLevel, CONFIG_PRESETS};
+use crate::app::{AppCtx, CONFIG_PRESETS, DashCmd, RouterCmd, ToastLevel, push_toast};
 
 // ── BuildConfig helpers ───────────────────────────────────────────────────────
 
@@ -22,11 +22,11 @@ impl BuildFaceKind {
     #[allow(dead_code)]
     fn label(self) -> &'static str {
         match self {
-            BuildFaceKind::Udp          => "UDP",
-            BuildFaceKind::Tcp          => "TCP",
-            BuildFaceKind::Multicast    => "UDP Multicast",
-            BuildFaceKind::Unix         => "Unix Socket",
-            BuildFaceKind::WebSocket    => "WebSocket",
+            BuildFaceKind::Udp => "UDP",
+            BuildFaceKind::Tcp => "TCP",
+            BuildFaceKind::Multicast => "UDP Multicast",
+            BuildFaceKind::Unix => "Unix Socket",
+            BuildFaceKind::WebSocket => "WebSocket",
             BuildFaceKind::EtherMulticast => "Ether Multicast",
         }
     }
@@ -49,15 +49,37 @@ impl BuildFaceEntry {
         match self.kind {
             BuildFaceKind::Udp => format!(
                 "UDP {}",
-                if self.remote.is_empty() { "(listen)".into() } else { format!("→ {}", self.remote) }
+                if self.remote.is_empty() {
+                    "(listen)".into()
+                } else {
+                    format!("→ {}", self.remote)
+                }
             ),
             BuildFaceKind::Tcp => format!(
                 "TCP {}",
-                if self.remote.is_empty() { "(listen)".into() } else { format!("→ {}", self.remote) }
+                if self.remote.is_empty() {
+                    "(listen)".into()
+                } else {
+                    format!("→ {}", self.remote)
+                }
             ),
             BuildFaceKind::Multicast => format!("Multicast {}:{}", self.group, self.port),
-            BuildFaceKind::Unix => format!("Unix {}", if self.path.is_empty() { "/tmp/ndn.sock" } else { &self.path }),
-            BuildFaceKind::WebSocket => format!("WS {}", if self.ws_url.is_empty() { "0.0.0.0:9696" } else { &self.ws_url }),
+            BuildFaceKind::Unix => format!(
+                "Unix {}",
+                if self.path.is_empty() {
+                    "/tmp/ndn.sock"
+                } else {
+                    &self.path
+                }
+            ),
+            BuildFaceKind::WebSocket => format!(
+                "WS {}",
+                if self.ws_url.is_empty() {
+                    "0.0.0.0:9696"
+                } else {
+                    &self.ws_url
+                }
+            ),
             BuildFaceKind::EtherMulticast => format!("EtherMC iface={}", self.interface),
         }
     }
@@ -65,7 +87,11 @@ impl BuildFaceEntry {
     fn to_face_config(&self) -> FaceConfig {
         let opt = |s: &str| -> Option<String> {
             let t = s.trim();
-            if t.is_empty() { None } else { Some(t.to_string()) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
         };
         match self.kind {
             BuildFaceKind::Udp => FaceConfig::Udp {
@@ -125,7 +151,11 @@ fn assemble_config(
         },
         cs: CsConfig {
             variant: cs_variant.to_string(),
-            capacity_mb: if cs_variant == "null" { 0 } else { cs_cap as usize },
+            capacity_mb: if cs_variant == "null" {
+                0
+            } else {
+                cs_cap as usize
+            },
             shards: cs_shards,
             ..Default::default()
         },
@@ -134,11 +164,14 @@ fn assemble_config(
             ..Default::default()
         },
         faces: faces.iter().map(|f| f.to_face_config()).collect(),
-        routes: routes.iter().map(|r| RouteConfig {
-            prefix: r.prefix.clone(),
-            face: r.face_idx,
-            cost: r.cost,
-        }).collect(),
+        routes: routes
+            .iter()
+            .map(|r| RouteConfig {
+                prefix: r.prefix.clone(),
+                face: r.face_idx,
+                cost: r.cost,
+            })
+            .collect(),
         security,
         discovery,
         face_system: Default::default(),
@@ -159,11 +192,11 @@ pub fn StartRouterModal(on_close: EventHandler<()>, config_toml: Signal<String>)
     let has_config = !toml_preview.is_empty();
 
     // ── Build Config state ────────────────────────────────────────────────────
-    let mut bc_socket    = use_signal(|| "/tmp/ndn.sock".to_string());
+    let mut bc_socket = use_signal(|| "/tmp/ndn.sock".to_string());
     let mut bc_cs_variant = use_signal(|| "lru".to_string());
-    let mut bc_cs_cap    = use_signal(|| 64u32);
+    let mut bc_cs_cap = use_signal(|| 64u32);
     let mut bc_log_level = use_signal(|| "info".to_string());
-    let mut bc_threads   = use_signal(|| 0u32);
+    let mut bc_threads = use_signal(|| 0u32);
     let mut bc_faces: Signal<Vec<BuildFaceEntry>> = use_signal(Vec::new);
     let mut bc_routes: Signal<Vec<BuildRouteEntry>> = use_signal(Vec::new);
     let mut bc_show_face_form = use_signal(|| false);
@@ -182,34 +215,47 @@ pub fn StartRouterModal(on_close: EventHandler<()>, config_toml: Signal<String>)
     let mut bc_show_preview = use_signal(|| false);
 
     // Security settings
-    let mut bc_sec_identity      = use_signal(String::new);
-    let mut bc_sec_pib_path      = use_signal(String::new);
-    let mut bc_sec_trust_anchor  = use_signal(String::new);
-    let mut bc_sec_profile       = use_signal(|| "default".to_string());
+    let mut bc_sec_identity = use_signal(String::new);
+    let mut bc_sec_pib_path = use_signal(String::new);
+    let mut bc_sec_trust_anchor = use_signal(String::new);
+    let mut bc_sec_profile = use_signal(|| "default".to_string());
     let mut bc_sec_require_signed = use_signal(|| false);
-    let mut bc_sec_auto_init     = use_signal(|| false);
+    let mut bc_sec_auto_init = use_signal(|| false);
 
     // Discovery settings
-    let mut bc_disc_node_name       = use_signal(String::new);
-    let mut bc_disc_profile         = use_signal(|| "lan".to_string());
-    let mut bc_disc_transport       = use_signal(|| "udp".to_string());
-    let mut bc_disc_hello_base      = use_signal(String::new);
-    let mut bc_disc_hello_max       = use_signal(String::new);
-    let mut bc_disc_liveness_miss   = use_signal(String::new);
-    let mut bc_disc_gossip_fanout   = use_signal(String::new);
+    let mut bc_disc_node_name = use_signal(String::new);
+    let mut bc_disc_profile = use_signal(|| "lan".to_string());
+    let mut bc_disc_transport = use_signal(|| "udp".to_string());
+    let mut bc_disc_hello_base = use_signal(String::new);
+    let mut bc_disc_hello_max = use_signal(String::new);
+    let mut bc_disc_liveness_miss = use_signal(String::new);
+    let mut bc_disc_gossip_fanout = use_signal(String::new);
     let mut bc_disc_served_prefixes = use_signal(String::new);
 
     // CS shards (sharded-lru only)
     let mut bc_cs_shards = use_signal(|| 4u32);
 
     // Pre-compute display/validation state before rsx!
-    let modal_width = if *active_tab.read() == 1 { "max-width:660px;" } else { "max-width:480px;" };
+    let modal_width = if *active_tab.read() == 1 {
+        "max-width:660px;"
+    } else {
+        "max-width:480px;"
+    };
     let show_face_form = *bc_show_face_form.read();
     let show_route_form = *bc_show_route_form.read();
-    let sec_identity_err = { let v = bc_sec_identity.read(); !v.is_empty() && !v.starts_with('/') };
+    let sec_identity_err = {
+        let v = bc_sec_identity.read();
+        !v.is_empty() && !v.starts_with('/')
+    };
     let sec_auto_init_disabled = bc_sec_identity.read().trim().is_empty();
-    let disc_node_err = { let v = bc_disc_node_name.read(); !v.is_empty() && !v.starts_with('/') };
-    let disc_enabled = { let v = bc_disc_node_name.read(); !v.is_empty() && v.starts_with('/') };
+    let disc_node_err = {
+        let v = bc_disc_node_name.read();
+        !v.is_empty() && !v.starts_with('/')
+    };
+    let disc_enabled = {
+        let v = bc_disc_node_name.read();
+        !v.is_empty() && v.starts_with('/')
+    };
     let cs_var = bc_cs_variant.read().clone();
     let cs_is_null = cs_var == "null";
     let cs_is_sharded = cs_var == "sharded-lru";
@@ -1155,10 +1201,10 @@ enum FaceKind {
 impl FaceKind {
     fn label(self) -> &'static str {
         match self {
-            FaceKind::Udp       => "UDP",
-            FaceKind::Tcp       => "TCP",
+            FaceKind::Udp => "UDP",
+            FaceKind::Tcp => "TCP",
             FaceKind::WebSocket => "WebSocket",
-            FaceKind::Ethernet  => "Ethernet",
+            FaceKind::Ethernet => "Ethernet",
         }
     }
     fn placeholder_host(self) -> &'static str {
@@ -1170,8 +1216,8 @@ impl FaceKind {
     fn default_port(self) -> &'static str {
         match self {
             FaceKind::Udp | FaceKind::Tcp => "6363",
-            FaceKind::WebSocket           => "9696",
-            FaceKind::Ethernet            => "",
+            FaceKind::WebSocket => "9696",
+            FaceKind::Ethernet => "",
         }
     }
     fn has_port(self) -> bool {
@@ -1179,10 +1225,10 @@ impl FaceKind {
     }
     fn build_uri(self, host: &str, port: &str, mac: &str) -> String {
         match self {
-            FaceKind::Udp       => format!("udp4://{}:{}", host.trim(), port.trim()),
-            FaceKind::Tcp       => format!("tcp4://{}:{}", host.trim(), port.trim()),
+            FaceKind::Udp => format!("udp4://{}:{}", host.trim(), port.trim()),
+            FaceKind::Tcp => format!("tcp4://{}:{}", host.trim(), port.trim()),
             FaceKind::WebSocket => format!("ws://{}:{}/", host.trim(), port.trim()),
-            FaceKind::Ethernet  => {
+            FaceKind::Ethernet => {
                 let mac = mac.trim();
                 if mac.is_empty() {
                     format!("ether://{}", host.trim())
@@ -1211,7 +1257,11 @@ pub fn FaceCreateModal(on_close: EventHandler<()>) -> Element {
         let h = host.read().clone();
         let p = port.read().clone();
         let m = mac.read().clone();
-        if h.is_empty() { String::new() } else { k.build_uri(&h, &p, &m) }
+        if h.is_empty() {
+            String::new()
+        } else {
+            k.build_uri(&h, &p, &m)
+        }
     };
 
     rsx! {
@@ -1424,7 +1474,11 @@ pub fn RouteAddModal(on_close: EventHandler<()>) -> Element {
 
     // Autocomplete suggestions
     const COMMON_PREFIXES: &[&str] = &[
-        "/ndn", "/localhop", "/localhost", "/localhop/nfd", "/localhop/ndnd",
+        "/ndn",
+        "/localhop",
+        "/localhost",
+        "/localhop/nfd",
+        "/localhop/ndnd",
     ];
 
     rsx! {

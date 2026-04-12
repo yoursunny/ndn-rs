@@ -38,22 +38,29 @@ fn put_vu(buf: &mut BytesMut, v: u64) {
 /// the single-buffer fast paths (`sign_digest_sha256`, `sign_none`).
 struct FastPathSizes {
     /// Total byte count of all encoded name components (value part of Name TLV).
-    comps_inner:  usize,
+    comps_inner: usize,
     /// Full encoded size of the Name TLV (type + length + comps_inner).
-    name_tlv:     usize,
+    name_tlv: usize,
     /// Total byte count of MetaInfo *value* bytes (0 when no freshness/FinalBlockId).
-    mi_inner:     usize,
+    mi_inner: usize,
     /// Full encoded size of the MetaInfo TLV (0 when `mi_inner == 0`).
     metainfo_tlv: usize,
     /// Full encoded size of the Content TLV.
-    content_tlv:  usize,
+    content_tlv: usize,
 }
 
 impl FastPathSizes {
-    fn compute(name: &Name, freshness: Option<Duration>, final_block_id: Option<&Bytes>, content: &[u8]) -> Self {
+    fn compute(
+        name: &Name,
+        freshness: Option<Duration>,
+        final_block_id: Option<&Bytes>,
+        content: &[u8],
+    ) -> Self {
         use ndn_tlv::varu64_size;
 
-        let comps_inner: usize = name.components().iter()
+        let comps_inner: usize = name
+            .components()
+            .iter()
             .map(|c| varu64_size(c.typ) + varu64_size(c.value.len() as u64) + c.value.len())
             .sum();
         let name_tlv = varu64_size(tlv_type::NAME) + varu64_size(comps_inner as u64) + comps_inner;
@@ -62,22 +69,31 @@ impl FastPathSizes {
             let mut s = 0usize;
             if let Some(f) = freshness {
                 let (_, nni_len) = super::nni(f.as_millis() as u64);
-                s += varu64_size(tlv_type::FRESHNESS_PERIOD) + varu64_size(nni_len as u64) + nni_len;
+                s +=
+                    varu64_size(tlv_type::FRESHNESS_PERIOD) + varu64_size(nni_len as u64) + nni_len;
             }
             if let Some(fb) = final_block_id {
-                s += varu64_size(tlv_type::FINAL_BLOCK_ID) + varu64_size(fb.len() as u64) + fb.len();
+                s +=
+                    varu64_size(tlv_type::FINAL_BLOCK_ID) + varu64_size(fb.len() as u64) + fb.len();
             }
             s
         };
         let metainfo_tlv = if mi_inner > 0 {
             varu64_size(tlv_type::META_INFO) + varu64_size(mi_inner as u64) + mi_inner
-        } else { 0 };
+        } else {
+            0
+        };
 
-        let content_tlv = varu64_size(tlv_type::CONTENT)
-            + varu64_size(content.len() as u64)
-            + content.len();
+        let content_tlv =
+            varu64_size(tlv_type::CONTENT) + varu64_size(content.len() as u64) + content.len();
 
-        Self { comps_inner, name_tlv, mi_inner, metainfo_tlv, content_tlv }
+        Self {
+            comps_inner,
+            name_tlv,
+            mi_inner,
+            metainfo_tlv,
+            content_tlv,
+        }
     }
 }
 
@@ -224,10 +240,14 @@ impl DataBuilder {
         const SIGVALUE: usize = 34;
 
         let sz = FastPathSizes::compute(
-            &self.name, self.freshness, self.final_block_id.as_ref(), &self.content,
+            &self.name,
+            self.freshness,
+            self.final_block_id.as_ref(),
+            &self.content,
         );
-        let signed_size = sz.name_tlv + sz.metainfo_tlv + sz.content_tlv + SIGINFO_DIGEST_SHA256.len();
-        let inner_size  = signed_size + SIGVALUE;
+        let signed_size =
+            sz.name_tlv + sz.metainfo_tlv + sz.content_tlv + SIGINFO_DIGEST_SHA256.len();
+        let inner_size = signed_size + SIGVALUE;
         let header_size = varu64_size(tlv_type::DATA) + varu64_size(inner_size as u64);
 
         let mut buf = BytesMut::with_capacity(header_size + inner_size);
@@ -235,9 +255,20 @@ impl DataBuilder {
         put_vu(&mut buf, inner_size as u64);
 
         let signed_start = buf.len();
-        write_fields(&mut buf, &self.name, self.freshness, self.final_block_id.as_ref(), &self.content, &sz);
+        write_fields(
+            &mut buf,
+            &self.name,
+            self.freshness,
+            self.final_block_id.as_ref(),
+            &self.content,
+            &sz,
+        );
         buf.put_slice(&SIGINFO_DIGEST_SHA256);
-        debug_assert_eq!(buf.len() - signed_start, signed_size, "signed region size mismatch");
+        debug_assert_eq!(
+            buf.len() - signed_start,
+            signed_size,
+            "signed region size mismatch"
+        );
 
         let hash = ring::digest::digest(&ring::digest::SHA256, &buf[signed_start..]);
         buf.put_slice(&[0x17u8, 0x20]);
@@ -274,10 +305,14 @@ impl DataBuilder {
         const SIGVALUE: usize = 34;
 
         let sz = FastPathSizes::compute(
-            &self.name, self.freshness, self.final_block_id.as_ref(), &self.content,
+            &self.name,
+            self.freshness,
+            self.final_block_id.as_ref(),
+            &self.content,
         );
-        let signed_size = sz.name_tlv + sz.metainfo_tlv + sz.content_tlv + SIGINFO_DIGEST_BLAKE3.len();
-        let inner_size  = signed_size + SIGVALUE;
+        let signed_size =
+            sz.name_tlv + sz.metainfo_tlv + sz.content_tlv + SIGINFO_DIGEST_BLAKE3.len();
+        let inner_size = signed_size + SIGVALUE;
         let header_size = varu64_size(tlv_type::DATA) + varu64_size(inner_size as u64);
 
         let mut buf = BytesMut::with_capacity(header_size + inner_size);
@@ -285,9 +320,20 @@ impl DataBuilder {
         put_vu(&mut buf, inner_size as u64);
 
         let signed_start = buf.len();
-        write_fields(&mut buf, &self.name, self.freshness, self.final_block_id.as_ref(), &self.content, &sz);
+        write_fields(
+            &mut buf,
+            &self.name,
+            self.freshness,
+            self.final_block_id.as_ref(),
+            &self.content,
+            &sz,
+        );
         buf.put_slice(&SIGINFO_DIGEST_BLAKE3);
-        debug_assert_eq!(buf.len() - signed_start, signed_size, "signed region size mismatch");
+        debug_assert_eq!(
+            buf.len() - signed_start,
+            signed_size,
+            "signed region size mismatch"
+        );
 
         let hash = blake3::hash(&buf[signed_start..]);
         buf.put_slice(&[0x17u8, 0x20]);
@@ -310,15 +356,25 @@ impl DataBuilder {
         use ndn_tlv::varu64_size;
 
         let sz = FastPathSizes::compute(
-            &self.name, self.freshness, self.final_block_id.as_ref(), &self.content,
+            &self.name,
+            self.freshness,
+            self.final_block_id.as_ref(),
+            &self.content,
         );
-        let inner_size  = sz.name_tlv + sz.metainfo_tlv + sz.content_tlv;
+        let inner_size = sz.name_tlv + sz.metainfo_tlv + sz.content_tlv;
         let header_size = varu64_size(tlv_type::DATA) + varu64_size(inner_size as u64);
 
         let mut buf = BytesMut::with_capacity(header_size + inner_size);
         put_vu(&mut buf, tlv_type::DATA);
         put_vu(&mut buf, inner_size as u64);
-        write_fields(&mut buf, &self.name, self.freshness, self.final_block_id.as_ref(), &self.content, &sz);
+        write_fields(
+            &mut buf,
+            &self.name,
+            self.freshness,
+            self.final_block_id.as_ref(),
+            &self.content,
+            &sz,
+        );
         buf.freeze()
     }
 
