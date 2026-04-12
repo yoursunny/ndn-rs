@@ -82,9 +82,11 @@ pub use l2::{RadioFaceMetadata, RadioTable};
 
 #[cfg(all(feature = "l2", target_os = "linux"))]
 pub use l2::{
-    BleFace, EtherNeighborDiscovery, MacAddr, MulticastEtherFace, NamedEtherFace,
-    NeighborDiscovery, WfbFace, get_interface_mac,
+    MacAddr, MulticastEtherFace, NamedEtherFace, NeighborDiscovery, WfbFace, get_interface_mac,
 };
+
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+pub use l2::BleFace;
 #[cfg(all(feature = "l2", target_os = "macos"))]
 pub use l2::{MulticastEtherFace, NamedEtherFace};
 #[cfg(all(feature = "l2", target_os = "windows"))]

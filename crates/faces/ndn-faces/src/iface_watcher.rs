@@ -76,9 +76,9 @@ async fn watch_interfaces_linux(
     // Bind to RTMGRP_LINK multicast group.
     let addr = libc::sockaddr_nl {
         nl_family: libc::AF_NETLINK as u16,
-        nl_pad: Default::default(),
         nl_pid: 0,
         nl_groups: libc::RTMGRP_LINK as u32,
+        ..Default::default()
     };
     let rc = unsafe {
         libc::bind(

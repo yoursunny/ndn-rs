@@ -1,4 +1,4 @@
-use crate::af_packet::MacAddr;
+use super::af_packet::MacAddr;
 use ndn_packet::Name;
 use ndn_transport::FaceId;
 use std::collections::HashMap;

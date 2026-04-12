@@ -11,7 +11,7 @@ use ndn_transport::{Face, FaceAddr, FaceError, FaceId, FaceKind, LinkType};
 use tokio::io::unix::AsyncFd;
 
 use crate::NDN_ETHERTYPE;
-use crate::af_packet::{
+use super::af_packet::{
     MacAddr, PacketRing, get_ifindex, make_sockaddr_ll, open_packet_socket, setsockopt_val,
     setup_packet_ring,
 };
