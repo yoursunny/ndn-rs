@@ -168,26 +168,32 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
         };
 
         // Extract SegmentNameComponent (TLV 0x32) from the last name component.
-        let seg_idx: Option<usize> = interest
+        let last_is_seg = interest
             .name
             .components()
             .last()
-            .and_then(|c| c.as_segment())
-            .map(|s| s as usize);
+            .and_then(|c| c.as_segment());
 
-        let seg_idx = match seg_idx {
-            Some(i) if i < seg_count => i,
-            _ => {
+        let seg_idx: usize = match last_is_seg {
+            Some(i) if (i as usize) < seg_count => i as usize,
+            Some(_) => {
+                // Segment number out of range — skip.
                 unknown += 1;
                 if !params.quiet {
                     let _ = tx
                         .send(ToolEvent::info(format!(
-                            "ndn-put: unknown Interest: {}",
+                            "ndn-put: segment out of range: {}",
                             interest.name
                         )))
                         .await;
                 }
                 continue;
+            }
+            None => {
+                // CanBePrefix discovery Interest (no SegmentNameComponent).
+                // Respond with segment 0 under the versioned prefix — compatible
+                // with ndn-cxx ndnputchunks behaviour and with `ndn-peek --can-be-prefix`.
+                0
             }
         };
 
@@ -196,7 +202,16 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
             None => continue,
         };
 
-        let mut builder = DataBuilder::new((*interest.name).clone(), seg_bytes)
+        // Use the versioned+segment name for the Data.  For discovery Interests
+        // (no segment in the Interest name) we build the full name so consumers
+        // can discover the versioned prefix from the returned Data name.
+        let data_name = if last_is_seg.is_some() {
+            (*interest.name).clone()
+        } else {
+            served_prefix.clone().append_segment(seg_idx as u64)
+        };
+
+        let mut builder = DataBuilder::new(data_name, seg_bytes)
             .final_block_id_typed_seg(last_seg as u64);
         if let Some(f) = freshness {
             builder = builder.freshness(f);
