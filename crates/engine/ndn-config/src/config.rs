@@ -28,6 +28,10 @@ use serde::{Deserialize, Serialize};
 /// [security]
 /// trust_anchor = "/etc/ndn/trust-anchor.cert"
 ///
+/// [[security.rule]]
+/// data = "/sensor/<node>/<type>"
+/// key  = "/sensor/<node>/KEY/<id>"
+///
 /// [logging]
 /// level = "info"
 /// file = "/var/log/ndn/router.log"
@@ -57,6 +61,10 @@ pub struct ForwarderConfig {
 
     #[serde(default)]
     pub discovery: DiscoveryTomlConfig,
+
+    /// Face system auto-configuration — interface enumeration and hotplug.
+    #[serde(default)]
+    pub face_system: FaceSystemConfig,
 }
 
 impl std::str::FromStr for ForwarderConfig {
@@ -100,7 +108,7 @@ impl ForwarderConfig {
         }
 
         // Validate CS capacity sanity (> 0 MB when not disabled).
-        if self.engine.cs_capacity_mb > 0 && self.engine.cs_capacity_mb > 65536 {
+        if self.engine.cs_capacity_mb > 65536 {
             return Err(ConfigError::Invalid(format!(
                 "engine.cs_capacity_mb ({}) is unreasonably large (max 65536 MB)",
                 self.engine.cs_capacity_mb
@@ -172,12 +180,12 @@ fn validate_face_config(face: &FaceConfig) -> Result<(), ConfigError> {
                     ConfigError::Invalid(format!("invalid WebSocket bind address: {addr}"))
                 })?;
             }
-            if let Some(u) = url {
-                if !u.starts_with("ws://") && !u.starts_with("wss://") {
-                    return Err(ConfigError::Invalid(format!(
-                        "WebSocket URL must start with ws:// or wss://: {u}"
-                    )));
-                }
+            if let Some(u) = url
+                && !u.starts_with("ws://") && !u.starts_with("wss://")
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "WebSocket URL must start with ws:// or wss://: {u}"
+                )));
             }
         }
         FaceConfig::Serial { path, baud } => {
@@ -332,6 +340,121 @@ fn default_baud() -> u32 {
     115200
 }
 
+/// Face system auto-configuration.
+///
+/// Controls automatic creation of multicast faces on startup and dynamic
+/// interface monitoring.  When `auto_multicast` is enabled, the router
+/// enumerates all eligible network interfaces at startup and creates one
+/// multicast face per interface without requiring explicit `[[face]]` entries.
+///
+/// ```toml
+/// [face_system.ether]
+/// auto_multicast = true
+/// whitelist = ["eth*", "enp*", "en*"]
+/// blacklist = ["docker*", "virbr*", "lo"]
+///
+/// [face_system.udp]
+/// auto_multicast = true
+/// ad_hoc = false
+/// whitelist = ["*"]
+/// blacklist = ["lo"]
+///
+/// [face_system]
+/// watch_interfaces = true  # Linux only; macOS/Windows: warning logged
+/// ```
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct FaceSystemConfig {
+    /// Ethernet (Layer-2) multicast face auto-configuration.
+    #[serde(default)]
+    pub ether: EtherFaceSystemConfig,
+    /// UDP multicast face auto-configuration.
+    #[serde(default)]
+    pub udp: UdpFaceSystemConfig,
+    /// Subscribe to OS interface add/remove events and automatically
+    /// create or destroy multicast faces as interfaces appear and disappear.
+    ///
+    /// **Linux**: uses `RTMGRP_LINK` netlink.
+    /// **macOS / Windows**: unsupported — logs a warning and ignored.
+    #[serde(default)]
+    pub watch_interfaces: bool,
+}
+
+/// Ethernet multicast face auto-configuration (`[face_system.ether]`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EtherFaceSystemConfig {
+    /// Create a `MulticastEtherFace` for every eligible interface at startup.
+    ///
+    /// An interface is eligible when it is UP, supports multicast, is not a
+    /// loopback, and passes the `whitelist` / `blacklist` filters.
+    #[serde(default)]
+    pub auto_multicast: bool,
+    /// Interface name glob patterns to include (default: `["*"]`).
+    ///
+    /// Supports `*` (any sequence) and `?` (one character).
+    /// Examples: `"eth*"`, `"enp*"`, `"en0"`.
+    #[serde(default = "default_iface_whitelist")]
+    pub whitelist: Vec<String>,
+    /// Interface name glob patterns to exclude (default: `["lo"]`).
+    ///
+    /// Applied after the whitelist.  Examples: `"docker*"`, `"virbr*"`.
+    #[serde(default = "default_ether_iface_blacklist")]
+    pub blacklist: Vec<String>,
+}
+
+impl Default for EtherFaceSystemConfig {
+    fn default() -> Self {
+        Self {
+            auto_multicast: false,
+            whitelist: default_iface_whitelist(),
+            blacklist: default_ether_iface_blacklist(),
+        }
+    }
+}
+
+/// UDP multicast face auto-configuration (`[face_system.udp]`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UdpFaceSystemConfig {
+    /// Create a `MulticastUdpFace` for every eligible interface at startup.
+    #[serde(default)]
+    pub auto_multicast: bool,
+    /// Advertise faces as `AdHoc` link type instead of `MultiAccess`.
+    ///
+    /// Set to `true` for Wi-Fi IBSS (ad-hoc) or MANET deployments where not
+    /// all nodes hear every multicast frame.  Strategies use this to disable
+    /// multi-access Interest suppression on partially-connected links.
+    #[serde(default)]
+    pub ad_hoc: bool,
+    /// Interface name glob patterns to include (default: `["*"]`).
+    #[serde(default = "default_iface_whitelist")]
+    pub whitelist: Vec<String>,
+    /// Interface name glob patterns to exclude (default: `["lo"]`).
+    #[serde(default = "default_udp_iface_blacklist")]
+    pub blacklist: Vec<String>,
+}
+
+impl Default for UdpFaceSystemConfig {
+    fn default() -> Self {
+        Self {
+            auto_multicast: false,
+            ad_hoc: false,
+            whitelist: default_iface_whitelist(),
+            blacklist: default_udp_iface_blacklist(),
+        }
+    }
+}
+
+fn default_iface_whitelist() -> Vec<String> {
+    vec!["*".to_owned()]
+}
+
+fn default_ether_iface_blacklist() -> Vec<String> {
+    vec!["lo".to_owned(), "lo0".to_owned(), "docker*".to_owned(), "virbr*".to_owned()]
+}
+
+fn default_udp_iface_blacklist() -> Vec<String> {
+    vec!["lo".to_owned(), "lo0".to_owned()]
+}
+
 /// Re-export the canonical `FaceKind` from `ndn-transport` — single source of
 /// truth for all face type classification.  Serde support is enabled via the
 /// `serde` feature on `ndn-transport`.
@@ -381,6 +504,31 @@ fn default_face_socket() -> String {
     return "/tmp/ndn.sock".to_owned();
     #[cfg(windows)]
     return r"\\.\pipe\ndn".to_owned();
+}
+
+/// A single trust schema rule in the router configuration.
+///
+/// Rules are specified as `[[security.rule]]` entries in the TOML config:
+///
+/// ```toml
+/// [[security.rule]]
+/// data  = "/sensor/<node>/<type>"
+/// key   = "/sensor/<node>/KEY/<id>"
+///
+/// [[security.rule]]
+/// data  = "/admin/<**rest>"
+/// key   = "/admin/KEY/<id>"
+/// ```
+///
+/// Each rule consists of a data name pattern and a key name pattern. Variables
+/// (e.g. `<node>`) captured in the data pattern must bind the same component
+/// value in the key pattern — this prevents cross-identity signing.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TrustRuleConfig {
+    /// Data name pattern, e.g. `/sensor/<node>/<type>`.
+    pub data: String,
+    /// Key name pattern, e.g. `/sensor/<node>/KEY/<id>`.
+    pub key: String,
 }
 
 /// Security settings.
@@ -456,10 +604,58 @@ pub struct SecurityConfig {
     /// `"yubikey-hotp"`.  Default: `["token"]`.
     #[serde(default = "default_ca_challenges")]
     pub ca_challenges: Vec<String>,
+
+    /// Static trust schema rules loaded at startup.
+    ///
+    /// These are added to the active validator's schema on startup in
+    /// addition to the rules implied by the `profile` setting.
+    ///
+    /// When `profile = "default"` the hierarchical rule is pre-loaded; additional
+    /// `[[security.rule]]` entries extend it. When `profile = "accept-signed"` the
+    /// accept-all rule is pre-loaded; additional rules are appended. When
+    /// `profile = "disabled"` this field is ignored.
+    ///
+    /// Rules can also be added or removed at runtime via the management API:
+    /// `/localhost/nfd/security/schema-rule-add` and `schema-rule-remove`.
+    #[serde(default, rename = "rule")]
+    pub rules: Vec<TrustRuleConfig>,
+
+    // ── PIB backing store ─────────────────────────────────────────────────────
+
+    /// Key backing store type.
+    ///
+    /// - `"file"` — file-based PIB at `pib_path` (default, persisted across restarts)
+    /// - `"memory"` — ephemeral in-memory store; keys are lost on restart
+    ///
+    /// When `identity` is set and the PIB cannot be opened, the router falls
+    /// back to an ephemeral identity and logs a warning (or shows an interactive
+    /// recovery prompt when running in a terminal).
+    ///
+    /// Default: `"file"`.
+    #[serde(default = "default_pib_type")]
+    pub pib_type: String,
+
+    /// NDN name prefix for the auto-generated ephemeral identity.
+    ///
+    /// When no `identity` is configured (or the PIB fails), an in-memory key is
+    /// generated under `<ephemeral_prefix>/<hostname>`.  If not set, the router
+    /// derives the name from the system hostname (e.g. `/ndn-fwd/router-host`).
+    ///
+    /// Set this to enforce a deterministic name for ephemeral identities, e.g.
+    /// in test environments where the hostname varies.
+    #[serde(default)]
+    pub ephemeral_prefix: Option<String>,
+}
+
+fn default_pib_type() -> String {
+    "file".to_owned()
 }
 
 fn default_security_profile() -> String {
-    "default".to_owned()
+    // Match NFD's default: forwarder does not validate Data at the network layer.
+    // Validation is a consumer-side concern in NDN; enable "default" or "accept-signed"
+    // explicitly if you want the forwarder to enforce signatures.
+    "disabled".to_owned()
 }
 
 fn default_ca_max_validity_days() -> u32 {
@@ -679,6 +875,10 @@ face = 1
 trust_anchor = "/etc/ndn/ta.cert"
 require_signed = true
 
+[[security.rule]]
+data = "/sensor/<node>/<type>"
+key  = "/sensor/<node>/KEY/<id>"
+
 [logging]
 level = "debug"
 file = "/var/log/ndn/router.log"
@@ -699,6 +899,9 @@ file = "/var/log/ndn/router.log"
         assert_eq!(cfg.routes[1].cost, 10); // default
         assert!(cfg.security.trust_anchor.is_some());
         assert!(cfg.security.require_signed);
+        assert_eq!(cfg.security.rules.len(), 1);
+        assert_eq!(cfg.security.rules[0].data, "/sensor/<node>/<type>");
+        assert_eq!(cfg.security.rules[0].key, "/sensor/<node>/KEY/<id>");
         assert_eq!(cfg.logging.level, "debug");
         assert_eq!(cfg.logging.file.as_deref(), Some("/var/log/ndn/router.log"));
     }
@@ -744,7 +947,7 @@ file = "/var/log/ndn/router.log"
 
     #[test]
     fn example_file_parses() {
-        let s = include_str!("../../../ndn-router.example.toml");
+        let s = include_str!("../../../../ndn-router.example.toml");
         ForwarderConfig::from_str(s).expect("example config should parse");
     }
 }

@@ -180,11 +180,42 @@ require_signed = false
 auto_init = false
 
 # Security profile.
-#   "default"        — full chain validation with hierarchical trust schema
+#   "disabled"       — no validation (default; matches NFD forwarder behaviour)
 #   "accept-signed"  — verify signatures but skip chain walking (faster)
-#   "disabled"       — no validation (lab / benchmarking only)
-# Default: "default"
-profile = "default"
+#   "default"        — full chain validation with hierarchical trust schema
+#
+# NDN validation is a consumer-side concern.  The forwarder does not validate
+# Data by design; enable a stricter profile only after trust anchors and keys
+# are fully provisioned.
+# Default: "disabled"
+profile = "disabled"
+
+# ─── Trust schema rules ─────────────────────────────────────────────────────
+#
+# Static trust schema rules applied at startup. These are appended to the rules
+# implied by `profile` above.
+#
+# Pattern syntax:
+#   /literal        — must match exactly
+#   /<var>          — captures one name component into the variable `var`
+#   /<**var>        — captures all remaining components (must be last)
+#
+# Variables with the same name in the data pattern and the key pattern must
+# capture the same value — this prevents cross-identity signing.
+#
+# Rules can also be added, removed, or replaced at runtime via:
+#   ndn-ctl security schema-list
+#   ndn-ctl security schema-rule-add "<data> => <key>"
+#   ndn-ctl security schema-rule-remove <index>
+#   ndn-ctl security schema-set "<rule1>\n<rule2>"
+#
+# [[security.rule]]
+# data = "/sensor/<node>/<type>"
+# key  = "/sensor/<node>/KEY/<id>"
+#
+# [[security.rule]]
+# data = "/admin/<**rest>"
+# key  = "/admin/KEY/<id>"
 
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
@@ -212,6 +243,46 @@ level = "info"
 # Parent directories are created automatically.
 # Default: (none — stderr only)
 # file = "/var/log/ndn/router.log"
+
+
+# ─── Face System ──────────────────────────────────────────────────────────────
+# Automatic face creation and interface monitoring.
+# When auto_multicast is enabled, the router enumerates eligible network
+# interfaces at startup and creates multicast faces without requiring explicit
+# [[face]] entries.  Whitelist/blacklist use glob patterns (* and ?).
+
+[face_system]
+# Subscribe to interface add/remove events and auto-create/destroy faces.
+# Linux only (netlink RTMGRP_LINK).  Ignored on macOS / Windows with a warning.
+# Default: false
+# watch_interfaces = true
+
+[face_system.ether]
+# Automatically create a MulticastEtherFace for every eligible interface.
+# Requires CAP_NET_RAW / sudo on Linux, root on macOS.
+# Default: false
+# auto_multicast = true
+
+# Interfaces to include (glob patterns; default: all).
+# whitelist = ["eth*", "enp*", "en*"]
+
+# Interfaces to exclude (applied after whitelist).
+# blacklist = ["lo", "lo0", "docker*", "virbr*"]
+
+[face_system.udp]
+# Automatically create a MulticastUdpFace on 224.0.23.170:6363
+# for every eligible interface's IPv4 address.
+# Default: false
+# auto_multicast = true
+
+# Use AdHoc link type instead of MultiAccess.
+# Enable for Wi-Fi IBSS (ad-hoc) or MANET where not all nodes
+# hear every multicast frame.  Disables multi-access Interest suppression.
+# Default: false
+# ad_hoc = false
+
+# whitelist = ["*"]
+# blacklist = ["lo", "lo0"]
 
 
 # ─── Discovery ────────────────────────────────────────────────────────────────

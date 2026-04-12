@@ -295,6 +295,15 @@ impl MgmtClient {
         self.dataset(module::SECURITY, verb::IDENTITY_LIST).await
     }
 
+    /// Query the active identity status: `security/identity-status`.
+    ///
+    /// Returns a `ControlResponse` whose `status_text` is a space-separated
+    /// key=value line: `identity=<name> is_ephemeral=<bool> pib_path=<path>`.
+    /// Works whether or not a PIB is configured (unlike `identity-list`).
+    pub async fn security_identity_status(&self) -> Result<ControlResponse, ForwarderError> {
+        self.dataset(module::SECURITY, verb::IDENTITY_STATUS).await
+    }
+
     /// Generate a new Ed25519 identity key: `security/identity-generate`.
     pub async fn security_identity_generate(&self, name: &Name) -> Result<ControlParameters, ForwarderError> {
         let params = ControlParameters {
@@ -395,6 +404,55 @@ impl MgmtClient {
             ..Default::default()
         };
         self.command(module::SECURITY, verb::YUBIKEY_GENERATE, &params).await
+    }
+
+    // ─── Trust schema ───────────────────────────────────────────────────────
+
+    /// List all active trust schema rules: `security/schema-list`.
+    ///
+    /// Returns a human-readable list of rules; one per line in the `status_text`:
+    /// `[0] /data_pattern => /key_pattern`
+    pub async fn security_schema_list(&self) -> Result<ControlResponse, ForwarderError> {
+        self.dataset(module::SECURITY, verb::SCHEMA_LIST).await
+    }
+
+    /// Add a trust schema rule: `security/schema-rule-add`.
+    ///
+    /// `rule` must be in the form `"<data_pattern> => <key_pattern>"`, e.g.:
+    /// `"/sensor/<node>/<type> => /sensor/<node>/KEY/<id>"`.
+    pub async fn security_schema_rule_add(&self, rule: &str) -> Result<ControlResponse, ForwarderError> {
+        let params = ControlParameters {
+            uri: Some(rule.to_owned()),
+            ..Default::default()
+        };
+        let name = ndn_config::command_name(module::SECURITY, verb::SCHEMA_RULE_ADD, &params);
+        self.send_interest(name).await
+    }
+
+    /// Remove a trust schema rule by index: `security/schema-rule-remove`.
+    ///
+    /// `index` is the 0-based position from `security_schema_list()`.
+    pub async fn security_schema_rule_remove(&self, index: u64) -> Result<ControlResponse, ForwarderError> {
+        let params = ControlParameters {
+            count: Some(index),
+            ..Default::default()
+        };
+        let name = ndn_config::command_name(module::SECURITY, verb::SCHEMA_RULE_REMOVE, &params);
+        self.send_interest(name).await
+    }
+
+    /// Replace the entire trust schema: `security/schema-set`.
+    ///
+    /// `rules` is a newline-separated list of rule strings. Each line must be in
+    /// the form `"<data_pattern> => <key_pattern>"`. Pass an empty string to
+    /// clear all rules (schema rejects everything).
+    pub async fn security_schema_set(&self, rules: &str) -> Result<ControlResponse, ForwarderError> {
+        let params = ControlParameters {
+            uri: Some(rules.to_owned()),
+            ..Default::default()
+        };
+        let name = ndn_config::command_name(module::SECURITY, verb::SCHEMA_SET, &params);
+        self.send_interest(name).await
     }
 
     // ─── Discovery ──────────────────────────────────────────────────────────

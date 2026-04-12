@@ -20,7 +20,7 @@ pub mod nfd_command;
 
 pub use config::{
     CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, FaceKind, ForwarderConfig,
-    LoggingConfig, ManagementConfig, RouteConfig, SecurityConfig,
+    LoggingConfig, ManagementConfig, RouteConfig, SecurityConfig, TrustRuleConfig,
 };
 pub use control_parameters::ControlParameters;
 pub use control_response::ControlResponse;
