@@ -76,7 +76,7 @@ async fn watch_interfaces_linux(
     // Bind to RTMGRP_LINK multicast group.
     let addr = libc::sockaddr_nl {
         nl_family: libc::AF_NETLINK as u16,
-        nl_pad: 0,
+        nl_pad: Default::default(),
         nl_pid: 0,
         nl_groups: libc::RTMGRP_LINK as u32,
     };
@@ -92,7 +92,9 @@ async fn watch_interfaces_linux(
             error = %std::io::Error::last_os_error(),
             "failed to bind netlink socket — interface hotplug disabled"
         );
-        unsafe { libc::close(fd); }
+        unsafe {
+            libc::close(fd);
+        }
         return;
     }
 
@@ -191,12 +193,10 @@ fn parse_rtm_link_messages(buf: &[u8]) -> Vec<(u16, String)> {
             let mut attr_off = attr_start;
 
             while attr_off + RTA_HDR <= attr_end {
-                let rta_len = u16::from_ne_bytes(
-                    buf[attr_off..attr_off + 2].try_into().unwrap()
-                ) as usize;
-                let rta_type = u16::from_ne_bytes(
-                    buf[attr_off + 2..attr_off + 4].try_into().unwrap()
-                );
+                let rta_len =
+                    u16::from_ne_bytes(buf[attr_off..attr_off + 2].try_into().unwrap()) as usize;
+                let rta_type =
+                    u16::from_ne_bytes(buf[attr_off + 2..attr_off + 4].try_into().unwrap());
                 if rta_len < RTA_HDR || attr_off + rta_len > attr_end {
                     break;
                 }
