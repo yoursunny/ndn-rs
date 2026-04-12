@@ -309,10 +309,10 @@ impl MobileEngine {
     ///
     /// ```no_run
     /// # async fn example(engine: ndn_mobile::MobileEngine) -> anyhow::Result<()> {
-    /// let mut producer = engine.register_producer("/example/app");
-    /// producer.serve(|interest| async move {
-    ///     let data = ndn_packet::encode::DataBuilder::new((*interest.name).clone(), b"hello").build();
-    ///     Some(data)
+    /// let producer = engine.register_producer("/example/app");
+    /// producer.serve(|interest, responder| async move {
+    ///     let wire = ndn_packet::encode::DataBuilder::new((*interest.name).clone(), b"hello").build();
+    ///     responder.respond_bytes(wire).await.ok();
     /// }).await?;
     /// # Ok(())
     /// # }

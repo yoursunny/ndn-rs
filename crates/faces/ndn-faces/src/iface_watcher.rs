@@ -77,9 +77,9 @@ async fn watch_interfaces_linux(
     // (nl_pid=0 means kernel assigns, nl_pad=0 is reserved).
     let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
     addr.nl_family = libc::AF_NETLINK as u16;
-    #[allow(clippy::unnecessary_cast)] // RTMGRP_LINK is i32 on Linux, u32 on macOS
-    let nl_groups = libc::RTMGRP_LINK as u32;
-    addr.nl_groups = nl_groups;
+    // RTMGRP_LINK = 1 is a stable Linux kernel ABI constant.
+    // We use a literal to avoid libc type variance (c_uint vs c_int across versions).
+    addr.nl_groups = 1;
     let rc = unsafe {
         libc::bind(
             fd,

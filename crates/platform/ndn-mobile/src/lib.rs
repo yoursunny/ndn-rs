@@ -59,13 +59,13 @@
 //!         .await?;
 //!
 //!     // Produce data for /mobile/sensor/temp
-//!     let mut producer = engine.register_producer("/mobile/sensor/temp");
-//!     producer.serve(|_interest| async move {
-//!         let data = ndn_packet::encode::DataBuilder::new(
+//!     let producer = engine.register_producer("/mobile/sensor/temp");
+//!     producer.serve(|_interest, responder| async move {
+//!         let wire = ndn_packet::encode::DataBuilder::new(
 //!             "/mobile/sensor/temp".parse::<ndn_mobile::Name>().unwrap(),
 //!             b"23.5C",
 //!         ).build();
-//!         Some(data)
+//!         responder.respond_bytes(wire).await.ok();
 //!     }).await?;
 //!
 //!     engine.shutdown().await;
