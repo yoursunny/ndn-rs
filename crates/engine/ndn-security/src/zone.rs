@@ -85,8 +85,7 @@ impl ZoneKey {
 
     /// The `did:ndn` DID string for this zone root.
     ///
-    /// Because the zone root contains a BLAKE3_DIGEST component, this uses the
-    /// `did:ndn:v1:<base64url>` encoding.
+    /// Returns `did:ndn:<base64url(Name-TLV)>` — the unified binary encoding.
     pub fn zone_root_did(&self) -> String {
         zone_root_to_did(&self.zone_root)
     }
@@ -109,9 +108,6 @@ pub fn zone_root_from_pubkey(public_key_bytes: &[u8]) -> Name {
 }
 
 /// Convert a zone root name to its `did:ndn` DID string representation.
-///
-/// Because a zone root name contains a BLAKE3_DIGEST component (non-generic),
-/// the DID uses the `v1:` base64url encoding.
 pub fn zone_root_to_did(zone_root: &Name) -> String {
     crate::did::name_to_did(zone_root)
 }

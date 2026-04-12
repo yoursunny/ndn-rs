@@ -1,66 +1,103 @@
 //! Encoding and decoding between NDN [`Name`]s and `did:ndn` DID strings.
+//!
+//! # Encoding
+//!
+//! A `did:ndn` DID is the base64url (no padding) encoding of the complete NDN
+//! Name TLV wire format, including the outer `Name-Type` and `TLV-Length` octets.
+//!
+//! ```text
+//! did:ndn:<base64url(Name TLV)>
+//! ```
+//!
+//! Every NDN name maps to exactly one DID, and every valid `did:ndn` DID maps to
+//! exactly one NDN name. The encoding is lossless across all component types
+//! (GenericNameComponent, BLAKE3_DIGEST, ImplicitSha256Digest, versioned
+//! components, etc.) without any type-specific special cases.
+//!
+//! # Backward compatibility
+//!
+//! Earlier drafts of the spec used two forms that are now deprecated:
+//!
+//! - **Simple form** — colon-joined ASCII component values:
+//!   `/com/acme/alice` → `did:ndn:com:acme:alice`
+//! - **`v1:` binary form** — `did:ndn:v1:<base64url(Name TLV)>`
+//!
+//! Both forms are still accepted by [`did_to_name`] for backward compatibility.
+//! [`name_to_did`] no longer produces either deprecated form.
+//!
+//! # Ambiguity in the deprecated scheme
+//!
+//! The `v1:` prefix occupied the same position as the first name-component in the
+//! simple form. A name whose first component is literally `v1` would produce the
+//! same `did:ndn:v1:...` string as a binary-encoded name, making round-trip
+//! decoding impossible without external context. The unified binary form has no
+//! such ambiguity.
 
 use ndn_packet::Name;
 use ndn_packet::name::NameComponent;
 
 use crate::did::resolver::DidError;
 
-/// TLV type for GenericNameComponent.
-const GENERIC_NAME_COMPONENT: u64 = 8;
 /// TLV type for Name container.
 const NAME_TLV_TYPE: u64 = 7;
 
 /// Encode an NDN [`Name`] as a `did:ndn` DID string.
 ///
-/// Simple names (all `GenericNameComponent`s with ASCII alphanumeric, `-`, `_`, or `.` values)
-/// use colon-encoded form: `/com/acme/alice` → `did:ndn:com:acme:alice`.
+/// The method-specific identifier is the base64url (no padding) encoding of the
+/// complete NDN Name TLV wire format, including the outer `07 <length>` bytes.
 ///
-/// All other names fall back to `did:ndn:v1:<base64url(TLV)>`.
+/// ```
+/// # use ndn_security::did::encoding::name_to_did;
+/// # use ndn_packet::Name;
+/// let name: Name = "/com/acme/alice".parse().unwrap();
+/// let did = name_to_did(&name);
+/// assert!(did.starts_with("did:ndn:"));
+/// // The method-specific-id is base64url — no colons, no v1: prefix.
+/// assert!(!did["did:ndn:".len()..].contains(':'));
+/// ```
 pub fn name_to_did(name: &Name) -> String {
-    if let Some(simple) = try_simple_encode(name) {
-        format!("did:ndn:{simple}")
-    } else {
-        let tlv = encode_name_tlv(name);
-        let encoded = base64_url_encode(&tlv);
-        format!("did:ndn:v1:{encoded}")
-    }
+    let tlv = encode_name_tlv(name);
+    let encoded = base64_url_encode(&tlv);
+    format!("did:ndn:{encoded}")
 }
 
 /// Decode a `did:ndn` DID string back to an NDN [`Name`].
+///
+/// Accepts:
+/// - **Current form**: `did:ndn:<base64url(Name TLV)>` — no colons in the
+///   method-specific identifier.
+/// - **Deprecated `v1:` form**: `did:ndn:v1:<base64url(Name TLV)>` — parsed
+///   for backward compatibility but no longer produced by [`name_to_did`].
+/// - **Deprecated simple form**: `did:ndn:com:acme:alice` — parsed for backward
+///   compatibility as colon-separated GenericNameComponent ASCII values.
 pub fn did_to_name(did: &str) -> Result<Name, DidError> {
     let rest = did
         .strip_prefix("did:ndn:")
         .ok_or_else(|| DidError::InvalidDid(did.to_string()))?;
 
-    if let Some(encoded) = rest.strip_prefix("v1:") {
-        let bytes = base64_url_decode(encoded)
+    if rest.contains(':') {
+        // Legacy forms (both use colons, which are not in the base64url alphabet).
+        if let Some(encoded) = rest.strip_prefix("v1:") {
+            // Deprecated v1: binary form.
+            let bytes = base64_url_decode(encoded)
+                .map_err(|_| DidError::InvalidDid(format!("invalid base64url in {did}")))?;
+            decode_name_tlv(&bytes)
+                .map_err(|_| DidError::InvalidDid(format!("invalid TLV name in {did}")))
+        } else {
+            // Deprecated simple colon-encoded form.
+            colon_decode(rest)
+                .ok_or_else(|| DidError::InvalidDid(format!("invalid did:ndn: {did}")))
+        }
+    } else {
+        // Current binary form: the entire method-specific-id is base64url.
+        let bytes = base64_url_decode(rest)
             .map_err(|_| DidError::InvalidDid(format!("invalid base64url in {did}")))?;
         decode_name_tlv(&bytes)
             .map_err(|_| DidError::InvalidDid(format!("invalid TLV name in {did}")))
-    } else {
-        colon_decode(rest)
-            .ok_or_else(|| DidError::InvalidDid(format!("invalid colon-encoded did:ndn: {did}")))
     }
 }
 
-fn try_simple_encode(name: &Name) -> Option<String> {
-    let mut parts = Vec::with_capacity(name.len());
-    for comp in name.components() {
-        if comp.typ != GENERIC_NAME_COMPONENT {
-            return None;
-        }
-        let s = std::str::from_utf8(&comp.value).ok()?;
-        if s.is_empty()
-            || !s
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-        {
-            return None;
-        }
-        parts.push(s.to_string());
-    }
-    Some(parts.join(":"))
-}
+// ── Legacy helpers (kept for did_to_name backward compat) ────────────────────
 
 fn colon_decode(s: &str) -> Option<Name> {
     if s.is_empty() {
@@ -75,6 +112,8 @@ fn colon_decode(s: &str) -> Option<Name> {
     }
     Some(name)
 }
+
+// ── TLV encoding / decoding ───────────────────────────────────────────────────
 
 fn encode_name_tlv(name: &Name) -> Vec<u8> {
     let mut inner: Vec<u8> = Vec::new();
@@ -174,10 +213,12 @@ mod tests {
     use ndn_packet::Name;
 
     #[test]
-    fn roundtrip_simple() {
+    fn roundtrip_ascii_name() {
         let name: Name = "/com/acme/alice".parse().unwrap();
         let did = name_to_did(&name);
-        assert_eq!(did, "did:ndn:com:acme:alice");
+        // Current form: binary, no colons in method-specific-id.
+        assert!(did.starts_with("did:ndn:"));
+        assert!(!did["did:ndn:".len()..].contains(':'));
         let back = did_to_name(&did).unwrap();
         assert_eq!(back, name);
     }
@@ -186,18 +227,55 @@ mod tests {
     fn roundtrip_root() {
         let name = Name::root();
         let did = name_to_did(&name);
-        assert_eq!(did, "did:ndn:");
+        assert!(did.starts_with("did:ndn:"));
         let back = did_to_name(&did).unwrap();
         assert_eq!(back, name);
     }
 
     #[test]
-    fn fallback_to_tlv_for_non_ascii() {
+    fn roundtrip_versioned_component() {
         let name: Name = "/com/acme".parse().unwrap();
         let name = name.append_version(42);
         let did = name_to_did(&name);
-        assert!(did.starts_with("did:ndn:v1:"));
+        // Must be binary form — no v1: prefix.
+        assert!(did.starts_with("did:ndn:"));
+        assert!(!did["did:ndn:".len()..].starts_with("v1:"));
         let back = did_to_name(&did).unwrap();
         assert_eq!(back, name);
+    }
+
+    #[test]
+    fn no_v1_ambiguity() {
+        // A name literally starting with "v1" must round-trip correctly.
+        // Under the old scheme this was ambiguous; under binary-only it is not.
+        let name: Name = "/v1/BwEA".parse().unwrap();
+        let did = name_to_did(&name);
+        assert!(did.starts_with("did:ndn:"));
+        // The DID does NOT contain "v1:" — it's all base64url.
+        assert!(!did.contains("v1:"));
+        let back = did_to_name(&did).unwrap();
+        assert_eq!(back, name);
+    }
+
+    // ── Backward-compat parsing ───────────────────────────────────────────────
+
+    #[test]
+    fn compat_simple_form() {
+        // Old `did:ndn:com:acme:alice` form still parses.
+        let name = did_to_name("did:ndn:com:acme:alice").unwrap();
+        assert_eq!(name, "/com/acme/alice".parse::<Name>().unwrap());
+    }
+
+    #[test]
+    fn compat_v1_binary_form() {
+        // Old `did:ndn:v1:<base64>` form still parses.
+        let original: Name = "/com/acme".parse().unwrap();
+        let original = original.append_version(42);
+        // Produce old form manually.
+        let tlv = encode_name_tlv(&original);
+        let b64 = base64_url_encode(&tlv);
+        let old_did = format!("did:ndn:v1:{b64}");
+        let back = did_to_name(&old_did).unwrap();
+        assert_eq!(back, original);
     }
 }

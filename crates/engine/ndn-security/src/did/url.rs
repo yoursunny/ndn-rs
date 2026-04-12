@@ -9,9 +9,11 @@
 //! ```
 //!
 //! Examples:
-//! - `did:ndn:com:acme:alice#key-0` — fragment reference to a VM
-//! - `did:ndn:v1:abc123#key-agreement-1` — zone DID key agreement VM
-//! - `did:ndn:com:acme:alice/service?type=ndn#endpoint` — service lookup
+//! - `did:ndn:BwkI...#key-0` — fragment reference to a verification method
+//! - `did:ndn:BwMg...#key-agreement-1` — zone DID key agreement VM
+//! - `did:ndn:BwkI.../service?type=ndn#endpoint` — service lookup
+//!
+//! (The method-specific identifier is base64url — no colons.)
 //!
 //! # Dereferencing
 //!
@@ -269,8 +271,9 @@ mod tests {
 
     #[test]
     fn parse_zone_did_with_fragment() {
-        let url = DidUrl::parse("did:ndn:v1:abc123abc123#key-agreement-1").unwrap();
-        assert_eq!(url.did, "did:ndn:v1:abc123abc123");
+        // Current binary form: base64url with no colons.
+        let url = DidUrl::parse("did:ndn:BwMgabc123abc123abc#key-agreement-1").unwrap();
+        assert_eq!(url.did, "did:ndn:BwMgabc123abc123abc");
         assert_eq!(url.fragment.as_deref(), Some("key-agreement-1"));
     }
 

@@ -78,7 +78,7 @@ pub fn cert_to_did_document(cert: &Certificate, x25519_key: Option<&[u8]>) -> Di
 /// Build a W3C DID Document for a self-certifying [`ZoneKey`].
 ///
 /// The resulting document:
-/// - Has `id` = `did:ndn:v1:<base64url(zone-root-name-TLV)>`
+/// - Has `id` = `did:ndn:<base64url(zone-root-name-TLV)>` (binary-only encoding)
 /// - Lists the Ed25519 signing key as `authentication`, `assertionMethod`,
 ///   `capabilityInvocation`, and `capabilityDelegation`
 /// - Optionally lists an X25519 key as `keyAgreement`

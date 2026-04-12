@@ -3,18 +3,16 @@
 //!
 //! # did:ndn encoding
 //!
-//! An NDN name maps to a `did:ndn` DID in two ways:
+//! A `did:ndn` DID is the base64url (no padding) encoding of the complete NDN
+//! Name TLV wire format, including the outer `07 <length>` bytes:
 //!
-//! - **Simple** (all GenericNameComponents, ASCII alphanumeric/hyphen/underscore/dot):
-//!   colon-encoded following the `did:web` convention.
-//!   `/com/acme/alice` → `did:ndn:com:acme:alice`
+//! ```text
+//! did:ndn:<base64url(Name TLV)>
+//! ```
 //!
-//! - **Complex** (non-generic components or non-ASCII bytes): TLV base64url
-//!   with a `v1:` prefix.
-//!   → `did:ndn:v1:<base64url(TLV Name)>`
-//!
-//! Zone root names always use the `v1:` encoding since they contain a
-//! `BLAKE3_DIGEST` component (type 0x03), which is not a GenericNameComponent.
+//! This single form handles all NDN names unambiguously — GenericNameComponents,
+//! BLAKE3_DIGEST zone roots, versioned components, etc. — without type-specific
+//! special cases. See [`encoding`] for backward-compat parsing of older forms.
 //!
 //! # Resolution
 //!

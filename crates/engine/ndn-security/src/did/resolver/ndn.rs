@@ -1,12 +1,13 @@
 //! `did:ndn` resolver — resolves via NDN Interest/Data exchange.
 //!
-//! Two resolution strategies, chosen by DID type:
+//! Two resolution strategies, chosen by decoding the binary DID back to the
+//! underlying NDN name and inspecting the first component type:
 //!
-//! **CA-anchored** (`did:ndn:com:acme:alice`):
+//! **CA-anchored** (name components are all GenericNameComponents):
 //! Fetches the certificate at `<identity-name>/KEY` and converts it to a
 //! DID Document via [`cert_to_did_document`].
 //!
-//! **Zone** (`did:ndn:v1:<base64url>`):
+//! **Zone** (first component is BLAKE3_DIGEST type):
 //! The zone root name IS the DID. The resolver fetches a published DID
 //! Document Data packet at `<zone-root-name>`. Zone owners must publish
 //! their DID Document as a signed Data packet for resolvers to find it.
