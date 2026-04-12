@@ -471,6 +471,6 @@ mod tests {
             MacAddr::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]),
             &DiscoveryProfile::HighMobility,
         );
-        assert!(nd.core.config.hello_interval_base < Duration::from_millis(100));
+        assert!(nd.core.config.read().unwrap().hello_interval_base < Duration::from_millis(100));
     }
 }
