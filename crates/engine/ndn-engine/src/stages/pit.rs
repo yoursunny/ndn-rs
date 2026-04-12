@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use tracing::trace;
 
 use crate::pipeline::{Action, DecodedPacket, DropReason, PacketContext};
-use ndn_packet::Selector;
+use ndn_packet::{Name, Selector};
 use ndn_store::{Pit, PitEntry, PitToken};
 use ndn_transport::FaceId;
 
@@ -139,6 +139,37 @@ impl PitMatchStage {
                 trace!(face=%ctx.face_id, name=%data.name, out_faces=?faces, "pit-match: satisfied");
                 ctx.out_faces = faces;
                 return Action::Continue(ctx);
+            }
+        }
+
+        // CanBePrefix: the Data name may be longer than the Interest name.
+        // Walk progressively shorter prefixes and check for a matching PIT entry
+        // with can_be_prefix=true.  This handles the common case where a producer
+        // responds under a versioned+segmented name to a plain CanBePrefix Interest.
+        let comps = data.name.components();
+        let can_be_prefix_probes: &[Option<Selector>] = &[
+            Some(Selector {
+                can_be_prefix: true,
+                must_be_fresh: false,
+            }),
+            Some(Selector {
+                can_be_prefix: true,
+                must_be_fresh: true,
+            }),
+            None,
+        ];
+        for prefix_len in (1..comps.len()).rev() {
+            let prefix = Name::from_components(comps[..prefix_len].iter().cloned());
+            for sel in can_be_prefix_probes {
+                let token = PitToken::from_interest(&prefix, sel.as_ref());
+                if let Some((_, entry)) = self.pit.remove(&token) {
+                    let faces: SmallVec<[FaceId; 4]> =
+                        entry.in_record_faces().map(FaceId).collect();
+                    trace!(face=%ctx.face_id, name=%data.name, prefix=%prefix,
+                           out_faces=?faces, "pit-match: satisfied (can-be-prefix)");
+                    ctx.out_faces = faces;
+                    return Action::Continue(ctx);
+                }
             }
         }
 
