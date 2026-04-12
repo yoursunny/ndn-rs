@@ -29,6 +29,7 @@ impl EwmaRtt {
         self.samples += 1;
     }
 
+    #[allow(dead_code)]
     pub fn rto_ms(&self) -> f64 {
         self.srtt_ms + 4.0 * self.rttvar_ms
     }
@@ -84,10 +85,12 @@ impl SimMeasurements {
         entry.satisfaction_rate = (1.0 - ALPHA) * entry.satisfaction_rate + ALPHA * sample;
     }
 
+    #[allow(dead_code)]
     pub fn get_rtt(&self, prefix: &str, face_id: u32) -> Option<&EwmaRtt> {
         self.entries.get(prefix).and_then(|e| e.rtt_per_face.get(&face_id))
     }
 
+    #[allow(dead_code)]
     pub fn get_satisfaction(&self, prefix: &str) -> f32 {
         self.entries.get(prefix).map(|e| e.satisfaction_rate).unwrap_or(0.0)
     }

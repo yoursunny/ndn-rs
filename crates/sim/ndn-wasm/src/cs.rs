@@ -41,10 +41,10 @@ impl SimCs {
     /// `must_be_fresh`: if true, check freshness.
     pub fn lookup(&self, interest_name: &str, can_be_prefix: bool, must_be_fresh: bool, now_ms: f64) -> Option<&CsEntry> {
         // Exact match first.
-        if let Some(entry) = self.entries.get(interest_name) {
-            if !must_be_fresh || is_fresh(entry, now_ms) {
-                return Some(entry);
-            }
+        if let Some(entry) = self.entries.get(interest_name)
+            && (!must_be_fresh || is_fresh(entry, now_ms))
+        {
+            return Some(entry);
         }
         if can_be_prefix {
             // Find any entry whose name is a more specific version of interest_name.
@@ -83,12 +83,14 @@ impl SimCs {
         self.entries.len()
     }
 
+    #[allow(dead_code)]
     pub fn hit_rate(&self) -> f64 {
         // Placeholder — in real engine this tracks per-request stats.
         // Here we return the CS occupancy ratio as a proxy.
         if self.capacity == 0 { 0.0 } else { self.entries.len() as f64 / self.capacity as f64 }
     }
 
+    #[allow(dead_code)]
     pub fn contains(&self, name: &str) -> bool {
         self.entries.contains_key(name)
     }

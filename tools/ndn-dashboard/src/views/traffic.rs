@@ -14,7 +14,7 @@ pub fn sum_face_histories(
     filter: Option<&HashSet<u64>>,
 ) -> VecDeque<ThroughputSample> {
     let sources: Vec<&VecDeque<ThroughputSample>> = face_throughput.iter()
-        .filter(|(fid, _)| filter.map_or(true, |f| f.contains(fid)))
+        .filter(|(fid, _)| filter.is_none_or(|f| f.contains(fid)))
         .map(|(_, h)| h)
         .collect();
 

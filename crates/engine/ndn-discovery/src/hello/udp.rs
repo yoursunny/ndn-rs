@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn swim_diff_add_creates_probing_neighbor() {
-        use crate::{NeighborState, NeighborTable, NeighborTableView, NeighborUpdate};
+        use crate::{NeighborState, NeighborTable, NeighborUpdate};
         use std::sync::Arc;
 
         struct TrackCtx {
@@ -625,7 +625,7 @@ mod tests {
             }
         }
 
-        let nd = make_nd();
+        let _nd = make_nd();
         let ctx = TrackCtx {
             neighbors: NeighborTable::new(),
         };
@@ -646,7 +646,7 @@ mod tests {
         // the full discovery flow.
 
         // Build a fake hello Data carrying the diff payload.
-        let interest_name = Name::from_str("/ndn/local/nd/hello/1").unwrap();
+        let _interest_name = Name::from_str("/ndn/local/nd/hello/1").unwrap();
         // We can't easily drive the full flow in a unit test without a real
         // multicast face, so replicate the direct diff application logic:
         use crate::{NeighborEntry, NeighborState as NS};

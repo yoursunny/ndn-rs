@@ -103,7 +103,7 @@ impl NdnProducer {
     pub fn serve(&self, handler: Box<dyn NdnInterestHandler>) -> Result<(), NdnError> {
         // Arc so the Fn closure can be called repeatedly without consuming handler.
         let handler: Arc<dyn NdnInterestHandler> = handler.into();
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         self.rt
             .block_on(inner.serve(move |interest, responder| {
                 let name = interest.name.to_string();

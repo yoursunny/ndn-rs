@@ -58,6 +58,7 @@ impl SimFib {
     }
 
     /// Remove all routes for a face on a given prefix.
+    #[allow(dead_code)]
     pub fn remove_route(&mut self, prefix: &str, face_id: u32) {
         let components = parse_name(prefix);
         let mut node = &mut self.root;

@@ -152,18 +152,16 @@ async fn fetch_segmented(
                     let seg_idx = data.name.components().last()
                         .and_then(|c| c.as_segment())
                         .map(|s| s as usize);
-                    if let Some(idx) = seg_idx {
-                        if idx < total_segs && segments[idx].is_none() {
-                            segments[idx] = Some(data.content().cloned().unwrap_or_else(Bytes::new));
-                            received += 1;
-                            if verbose {
-                                let _ = tx.send(
-                                    ToolEvent::info(format!("ndn-peek: {received}/{total_segs} segments"))
-                                        .with_data(ToolData::FetchProgress { received, total: total_segs })
-                                ).await;
-                            }
-                            in_flight.retain(|_, (s, _)| *s != idx);
+                    if let Some(idx) = seg_idx.filter(|&i| i < total_segs && segments[i].is_none()) {
+                        segments[idx] = Some(data.content().cloned().unwrap_or_else(Bytes::new));
+                        received += 1;
+                        if verbose {
+                            let _ = tx.send(
+                                ToolEvent::info(format!("ndn-peek: {received}/{total_segs} segments"))
+                                    .with_data(ToolData::FetchProgress { received, total: total_segs })
+                            ).await;
                         }
+                        in_flight.retain(|_, (s, _)| *s != idx);
                     }
                 }
             }

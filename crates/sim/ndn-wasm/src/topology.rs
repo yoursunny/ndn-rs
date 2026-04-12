@@ -79,6 +79,7 @@ pub struct SimLink {
 
 impl SimLink {
     /// Given a node ID and face ID on that node, return the other end's (node_id, face_id).
+    #[allow(dead_code)]
     pub fn other_end(&self, node_id: u32, face_id: u32) -> Option<(u32, u32)> {
         if node_id == self.node_a && face_id == self.face_a {
             Some((self.node_b, self.face_b))
@@ -286,6 +287,7 @@ impl SimTopology {
     ///
     /// Returns `InterestResult` indicating how the Interest was handled.
     /// `in_link_id`: the link the Interest arrived on (to avoid forwarding back).
+    #[allow(clippy::too_many_arguments)]
     fn route_interest(
         &mut self,
         node_id: u32,
@@ -353,9 +355,9 @@ impl SimTopology {
         }
 
         // Choose the face (BestRoute: lowest cost; exclude in-face to avoid loop).
-        let in_face_from_link = in_link_id.and_then(|lid| {
+        let in_face_from_link = in_link_id.map(|lid| {
             let link = &self.links[&lid];
-            if link.node_a == node_id { Some(link.face_a) } else { Some(link.face_b) }
+            if link.node_a == node_id { link.face_a } else { link.face_b }
         });
         let chosen = nexthops.iter()
             .filter(|nh| Some(nh.face_id) != in_face_from_link)

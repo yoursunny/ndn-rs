@@ -190,7 +190,7 @@ fn decode_tlv_range(buf: &[u8], mut pos: usize, end: usize) -> Vec<TlvNode> {
 
         let value_bytes = &buf[value_start..value_end];
         let value_hex: String = value_bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
-        let value_text = if value_bytes.iter().all(|&b| b >= 32 && b < 127) && !value_bytes.is_empty() {
+        let value_text = if !value_bytes.is_empty() && value_bytes.iter().all(|&b| (32u8..127).contains(&b)) {
             Some(String::from_utf8_lossy(value_bytes).to_string())
         } else {
             None
@@ -235,7 +235,7 @@ fn is_container(typ: u64) -> bool {
 /// Parse hex bytes string (space-separated or continuous) into a byte Vec.
 pub fn parse_hex(hex: &str) -> Result<Vec<u8>, String> {
     let clean: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    if clean.len() % 2 != 0 {
+    if !clean.len().is_multiple_of(2) {
         return Err("Odd number of hex digits".to_string());
     }
     (0..clean.len())

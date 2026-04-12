@@ -62,7 +62,7 @@ pub async fn run_server(params: PingServerParams, tx: mpsc::Sender<ToolEvent>) -
         .then(|| Duration::from_millis(params.freshness_ms));
 
     let signer: Option<Arc<dyn Signer>> = if params.sign {
-        let keychain = KeyChain::ephemeral(&prefix.to_string())?;
+        let keychain = KeyChain::ephemeral(prefix.to_string().as_str())?;
         let signer = keychain.signer()?;
         let _ = tx.send(ToolEvent::info(format!(
             "Signing with {} ({:?})",

@@ -230,6 +230,12 @@ pub struct WasmTopology {
     inner: SimTopology,
 }
 
+impl Default for WasmTopology {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl WasmTopology {
     #[wasm_bindgen(constructor)]

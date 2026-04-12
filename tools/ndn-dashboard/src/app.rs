@@ -135,6 +135,12 @@ pub enum DashCmd {
     /// Apply runtime DVR config — `params` is a URL query string
     /// (`"update_interval_ms=30000&route_ttl_ms=90000"`).
     DvrConfigSet(String),
+    /// Add a trust schema rule; `rule` is `"<data_pattern> => <key_pattern>"`.
+    SchemaRuleAdd(String),
+    /// Remove the trust schema rule at the given 0-based index.
+    SchemaRuleRemove(u64),
+    /// Replace the entire trust schema; `rules` is newline-separated rule strings.
+    SchemaSet(String),
 }
 
 /// Commands sent to the router-management coroutine.
@@ -196,10 +202,17 @@ pub struct AppCtx {
     pub session_log:       Signal<Vec<SessionEntry>>,
     pub recording:         Signal<bool>,
     pub neighbors:         Signal<Vec<NeighborInfo>>,
-    pub security_keys:     Signal<Vec<SecurityKeyInfo>>,
-    pub security_anchors:  Signal<Vec<AnchorInfo>>,
-    pub ca_info:           Signal<Option<CaInfo>>,
-    pub yubikey_status:    Signal<Option<String>>,
+    pub security_keys:        Signal<Vec<SecurityKeyInfo>>,
+    pub security_anchors:     Signal<Vec<AnchorInfo>>,
+    pub ca_info:              Signal<Option<CaInfo>>,
+    pub schema_rules:         Signal<Vec<SchemaRuleInfo>>,
+    pub yubikey_status:       Signal<Option<String>>,
+    /// Active identity name (may be the ephemeral name when no PIB is loaded).
+    pub identity_name:        Signal<String>,
+    /// `true` when the router is using an ephemeral in-memory signing key.
+    pub identity_is_ephemeral: Signal<bool>,
+    /// PIB path reported by the router (`None` when ephemeral).
+    pub identity_pib_path:    Signal<Option<String>>,
     pub cs_hit_history:    Signal<VecDeque<f64>>,
     /// Per-face throughput rate history (60 samples × 3 s = 3 min window).
     pub face_throughput:   Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
@@ -335,10 +348,14 @@ pub fn App() -> Element {
     let session_log:     Signal<Vec<SessionEntry>>            = use_signal(Vec::new);
     let recording:       Signal<bool>                         = use_signal(|| false);
     let neighbors:       Signal<Vec<NeighborInfo>>            = use_signal(Vec::new);
-    let security_keys:   Signal<Vec<SecurityKeyInfo>>         = use_signal(Vec::new);
-    let security_anchors: Signal<Vec<AnchorInfo>>             = use_signal(Vec::new);
-    let ca_info:         Signal<Option<CaInfo>>               = use_signal(|| None);
-    let yubikey_status:  Signal<Option<String>>               = use_signal(|| None);
+    let security_keys:        Signal<Vec<SecurityKeyInfo>>    = use_signal(Vec::new);
+    let security_anchors:     Signal<Vec<AnchorInfo>>         = use_signal(Vec::new);
+    let ca_info:              Signal<Option<CaInfo>>          = use_signal(|| None);
+    let schema_rules:         Signal<Vec<SchemaRuleInfo>>     = use_signal(Vec::new);
+    let yubikey_status:       Signal<Option<String>>          = use_signal(|| None);
+    let identity_name:        Signal<String>                  = use_signal(String::new);
+    let identity_is_ephemeral: Signal<bool>                   = use_signal(|| false);
+    let identity_pib_path:    Signal<Option<String>>          = use_signal(|| None);
     let cs_hit_history:  Signal<VecDeque<f64>>               = use_signal(VecDeque::new);
     let face_throughput: Signal<HashMap<u64, VecDeque<ThroughputSample>>> = use_signal(HashMap::new);
     let face_prev_ctr:   Signal<HashMap<u64, ThroughputSample>>           = use_signal(HashMap::new);
@@ -512,7 +529,7 @@ pub fn App() -> Element {
             // Reset the log cursor so the first poll fetches all buffered lines.
             *LAST_LOG_SEQ.write() = 0;
 
-            if let Err(e) = poll_all(&client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status).await {
+            if let Err(e) = poll_all(&client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await {
                 conn_state.set(ConnState::Disconnected);
                 error_msg.set(Some(e));
                 continue;
@@ -525,7 +542,7 @@ pub fn App() -> Element {
             'session: loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        if let Err(e) = poll_all(&client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status).await {
+                        if let Err(e) = poll_all(&client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await {
                             conn_state.set(ConnState::Disconnected);
                             error_msg.set(Some(e));
                             break 'session;
@@ -535,7 +552,7 @@ pub fn App() -> Element {
                         if matches!(cmd_msg, DashCmd::Reconnect) {
                             break 'session;
                         }
-                        run_cmd(cmd_msg, &client, status, faces, routes, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status).await;
+                        run_cmd(cmd_msg, &client, status, faces, routes, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, schema_rules, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await;
                     }
                 }
             }
@@ -889,7 +906,11 @@ pub fn App() -> Element {
         security_keys,
         security_anchors,
         ca_info,
+        schema_rules,
         yubikey_status,
+        identity_name,
+        identity_is_ephemeral,
+        identity_pib_path,
         cs_hit_history,
         face_throughput,
         discovery_status,
@@ -1194,26 +1215,30 @@ fn default_socket_path() -> String {
 
 #[allow(clippy::too_many_arguments)]
 async fn poll_all(
-    client:                  &MgmtClient,
-    mut status:              Signal<Option<ForwarderStatus>>,
-    mut faces:               Signal<Vec<FaceInfo>>,
-    mut routes:              Signal<Vec<FibEntry>>,
-    mut cs:                  Signal<Option<CsInfo>>,
-    mut strategies:          Signal<Vec<StrategyEntry>>,
-    mut counters:            Signal<Vec<FaceCounter>>,
-    mut measurements:        Signal<Vec<MeasurementEntry>>,
-    mut config_toml:         Signal<String>,
-    mut throughput:          Signal<VecDeque<ThroughputSample>>,
-    mut prev_counters:       Signal<ThroughputSample>,
-    mut neighbors:           Signal<Vec<NeighborInfo>>,
-    mut security_keys:       Signal<Vec<SecurityKeyInfo>>,
-    mut security_anchors:    Signal<Vec<AnchorInfo>>,
-    mut ca_info:             Signal<Option<CaInfo>>,
-    mut cs_hit_history:      Signal<VecDeque<f64>>,
-    mut face_throughput:     Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
-    mut face_prev_ctr:       Signal<HashMap<u64, ThroughputSample>>,
-    mut discovery_status:    Signal<Option<DiscoveryStatus>>,
-    mut dvr_status:          Signal<Option<DvrStatus>>,
+    client:                   &MgmtClient,
+    mut status:               Signal<Option<ForwarderStatus>>,
+    mut faces:                Signal<Vec<FaceInfo>>,
+    mut routes:               Signal<Vec<FibEntry>>,
+    mut cs:                   Signal<Option<CsInfo>>,
+    mut strategies:           Signal<Vec<StrategyEntry>>,
+    mut counters:             Signal<Vec<FaceCounter>>,
+    mut measurements:         Signal<Vec<MeasurementEntry>>,
+    mut config_toml:          Signal<String>,
+    mut throughput:           Signal<VecDeque<ThroughputSample>>,
+    mut prev_counters:        Signal<ThroughputSample>,
+    mut neighbors:            Signal<Vec<NeighborInfo>>,
+    mut security_keys:        Signal<Vec<SecurityKeyInfo>>,
+    mut security_anchors:     Signal<Vec<AnchorInfo>>,
+    mut ca_info:              Signal<Option<CaInfo>>,
+    mut schema_rules:         Signal<Vec<SchemaRuleInfo>>,
+    mut cs_hit_history:       Signal<VecDeque<f64>>,
+    mut face_throughput:      Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
+    mut face_prev_ctr:        Signal<HashMap<u64, ThroughputSample>>,
+    mut discovery_status:     Signal<Option<DiscoveryStatus>>,
+    mut dvr_status:           Signal<Option<DvrStatus>>,
+    mut identity_name:        Signal<String>,
+    mut identity_is_ephemeral: Signal<bool>,
+    mut identity_pib_path:    Signal<Option<String>>,
 ) -> Result<(), String> {
     match client.status().await {
         Ok(r)  => status.set(Some(ForwarderStatus::parse(&r.status_text))),
@@ -1260,7 +1285,7 @@ async fn poll_all(
             let prev_snap = fp.get(&fid).cloned().unwrap_or_default();
             let rate = ThroughputSample::rate_from_delta(&prev_snap, &curr_snap, 3.0);
             fp.insert(fid, curr_snap);
-            let hist = fh.entry(fid).or_insert_with(VecDeque::new);
+            let hist = fh.entry(fid).or_default();
             hist.push_back(rate);
             if hist.len() > 60 { hist.pop_front(); }
         }
@@ -1288,6 +1313,16 @@ async fn poll_all(
     }
     if let Ok(r) = client.security_ca_info().await {
         ca_info.set(CaInfo::parse(&r.status_text));
+    }
+    if let Ok(r) = client.security_schema_list().await {
+        schema_rules.set(SchemaRuleInfo::parse_list(&r.status_text));
+    }
+    // Identity status — works even when router uses an ephemeral key (no PIB).
+    if let Ok(r) = client.security_identity_status().await {
+        let (name, ephemeral, pib) = parse_identity_status(&r.status_text);
+        identity_name.set(name);
+        identity_is_ephemeral.set(ephemeral);
+        identity_pib_path.set(pib);
     }
     // Discovery / routing status — best-effort (older routers won't have these).
     if let Ok(r) = client.discovery_status().await {
@@ -1448,12 +1483,16 @@ async fn run_cmd(
     security_keys:        Signal<Vec<SecurityKeyInfo>>,
     security_anchors:     Signal<Vec<AnchorInfo>>,
     ca_info:              Signal<Option<CaInfo>>,
+    schema_rules:         Signal<Vec<SchemaRuleInfo>>,
     mut yubikey_status:   Signal<Option<String>>,
     cs_hit_history:       Signal<VecDeque<f64>>,
     face_throughput:      Signal<HashMap<u64, VecDeque<ThroughputSample>>>,
     face_prev_ctr:        Signal<HashMap<u64, ThroughputSample>>,
     discovery_status:     Signal<Option<DiscoveryStatus>>,
     dvr_status:           Signal<Option<DvrStatus>>,
+    identity_name:        Signal<String>,
+    identity_is_ephemeral: Signal<bool>,
+    identity_pib_path:    Signal<Option<String>>,
 ) {
     // Session recording: log before dispatch.
     if *recording.read()
@@ -1474,6 +1513,9 @@ async fn run_cmd(
         DashCmd::StrategyUnset(_)      => Some("Strategy cleared"),
         DashCmd::DiscoveryConfigSet(_) => Some("Discovery config applied"),
         DashCmd::DvrConfigSet(_)       => Some("DVR config applied"),
+        DashCmd::SchemaRuleAdd(_)      => Some("Trust schema rule added"),
+        DashCmd::SchemaRuleRemove(_)   => Some("Trust schema rule removed"),
+        DashCmd::SchemaSet(_)          => Some("Trust schema updated"),
         _ => None,
     };
 
@@ -1551,7 +1593,7 @@ async fn run_cmd(
                     // Skip recording the replayed commands to avoid infinite loops.
                     let was_recording = *recording.read();
                     recording.set(false);
-                    Box::pin(run_cmd(replay_cmd, client, status, faces, routes, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status)).await;
+                    Box::pin(run_cmd(replay_cmd, client, status, faces, routes, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, schema_rules, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path)).await;
                     recording.set(was_recording);
                     tokio::time::sleep(Duration::from_millis(150)).await;
                 }
@@ -1622,16 +1664,44 @@ async fn run_cmd(
             client.routing_dvr_config_set(&params).await
                 .map(|_| ()).map_err(|e| e.to_string())
         }
+        DashCmd::SchemaRuleAdd(rule) => {
+            client.security_schema_rule_add(&rule).await
+                .map(|_| ()).map_err(|e| e.to_string())
+        }
+        DashCmd::SchemaRuleRemove(index) => {
+            client.security_schema_rule_remove(index).await
+                .map(|_| ()).map_err(|e| e.to_string())
+        }
+        DashCmd::SchemaSet(rules) => {
+            client.security_schema_set(&rules).await
+                .map(|_| ()).map_err(|e| e.to_string())
+        }
     };
 
     match result {
         Ok(()) => {
             error_msg.set(None);
             if let Some(label) = op_label { push_toast(label, ToastLevel::Success); }
-            let _ = poll_all(client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status).await;
+            let _ = poll_all(client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await;
         }
         Err(e) => {
             push_toast(format!("Command failed: {e}"), ToastLevel::Error);
         }
     }
+}
+
+/// Parse the `identity-status` dataset response.
+///
+/// Expected format: `identity=<name> is_ephemeral=<bool> pib_path=<path>`
+fn parse_identity_status(text: &str) -> (String, bool, Option<String>) {
+    let mut name      = String::new();
+    let mut ephemeral = false;
+    let mut pib_path  = None::<String>;
+
+    for token in text.split_whitespace() {
+        if let Some(v) = token.strip_prefix("identity=")     { name = v.to_string(); }
+        if let Some(v) = token.strip_prefix("is_ephemeral=") { ephemeral = v == "true"; }
+        if let Some(v) = token.strip_prefix("pib_path=")     { pib_path = Some(v.to_string()); }
+    }
+    (name, ephemeral, if ephemeral { None } else { pib_path })
 }

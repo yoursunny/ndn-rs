@@ -390,7 +390,7 @@ fn IperfCard(panel_id: u32) -> Element {
                 div { style: "margin-bottom:10px;",
                     div { style: "font-size:11px;color:var(--text-muted);margin-bottom:6px;", "AUTH MODE" }
                     div { style: "display:flex;gap:14px;",
-                        for (val, lbl) in [("none", "None"), ("digest_sha256", "DigestSHA256"), ("hmac", "HMAC"), ("ed25519", "Ed25519")] {
+                        for (val, lbl) in [("none", "None"), ("digest_sha256", "DigestSHA256"), ("blake3", "BLAKE3"), ("hmac", "HMAC"), ("ed25519", "Ed25519")] {
                             label { style: "display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;",
                                 input {
                                     r#type: "radio",
@@ -492,9 +492,9 @@ fn PeekTab() -> Element {
 #[component]
 fn PeekCard(panel_id: u32) -> Element {
     let ctx          = use_context::<AppCtx>();
-    let mut name     = use_signal(|| String::new());
-    let mut out_file = use_signal(|| String::new());
-    let mut pipeline = use_signal(|| String::new());
+    let mut name     = use_signal(String::new);
+    let mut out_file = use_signal(String::new);
+    let mut pipeline = use_signal(String::new);
 
     let running = TOOL_INSTANCES.read().get(&panel_id).map(|s| s.running).unwrap_or(false);
 
@@ -607,9 +607,9 @@ fn PutTab() -> Element {
 #[component]
 fn PutCard(panel_id: u32) -> Element {
     let ctx            = use_context::<AppCtx>();
-    let mut name       = use_signal(|| String::new());
-    let mut text_data  = use_signal(|| String::new());
-    let mut file_path  = use_signal(|| String::new());
+    let mut name       = use_signal(String::new);
+    let mut text_data  = use_signal(String::new);
+    let mut file_path  = use_signal(String::new);
     let mut use_file   = use_signal(|| false);
     let mut sign       = use_signal(|| false);
     let mut freshness  = use_signal(|| "0".to_string());

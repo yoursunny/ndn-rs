@@ -16,18 +16,13 @@ use crate::measurements::SimMeasurements;
 
 // ── Strategy type ────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StrategyType {
+    #[default]
     BestRoute,
     Multicast,
     Suppress,
-}
-
-impl Default for StrategyType {
-    fn default() -> Self {
-        StrategyType::BestRoute
-    }
 }
 
 // ── Trace event types ─────────────────────────────────────────────────────────
@@ -136,6 +131,7 @@ impl SimPipeline {
     // ── Interest pipeline ────────────────────────────────────────────────────
 
     /// Run an Interest through the pipeline and return a full trace.
+    #[allow(clippy::too_many_arguments)]
     pub fn process_interest(
         &mut self,
         name: &str,

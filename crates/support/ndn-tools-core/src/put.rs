@@ -90,7 +90,7 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
     ))).await;
 
     let signer: Option<Arc<dyn Signer>> = if params.sign {
-        let keychain = KeyChain::ephemeral(&name.to_string())?;
+        let keychain = KeyChain::ephemeral(name.to_string().as_str())?;
         let s = keychain.signer()?;
         let _ = tx.send(ToolEvent::info(format!(
             "ndn-put: signing with {} ({:?})", s.key_name(), s.sig_type()
@@ -120,11 +120,9 @@ pub async fn run_producer(params: PutParams, tx: mpsc::Sender<ToolEvent>) -> Res
     loop {
         if tx.is_closed() { break; }
 
-        if let Some(dl) = deadline {
-            if Instant::now() >= dl {
-                let _ = tx.send(ToolEvent::info("ndn-put: timeout reached, shutting down")).await;
-                break;
-            }
+        if let Some(dl) = deadline && Instant::now() >= dl {
+            let _ = tx.send(ToolEvent::info("ndn-put: timeout reached, shutting down")).await;
+            break;
         }
 
         let raw = match client.recv().await {

@@ -32,6 +32,8 @@ enum FlowSignMode {
     None,
     /// NDN DigestSha256 (fast path, single allocation, in-place hash).
     DigestSha256,
+    /// BLAKE3 digest (experimental; faster than SHA-256 on hardware without SHA-NI / ARM crypto extensions).
+    DigestBlake3,
     /// HMAC-SHA256 or Ed25519 via a boxed `Signer`.
     Custom(Arc<dyn NdnSigner>),
 }
@@ -41,9 +43,10 @@ type FlowSigners = Arc<std::sync::RwLock<HashMap<String, FlowSignMode>>>;
 /// Map a negotiated sign-mode string to a `FlowSignMode`.
 ///
 /// - `"none"`:         no signature (benchmarking only)
-/// - `"digest_sha256"` / `""` / unrecognised: DigestSha256
+/// - `"blake3"`:       BLAKE3 digest (experimental; fastest on non-SHA-NI hardware)
 /// - `"hmac"`:         HMAC-SHA256 keyed by `flow_id`
 /// - `"ed25519"`:      server-wide ephemeral Ed25519 key
+/// - `"digest_sha256"` / `""` / unrecognised: DigestSha256
 fn make_sign_mode(
     sign_mode: &str,
     flow_id:   &str,
@@ -51,6 +54,7 @@ fn make_sign_mode(
 ) -> FlowSignMode {
     match sign_mode {
         "none" => FlowSignMode::None,
+        "blake3" => FlowSignMode::DigestBlake3,
         "hmac" => {
             let kn: ndn_packet::Name = format!("/iperf-key/{flow_id}").parse()
                 .unwrap_or_else(|_| "/iperf-key/unknown".parse().unwrap());
@@ -64,9 +68,10 @@ fn make_sign_mode(
 /// Apply per-packet signing to a `DataBuilder` according to the negotiated mode.
 fn sign_data(builder: DataBuilder, mode: &FlowSignMode) -> bytes::Bytes {
     match mode {
-        FlowSignMode::None        => builder.sign_none(),
+        FlowSignMode::None         => builder.sign_none(),
         FlowSignMode::DigestSha256 => builder.sign_digest_sha256(),
-        FlowSignMode::Custom(s)   => {
+        FlowSignMode::DigestBlake3 => builder.sign_digest_blake3(),
+        FlowSignMode::Custom(s)    => {
             let sig_type = s.sig_type();
             builder.sign_sync(sig_type, None, |region| {
                 s.sign_sync(region).unwrap_or_else(|_| bytes::Bytes::from_static(&[0u8; 32]))
@@ -384,11 +389,12 @@ async fn handle_session_negotiation(
 
     let agreed_size = if req.size > 0 { req.size } else { default_size };
     let agreed_sign = match req.signing.as_str() {
-        "ed25519"      => "ed25519",
-        "hmac"         => "hmac",
+        "ed25519"       => "ed25519",
+        "hmac"          => "hmac",
+        "blake3"        => "blake3",
         "digest_sha256" => "digest_sha256",
-        "none"         => "none",
-        _              => "digest_sha256",
+        "none"          => "none",
+        _               => "digest_sha256",
     };
 
     // Register per-flow sign mode so the main data loop can sign packets for this flow.
@@ -683,29 +689,28 @@ pub async fn run_client(params: IperfClientParams, tx: mpsc::Sender<ToolEvent>) 
 
     match tokio::time::timeout(lifetime + Duration::from_millis(500), client.recv()).await {
         Ok(Some(raw)) => {
-            if let Ok(data) = Data::decode(raw) {
-                if let Some(content) = data.content() {
-                    if let Ok(resp) = serde_json::from_slice::<serde_json::Value>(content) {
-                        let _ = tx.send(ToolEvent::info(format!(
-                            "  negotiated: size={}B sign={} reverse={}",
-                            resp["size"], resp["signing"], resp["reverse"]
-                        ))).await;
-                    }
-                }
+            if let Ok(data) = Data::decode(raw)
+                && let Some(content) = data.content()
+                && let Ok(resp) = serde_json::from_slice::<serde_json::Value>(content)
+            {
+                let _ = tx.send(ToolEvent::info(format!(
+                    "  negotiated: size={}B sign={} reverse={}",
+                    resp["size"], resp["signing"], resp["reverse"]
+                ))).await;
             }
         }
         Ok(None) => anyhow::bail!("connection closed during negotiation"),
         Err(_)   => { let _ = tx.send(ToolEvent::warn("  session negotiation timeout — server may not support it, proceeding")).await; }
     }
 
-    if params.reverse {
-        if let Some(cb_prefix) = callback_prefix {
-            let pc = producer_client.expect("producer_client must be set when reverse=true");
-            return run_reverse_producer(
-                pc, &cb_prefix, &prefix, &flow_id,
-                params.duration_secs, &params.sign_mode, tx,
-            ).await;
-        }
+    if params.reverse
+        && let Some(cb_prefix) = callback_prefix
+    {
+        let pc = producer_client.expect("producer_client must be set when reverse=true");
+        return run_reverse_producer(
+            pc, &cb_prefix, &prefix, &flow_id,
+            params.duration_secs, &params.sign_mode, tx,
+        ).await;
     }
 
     let _ = tx.send(ToolEvent::info("  testing...")).await;
@@ -933,37 +938,36 @@ async fn run_reverse_producer(
 
     match tokio::time::timeout(Duration::from_secs(12), client.recv()).await {
         Ok(Some(raw)) => {
-            if let Ok(data) = Data::decode(raw) {
-                if let Some(content) = data.content() {
-                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(content) {
-                        let dur   = v["duration_s"].as_f64().unwrap_or(0.0);
-                        let xfer  = v["transferred_bytes"].as_u64().unwrap_or(0);
-                        let sent  = v["sent"].as_u64().unwrap_or(0);
-                        let recv  = v["received"].as_u64().unwrap_or(0);
-                        let lost  = v["lost"].as_u64().unwrap_or(0);
-                        let tp    = v["throughput"].as_str().unwrap_or("n/a");
-                        let bps   = xfer as f64 * 8.0 / dur.max(0.001);
-                        let _ = tx.send(ToolEvent::summary(String::new())).await;
-                        let _ = tx.send(ToolEvent::summary("--- ndn-iperf reverse results (server→client) ---")).await;
-                        let _ = tx.send(ToolEvent::summary(format!("  duration:    {dur:.2}s"))).await;
-                        let _ = tx.send(ToolEvent::summary(format!("  transferred: {}", format_bytes(xfer)))).await;
-                        let _ = tx.send(ToolEvent::summary(format!("  throughput:  {tp}"))).await;
-                        let _ = tx.send(ToolEvent::summary(format!("  packets:     {sent} sent, {recv} received, {lost} lost"))).await;
-                        let loss_pct = if sent > 0 { lost as f64 / sent as f64 * 100.0 } else { 0.0 };
-                        let _ = tx.send(
-                            ToolEvent::summary(String::new()).with_data(ToolData::IperfSummary {
-                                duration_secs: dur,
-                                transferred_bytes: xfer,
-                                throughput_bps: bps,
-                                sent,
-                                received: recv,
-                                loss_pct,
-                                rtt_avg_us: 0,
-                                rtt_p99_us: 0,
-                            })
-                        ).await;
-                    }
-                }
+            if let Ok(data) = Data::decode(raw)
+                && let Some(content) = data.content()
+                && let Ok(v) = serde_json::from_slice::<serde_json::Value>(content)
+            {
+                let dur   = v["duration_s"].as_f64().unwrap_or(0.0);
+                let xfer  = v["transferred_bytes"].as_u64().unwrap_or(0);
+                let sent  = v["sent"].as_u64().unwrap_or(0);
+                let recv  = v["received"].as_u64().unwrap_or(0);
+                let lost  = v["lost"].as_u64().unwrap_or(0);
+                let tp    = v["throughput"].as_str().unwrap_or("n/a");
+                let bps   = xfer as f64 * 8.0 / dur.max(0.001);
+                let _ = tx.send(ToolEvent::summary(String::new())).await;
+                let _ = tx.send(ToolEvent::summary("--- ndn-iperf reverse results (server→client) ---")).await;
+                let _ = tx.send(ToolEvent::summary(format!("  duration:    {dur:.2}s"))).await;
+                let _ = tx.send(ToolEvent::summary(format!("  transferred: {}", format_bytes(xfer)))).await;
+                let _ = tx.send(ToolEvent::summary(format!("  throughput:  {tp}"))).await;
+                let _ = tx.send(ToolEvent::summary(format!("  packets:     {sent} sent, {recv} received, {lost} lost"))).await;
+                let loss_pct = if sent > 0 { lost as f64 / sent as f64 * 100.0 } else { 0.0 };
+                let _ = tx.send(
+                    ToolEvent::summary(String::new()).with_data(ToolData::IperfSummary {
+                        duration_secs: dur,
+                        transferred_bytes: xfer,
+                        throughput_bps: bps,
+                        sent,
+                        received: recv,
+                        loss_pct,
+                        rtt_avg_us: 0,
+                        rtt_p99_us: 0,
+                    })
+                ).await;
             }
         }
         _ => { let _ = tx.send(ToolEvent::warn("  could not retrieve server result")).await; }

@@ -74,6 +74,7 @@ impl SimPit {
     }
 
     /// Check if a PIT entry exists for this Interest (for aggregation).
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, name: &str, can_be_prefix: bool, must_be_fresh: bool) -> Option<&mut PitEntry> {
         let key = PitKey { name: name.to_string(), can_be_prefix, must_be_fresh };
         self.entries.get_mut(&key)
@@ -82,7 +83,7 @@ impl SimPit {
     /// Check if any PIT entry can satisfy the given Data name.
     /// Returns the first matching entry's key if found.
     pub fn match_data(&self, data_name: &str) -> Option<String> {
-        for (_, entry) in &self.entries {
+        for entry in self.entries.values() {
             if data_name == entry.name || (entry.can_be_prefix && data_name.starts_with(&entry.name)) {
                 return Some(entry.name.clone());
             }
@@ -91,6 +92,7 @@ impl SimPit {
     }
 
     /// Insert or update a PIT entry. Returns `(is_new, did_aggregate)`.
+    #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &mut self,
         name: &str,
@@ -130,6 +132,7 @@ impl SimPit {
         self.entries.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

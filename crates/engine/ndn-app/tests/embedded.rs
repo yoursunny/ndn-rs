@@ -37,7 +37,7 @@ async fn embedded_consumer_producer() {
 
     // 4. Create Consumer and Producer from their handles.
     let mut consumer = Consumer::from_handle(consumer_handle);
-    let mut producer = Producer::from_handle(producer_handle, prefix.clone());
+    let producer = Producer::from_handle(producer_handle, prefix.clone());
 
     // 5. Run producer in a background task.
     let producer_task = tokio::spawn(async move {
@@ -85,7 +85,7 @@ async fn embedded_multiple_fetches() {
     engine.fib().add_nexthop(&prefix, FaceId(2), 0);
 
     let mut consumer = Consumer::from_handle(consumer_handle);
-    let mut producer = Producer::from_handle(producer_handle, prefix.clone());
+    let producer = Producer::from_handle(producer_handle, prefix.clone());
 
     let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let counter_clone = counter.clone();
@@ -136,7 +136,7 @@ async fn embedded_consumer_get() {
     engine.fib().add_nexthop(&prefix, FaceId(2), 0);
 
     let mut consumer = Consumer::from_handle(consumer_handle);
-    let mut producer = Producer::from_handle(producer_handle, prefix.clone());
+    let producer = Producer::from_handle(producer_handle, prefix.clone());
 
     tokio::spawn(async move {
         producer
