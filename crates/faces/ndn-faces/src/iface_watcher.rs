@@ -74,12 +74,11 @@ async fn watch_interfaces_linux(
     }
 
     // Bind to RTMGRP_LINK multicast group.
-    let addr = libc::sockaddr_nl {
-        nl_family: libc::AF_NETLINK as u16,
-        nl_pid: 0,
-        nl_groups: libc::RTMGRP_LINK as u32,
-        ..Default::default()
-    };
+    // SAFETY: sockaddr_nl is a plain C struct; zero-initialising is correct
+    // (nl_pid=0 means kernel assigns, nl_pad=0 is reserved).
+    let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    addr.nl_family = libc::AF_NETLINK as u16;
+    addr.nl_groups = libc::RTMGRP_LINK as u32;
     let rc = unsafe {
         libc::bind(
             fd,

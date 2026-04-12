@@ -52,7 +52,11 @@ pub enum ForwarderError {
     Command { code: u64, text: String },
     #[error("malformed management response")]
     MalformedResponse,
-    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+    #[cfg(all(
+        unix,
+        not(any(target_os = "android", target_os = "ios")),
+        feature = "spsc-shm"
+    ))]
     #[error("SHM error: {0}")]
     Shm(#[from] ndn_faces::local::ShmError),
 }
@@ -60,7 +64,11 @@ pub enum ForwarderError {
 /// Data plane transport — either SHM (preferred) or reuse the control UnixFace.
 enum DataTransport {
     /// High-performance shared-memory data plane.
-    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+    #[cfg(all(
+        unix,
+        not(any(target_os = "android", target_os = "ios")),
+        feature = "spsc-shm"
+    ))]
     Shm {
         handle: ndn_faces::local::shm::spsc::SpscHandle,
         face_id: u64,
@@ -117,7 +125,11 @@ impl ForwarderClient {
         let dead = Arc::new(AtomicBool::new(false));
 
         // Try SHM data plane if a name is provided.
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+        #[cfg(all(
+            unix,
+            not(any(target_os = "android", target_os = "ios")),
+            feature = "spsc-shm"
+        ))]
         if let Some(name) = shm_name {
             match Self::setup_shm(&control, name, cancel.child_token()).await {
                 Ok(transport) => {
@@ -151,7 +163,11 @@ impl ForwarderClient {
     }
 
     /// Set up SHM data plane by sending `faces/create` to the router.
-    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+    #[cfg(all(
+        unix,
+        not(any(target_os = "android", target_os = "ios")),
+        feature = "spsc-shm"
+    ))]
     async fn setup_shm(
         control: &Arc<IpcFace>,
         shm_name: &str,
@@ -197,7 +213,11 @@ impl ForwarderClient {
     /// SHM face immediately rather than waiting for GC.
     pub async fn close(self) {
         self.cancel.cancel();
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+        #[cfg(all(
+            unix,
+            not(any(target_os = "android", target_os = "ios")),
+            feature = "spsc-shm"
+        ))]
         if let DataTransport::Shm { face_id, .. } = &self.transport {
             let _ = self.mgmt.face_destroy(*face_id).await;
         }
@@ -206,7 +226,11 @@ impl ForwarderClient {
 
     /// Get the SHM face ID if using SHM transport.
     fn shm_face_id(&self) -> Option<u64> {
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+        #[cfg(all(
+            unix,
+            not(any(target_os = "android", target_os = "ios")),
+            feature = "spsc-shm"
+        ))]
         if let DataTransport::Shm { face_id, .. } = &self.transport {
             return Some(*face_id);
         }
@@ -216,7 +240,11 @@ impl ForwarderClient {
     /// Send a packet on the data plane.
     pub async fn send(&self, pkt: Bytes) -> Result<(), ForwarderError> {
         match &self.transport {
-            #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+            #[cfg(all(
+                unix,
+                not(any(target_os = "android", target_os = "ios")),
+                feature = "spsc-shm"
+            ))]
             DataTransport::Shm { handle, .. } => {
                 handle.send(pkt).await.map_err(ForwarderError::Shm)
             }
@@ -233,7 +261,11 @@ impl ForwarderClient {
     pub async fn recv(&self) -> Option<Bytes> {
         self.start_monitor_once();
         match &self.transport {
-            #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+            #[cfg(all(
+                unix,
+                not(any(target_os = "android", target_os = "ios")),
+                feature = "spsc-shm"
+            ))]
             DataTransport::Shm { handle, .. } => handle.recv().await,
             DataTransport::Unix => {
                 let _guard = self.recv_lock.lock().await;
@@ -262,7 +294,11 @@ impl ForwarderClient {
             return; // already started
         }
 
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+        #[cfg(all(
+            unix,
+            not(any(target_os = "android", target_os = "ios")),
+            feature = "spsc-shm"
+        ))]
         if matches!(&self.transport, DataTransport::Shm { .. }) {
             let control = Arc::clone(&self.control);
             let cancel = self.cancel.clone();
@@ -296,7 +332,11 @@ impl ForwarderClient {
 
     /// Whether this client is using SHM for data transport.
     pub fn is_shm(&self) -> bool {
-        #[cfg(all(unix, not(any(target_os = "android", target_os = "ios")), feature = "spsc-shm"))]
+        #[cfg(all(
+            unix,
+            not(any(target_os = "android", target_os = "ios")),
+            feature = "spsc-shm"
+        ))]
         if matches!(&self.transport, DataTransport::Shm { .. }) {
             return true;
         }

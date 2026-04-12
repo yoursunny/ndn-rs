@@ -5,11 +5,11 @@ use ndn_packet::Name;
 use ndn_transport::{Face, FaceError, FaceId, FaceKind};
 use tokio::io::unix::AsyncFd;
 
-use crate::NDN_ETHERTYPE;
 use super::af_packet::{
     MacAddr, PacketRing, get_ifindex, make_sockaddr_ll, open_packet_socket, setup_packet_ring,
 };
 use super::radio::RadioFaceMetadata;
+use crate::NDN_ETHERTYPE;
 
 // ─── NamedEtherFace ──────────────────────────────────────────────────────────
 
