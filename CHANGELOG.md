@@ -10,6 +10,26 @@ For the narrative behind each release — design decisions, rejected approaches,
 
 ## [Unreleased]
 
+### Security
+
+- **BLAKE3 signature types split into distinct plain and keyed codes** (#12).
+  Previously `Blake3Signer` and `Blake3KeyedSigner` both emitted
+  `SignatureType::Other(6)` on the wire, which is unsafe: an attacker could
+  strip a keyed signature and substitute a plain BLAKE3 digest over forged
+  content, and a verifier dispatching on type code alone would accept the
+  forgery because both modes are indistinguishable in the TLV. The
+  implementation now uses two distinct experimental codes —
+  `SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN = 6` for plain digest and
+  `SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED = 7` for keyed — mirroring the
+  existing NDN pattern (`DigestSha256` = 0 vs. `SignatureHmacWithSha256`
+  = 4). The old `SIGNATURE_TYPE_DIGEST_BLAKE3` constant has been removed;
+  external callers should import the new split constants.
+
+  Both values remain **experimental** and require manual reservation on
+  the [NDN TLV SignatureType registry](https://redmine.named-data.net/projects/ndn-tlv/wiki/SignatureType)
+  before being considered stable. This is a one-time maintainer action
+  tracked as part of #12.
+
 ### Fixed
 
 - **BLE face wire format now matches NDNts and esp8266ndn exactly** (#10).

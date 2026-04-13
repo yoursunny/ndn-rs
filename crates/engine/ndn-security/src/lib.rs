@@ -48,8 +48,8 @@ pub use profile::SecurityProfile;
 pub use safe_data::SafeData;
 pub use sign_ext::SignWith;
 pub use signer::{
-    Blake3KeyedSigner, Blake3Signer, Ed25519Signer, HmacSha256Signer, SIGNATURE_TYPE_DIGEST_BLAKE3,
-    Signer,
+    Blake3KeyedSigner, Blake3Signer, Ed25519Signer, HmacSha256Signer,
+    SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED, SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN, Signer,
 };
 pub use trust_schema::{NamePattern, PatternComponent, PatternParseError, SchemaRule, TrustSchema};
 pub use validator::{ValidationResult, Validator};

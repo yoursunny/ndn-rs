@@ -2,8 +2,9 @@ use bytes::Bytes;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use ndn_packet::{Name, NameComponent};
 use ndn_security::{
-    Certificate, Ed25519Signer, Ed25519Verifier, HmacSha256Signer, Signer, TrustSchema,
-    ValidationResult, Validator, Verifier,
+    Blake3DigestVerifier, Blake3KeyedSigner, Blake3KeyedVerifier, Blake3Signer, Certificate,
+    Ed25519Signer, Ed25519Verifier, HmacSha256Signer, Signer, TrustSchema, ValidationResult,
+    Validator, Verifier,
 };
 use ndn_tlv::TlvWriter;
 use std::sync::Arc;
@@ -79,7 +80,9 @@ fn build_signed_data(signer: &Ed25519Signer, data_comp: &str, key_comp: &str) ->
 fn bench_signing(c: &mut Criterion) {
     let key_name = name1("key");
     let ed_signer = Ed25519Signer::from_seed(&[1u8; 32], key_name.clone());
-    let hmac_signer = HmacSha256Signer::new(&[2u8; 32], key_name);
+    let hmac_signer = HmacSha256Signer::new(&[2u8; 32], key_name.clone());
+    let blake3_plain_signer = Blake3Signer::new(key_name.clone());
+    let blake3_keyed_signer = Blake3KeyedSigner::new(&[3u8; 32], key_name);
 
     let region_100 = vec![0u8; 100];
     let region_500 = vec![0u8; 500];
@@ -113,6 +116,38 @@ fn bench_signing(c: &mut Criterion) {
         }
         group.finish();
     }
+
+    // BLAKE3 plain digest — analogous to DigestSha256 (type 0).
+    {
+        let mut group = c.benchmark_group("signing/blake3-plain");
+        for (label, region) in [("100B", &region_100), ("500B", &region_500)] {
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(BenchmarkId::new("sign_sync", label), region, |b, r| {
+                b.iter(|| {
+                    let sig = blake3_plain_signer.sign_sync(r).unwrap();
+                    debug_assert_eq!(sig.len(), 32);
+                    sig
+                });
+            });
+        }
+        group.finish();
+    }
+
+    // BLAKE3 keyed — analogous to HmacWithSha256 (type 4).
+    {
+        let mut group = c.benchmark_group("signing/blake3-keyed");
+        for (label, region) in [("100B", &region_100), ("500B", &region_500)] {
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(BenchmarkId::new("sign_sync", label), region, |b, r| {
+                b.iter(|| {
+                    let sig = blake3_keyed_signer.sign_sync(r).unwrap();
+                    debug_assert_eq!(sig.len(), 32);
+                    sig
+                });
+            });
+        }
+        group.finish();
+    }
 }
 
 // ── Verification benchmark ────────────────────────────────────────────────
@@ -133,25 +168,84 @@ fn bench_verification(c: &mut Criterion) {
     let sig_100 = signer.sign_sync(&region_100).unwrap();
     let sig_500 = signer.sign_sync(&region_500).unwrap();
 
-    let mut group = c.benchmark_group("verification/ed25519");
-    for (label, region, sig) in [
-        ("100B", region_100.as_slice(), sig_100.as_ref()),
-        ("500B", region_500.as_slice(), sig_500.as_ref()),
-    ] {
-        group.throughput(Throughput::Bytes(region.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::new("verify", label),
-            &(region, sig),
-            |b, &(r, s)| {
-                b.iter(|| {
-                    let outcome = rt.block_on(verifier.verify(r, s, &public_key)).unwrap();
-                    debug_assert_eq!(outcome, ndn_security::VerifyOutcome::Valid);
-                    outcome
-                });
-            },
-        );
+    {
+        let mut group = c.benchmark_group("verification/ed25519");
+        for (label, region, sig) in [
+            ("100B", region_100.as_slice(), sig_100.as_ref()),
+            ("500B", region_500.as_slice(), sig_500.as_ref()),
+        ] {
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(
+                BenchmarkId::new("verify", label),
+                &(region, sig),
+                |b, &(r, s)| {
+                    b.iter(|| {
+                        let outcome = rt.block_on(verifier.verify(r, s, &public_key)).unwrap();
+                        debug_assert_eq!(outcome, ndn_security::VerifyOutcome::Valid);
+                        outcome
+                    });
+                },
+            );
+        }
+        group.finish();
     }
-    group.finish();
+
+    // BLAKE3 plain-digest verification — no key material.
+    {
+        let blake3_plain_signer = Blake3Signer::new(name1("key"));
+        let sig_100 = blake3_plain_signer.sign_sync(&region_100).unwrap();
+        let sig_500 = blake3_plain_signer.sign_sync(&region_500).unwrap();
+        let verifier = Blake3DigestVerifier;
+
+        let mut group = c.benchmark_group("verification/blake3-plain");
+        for (label, region, sig) in [
+            ("100B", region_100.as_slice(), sig_100.as_ref()),
+            ("500B", region_500.as_slice(), sig_500.as_ref()),
+        ] {
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(
+                BenchmarkId::new("verify", label),
+                &(region, sig),
+                |b, &(r, s)| {
+                    b.iter(|| {
+                        let outcome = rt.block_on(verifier.verify(r, s, &[])).unwrap();
+                        debug_assert_eq!(outcome, ndn_security::VerifyOutcome::Valid);
+                        outcome
+                    });
+                },
+            );
+        }
+        group.finish();
+    }
+
+    // BLAKE3 keyed verification — 32-byte shared secret as "public_key".
+    {
+        let key = [7u8; 32];
+        let blake3_keyed_signer = Blake3KeyedSigner::new(&key, name1("key"));
+        let sig_100 = blake3_keyed_signer.sign_sync(&region_100).unwrap();
+        let sig_500 = blake3_keyed_signer.sign_sync(&region_500).unwrap();
+        let verifier = Blake3KeyedVerifier;
+
+        let mut group = c.benchmark_group("verification/blake3-keyed");
+        for (label, region, sig) in [
+            ("100B", region_100.as_slice(), sig_100.as_ref()),
+            ("500B", region_500.as_slice(), sig_500.as_ref()),
+        ] {
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(
+                BenchmarkId::new("verify", label),
+                &(region, sig),
+                |b, &(r, s)| {
+                    b.iter(|| {
+                        let outcome = rt.block_on(verifier.verify(r, s, &key)).unwrap();
+                        debug_assert_eq!(outcome, ndn_security::VerifyOutcome::Valid);
+                        outcome
+                    });
+                },
+            );
+        }
+        group.finish();
+    }
 }
 
 // ── Validation benchmarks ─────────────────────────────────────────────────

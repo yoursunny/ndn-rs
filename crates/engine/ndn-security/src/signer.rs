@@ -134,22 +134,56 @@ impl Signer for HmacSha256Signer {
     }
 }
 
+// ── BLAKE3 signature type codes ───────────────────────────────────────────────
+//
+// NDN defines separate SignatureType values for plain digests and keyed
+// digests for a reason: the verifier must be able to tell which algorithm to
+// run, and a shared code opens a trivial downgrade attack (an attacker strips
+// a keyed signature and replaces the Content with a plain BLAKE3 hash over
+// their forged payload — on the wire both look identical, so a verifier that
+// dispatches on type code alone picks the plain-digest path and validates
+// the forgery). This matches the existing NDN pattern:
+//
+//   type 0  DigestSha256           (plain, unauthenticated)
+//   type 4  SignatureHmacWithSha256 (keyed, authenticated)
+//
+// ndn-rs therefore assigns BLAKE3 two distinct experimental type codes
+// rather than reusing one. These values are **not yet reserved** on the NDN
+// TLV SignatureType registry
+// (<https://redmine.named-data.net/projects/ndn-tlv/wiki/SignatureType>) —
+// they must be entered there before shipping a release to avoid conflicting
+// with any value the NDN community later standardizes in the same range.
+// The registration is a manual one-time action by the project maintainer.
+
+/// Signature type code for **plain** BLAKE3 digest (experimental, not yet in
+/// the NDN spec). Analogous to `DigestSha256` (type 0) — provides content
+/// integrity / self-certifying names but **no authentication**. Anyone can
+/// produce a valid signature.
+pub const SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN: u64 = 6;
+
+/// Signature type code for **keyed** BLAKE3 (experimental, not yet in the NDN
+/// spec). Analogous to `SignatureHmacWithSha256` (type 4) — requires a 32-byte
+/// shared secret; provides both integrity **and** authentication of the
+/// source. Distinct from the plain-digest code on purpose: see the
+/// plain-vs-keyed rationale above.
+pub const SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED: u64 = 7;
+
 /// BLAKE3 digest signer for high-throughput self-certifying content.
 ///
-/// **Experimental / NDA extension** — uses signature type code 6, which is not
-/// yet assigned by the NDN Packet Format specification. This is analogous to
-/// `DigestSha256` (type 0) but uses BLAKE3, which is 3–8x faster on modern
-/// CPUs due to SIMD parallelism.
+/// **Experimental / NDA extension** — uses signature type code
+/// [`SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN`] (6), not yet assigned by the NDN
+/// Packet Format specification. This is analogous to `DigestSha256` (type 0)
+/// but uses BLAKE3, which is 3–8× faster on modern CPUs due to SIMD
+/// parallelism.
 ///
 /// The "signature" is a 32-byte BLAKE3 hash of the signed region. There is no
-/// secret key — this provides integrity (content addressing) but not
-/// authentication. For keyed BLAKE3 (authentication), use [`Blake3KeyedSigner`].
+/// secret key — this provides integrity (content addressing) but **not**
+/// authentication. For keyed BLAKE3 (authentication), use [`Blake3KeyedSigner`],
+/// which uses a distinct type code so verifiers cannot be downgraded from
+/// keyed to plain mode via a substitution attack.
 pub struct Blake3Signer {
     key_name: Name,
 }
-
-/// Signature type code for BLAKE3 digest (experimental, not yet in NDN spec).
-pub const SIGNATURE_TYPE_DIGEST_BLAKE3: u64 = 6;
 
 impl Blake3Signer {
     pub fn new(key_name: Name) -> Self {
@@ -159,7 +193,7 @@ impl Blake3Signer {
 
 impl Signer for Blake3Signer {
     fn sig_type(&self) -> SignatureType {
-        SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3)
+        SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN)
     }
 
     fn key_name(&self) -> &Name {
@@ -178,8 +212,12 @@ impl Signer for Blake3Signer {
 
 /// BLAKE3 keyed signer for authenticated high-throughput content.
 ///
-/// Uses a 32-byte secret key with BLAKE3's built-in keyed hashing mode.
-/// Faster than HMAC-SHA256 while providing equivalent security guarantees.
+/// **Experimental / NDA extension** — uses signature type code
+/// [`SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED`] (7), distinct from the plain BLAKE3
+/// code on purpose (see the plain-vs-keyed rationale on the type code
+/// constants above). Uses a 32-byte secret key with BLAKE3's built-in keyed
+/// hashing mode — faster than HMAC-SHA256 while providing equivalent security
+/// guarantees.
 pub struct Blake3KeyedSigner {
     key: [u8; 32],
     key_name: Name,
@@ -197,7 +235,7 @@ impl Blake3KeyedSigner {
 
 impl Signer for Blake3KeyedSigner {
     fn sig_type(&self) -> SignatureType {
-        SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3)
+        SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED)
     }
 
     fn key_name(&self) -> &Name {
@@ -327,5 +365,84 @@ mod tests {
         let async_sig = s.sign(b"data").await.unwrap();
         let sync_sig = s.sign_sync(b"data").unwrap();
         assert_eq!(async_sig, sync_sig);
+    }
+
+    // ── BLAKE3 tests ───────────────────────────────────────────────────────
+
+    /// Plain and keyed BLAKE3 must use distinct SignatureType codes so that
+    /// a verifier dispatching on type code cannot be tricked into running
+    /// the unauthenticated plain-digest path against a packet that was
+    /// originally signed with the keyed (authenticated) mode. This mirrors
+    /// the existing NDN pattern (`DigestSha256` = 0, `HmacWithSha256` = 4).
+    #[test]
+    fn blake3_plain_and_keyed_use_distinct_sig_types() {
+        let plain = Blake3Signer::new(test_key_name());
+        let keyed = Blake3KeyedSigner::new(&[9u8; 32], test_key_name());
+        assert_eq!(
+            plain.sig_type(),
+            SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN)
+        );
+        assert_eq!(
+            keyed.sig_type(),
+            SignatureType::Other(SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED)
+        );
+        assert_ne!(
+            plain.sig_type(),
+            keyed.sig_type(),
+            "plain and keyed BLAKE3 must not share a type code"
+        );
+    }
+
+    /// Historical values that external callers may have depended on. Kept
+    /// as an explicit assertion so any future change to the numbers is a
+    /// deliberate, flagged break.
+    #[test]
+    fn blake3_sig_type_code_values_are_pinned() {
+        assert_eq!(SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN, 6);
+        assert_eq!(SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED, 7);
+    }
+
+    #[test]
+    fn blake3_plain_produces_32_bytes() {
+        let s = Blake3Signer::new(test_key_name());
+        let sig = s.sign_sync(b"hello ndn").unwrap();
+        assert_eq!(sig.len(), 32);
+    }
+
+    #[test]
+    fn blake3_keyed_produces_32_bytes() {
+        let s = Blake3KeyedSigner::new(&[1u8; 32], test_key_name());
+        let sig = s.sign_sync(b"hello ndn").unwrap();
+        assert_eq!(sig.len(), 32);
+    }
+
+    /// Regression: with distinct keys, keyed signatures over the same region
+    /// must differ. This is the core authenticity property that makes the
+    /// keyed variant meaningful (vs. the plain one).
+    #[test]
+    fn blake3_keyed_different_key_different_sig() {
+        let s1 = Blake3KeyedSigner::new(&[1u8; 32], test_key_name());
+        let s2 = Blake3KeyedSigner::new(&[2u8; 32], test_key_name());
+        assert_ne!(
+            s1.sign_sync(b"data").unwrap(),
+            s2.sign_sync(b"data").unwrap()
+        );
+    }
+
+    /// Plain BLAKE3 and keyed BLAKE3 with an all-zero key must still produce
+    /// different bytes over the same region (BLAKE3's keyed mode is not just
+    /// plain hash when key = 0). This is the main reason sharing a type code
+    /// would be unsafe: a verifier that picked the wrong mode would compute
+    /// a different expected hash and (usually) reject the packet — but under
+    /// a shared type code, a substitution attack recomputes the plain digest
+    /// to match, and the verifier cannot tell the difference.
+    #[test]
+    fn blake3_plain_and_keyed_with_zero_key_differ() {
+        let plain = Blake3Signer::new(test_key_name());
+        let keyed = Blake3KeyedSigner::new(&[0u8; 32], test_key_name());
+        assert_ne!(
+            plain.sign_sync(b"region").unwrap(),
+            keyed.sign_sync(b"region").unwrap()
+        );
     }
 }
