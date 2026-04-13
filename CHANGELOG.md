@@ -78,11 +78,17 @@ For the narrative behind each release — design decisions, rejected approaches,
 
 ---
 
-## [0.1.0] — 2026-04-11
+## [0.1.0] — Unreleased (upcoming)
 
-Stable 0.1.0. Finalizes all public names, fills ergonomic gaps, and wires
-remaining stub features. Detailed narrative in the
-[0.1.0 wiki page](https://quarmire.github.io/ndn-rs/wiki/releases/v0-1-0.html).
+> **Not yet tagged.** The workspace version reads `0.1.0`, but no `v0.1.0`
+> git tag exists and no GitHub Release has been published. This section
+> describes the scope of the upcoming first stable release; additional
+> fixes in [[Unreleased]](#unreleased) above will fold into it before the
+> tag is cut. Detailed narrative in the
+> [0.1.0 draft release notes](https://quarmire.github.io/ndn-rs/wiki/releases/v0-1-0.html).
+
+Stable 0.1.0 (target). Finalizes all public names, fills ergonomic gaps,
+and wires remaining stub features.
 
 ### Breaking Changes
 
