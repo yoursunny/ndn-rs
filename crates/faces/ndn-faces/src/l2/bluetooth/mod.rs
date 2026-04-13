@@ -9,26 +9,37 @@
 //!
 //! ## GATT profile
 //!
+//! UUIDs and direction assignments match NDNts
+//! [`@ndn/web-bluetooth-transport`](https://github.com/yoursunny/NDNts/blob/main/pkg/web-bluetooth-transport/src/web-bluetooth-transport.ts)
+//! and esp8266ndn
+//! [`ble-uuid.hpp`](https://github.com/yoursunny/esp8266ndn/blob/main/src/transport/ble-uuid.hpp)
+//! exactly.
+//!
 //! | Role | Detail |
 //! |------|--------|
 //! | GATT role | **Server** (forwarder acts as peripheral) |
 //! | Service UUID | `099577e3-0788-412a-8824-395084d97391` |
-//! | TX characteristic (forwarder → client) | `cc5abb89-a541-46d8-a351-2d95a8a1a374` (Notify) |
-//! | RX characteristic (client → forwarder) | `972f9527-0d83-4261-b95d-b7b2a9e5007b` (Write Without Response) |
+//! | CS characteristic (client → server = client → forwarder) | `cc5abb89-a541-46d8-a351-2f95a6a81f49` (Write Without Response) |
+//! | SC characteristic (server → client = forwarder → client) | `972f9527-0d83-4261-b95d-b1b2fc73bde4` (Notify) |
 //!
 //! ## Framing
 //!
-//! Raw NDN TLV packets are sent without LP framing (matching NDNts expectations).
-//! If the packet exceeds the negotiated ATT payload size (`att_mtu − 3` bytes),
-//! it is fragmented using the NDNts BLE fragmentation scheme:
+//! The NDN-BLE protocol itself does not define a fragmentation scheme — as
+//! stated in the NDNts README, "it can be used with existing NDN fragmentation
+//! schemes such as NDNLPv2." ndn-rs therefore uses NDNLPv2 fragmentation at
+//! the Face layer (the same code path used by UDP, multicast, and Ethernet
+//! faces). Each BLE ATT write carries exactly one LpPacket, which is either
+//! a whole Interest/Data wrapped in an LpPacket envelope or one fragment of
+//! a multi-fragment LpPacket.
 //!
-//! - Small packets that fit in one BLE payload: sent as-is (no header byte).
-//! - Fragmented packets: each fragment prefixed with a 1-byte header.
-//!   - `0x80 | (seq & 0x7F)` — first fragment; seq is an incrementing counter.
-//!   - `seq & 0x7F` — continuation fragment; seq increments per fragment.
+//! Reassembly is handled by the pipeline's `TlvDecodeStage` via its per-face
+//! `ReassemblyBuffer`, so this module has no local fragment state.
 //!
-//! Reassembly: the receiver buffers fragments until the accumulated bytes form
-//! a complete NDN TLV packet (detected by parsing the top-level TLV length).
+//! The BLE ATT MTU must be negotiated high enough to fit at least the NDNLPv2
+//! fragment overhead (~50 bytes plus ATT/HCI headers); the default 23-byte
+//! MTU is **not** usable. Modern BLE stacks (Web Bluetooth, BlueZ ≥5.48,
+//! CoreBluetooth on iOS/macOS, NimBLE on ESP32) negotiate 185+ bytes
+//! automatically.
 //!
 //! ## Platform support
 //!
@@ -39,10 +50,9 @@
 //!
 //! # References
 //!
-//! - NDNts source: `packages/web-bluetooth-transport`
+//! - NDNts source: `pkg/web-bluetooth-transport` in yoursunny/NDNts
 //! - ESP32 source: `esp8266ndn` library `BleServerTransport`
 
-pub mod framing;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -60,15 +70,22 @@ use linux::BleServer;
 use macos::BleServer;
 
 // ── GATT UUIDs ────────────────────────────────────────────────────────────────
+//
+// These must match NDNts `@ndn/web-bluetooth-transport` and esp8266ndn
+// `BleServerTransport` exactly — verified against the upstream source files
+// referenced in the module-level docs above.
 
 /// Primary GATT service UUID for the NDN BLE transport.
 pub const BLE_SERVICE_UUID: &str = "099577e3-0788-412a-8824-395084d97391";
 
-/// TX characteristic UUID — forwarder notifies client of outgoing NDN packets.
-pub const BLE_TX_CHAR_UUID: &str = "cc5abb89-a541-46d8-a351-2d95a8a1a374";
+/// CS (client → server) characteristic UUID — Write Without Response.
+/// The forwarder (server) reads incoming NDN packets from this characteristic.
+pub const BLE_CS_CHAR_UUID: &str = "cc5abb89-a541-46d8-a351-2f95a6a81f49";
 
-/// RX characteristic UUID — client writes incoming NDN packets to the forwarder.
-pub const BLE_RX_CHAR_UUID: &str = "972f9527-0d83-4261-b95d-b7b2a9e5007b";
+/// SC (server → client) characteristic UUID — Notify.
+/// The forwarder (server) sends outgoing NDN packets as notifications
+/// on this characteristic.
+pub const BLE_SC_CHAR_UUID: &str = "972f9527-0d83-4261-b95d-b1b2fc73bde4";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -161,5 +178,101 @@ impl Face for BleFace {
     /// Returns [`FaceError::Closed`] if the background TX task has exited.
     async fn send(&self, pkt: Bytes) -> Result<(), FaceError> {
         self.tx.send(pkt).await.map_err(|_| FaceError::Closed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression guard for NDNts / esp8266ndn UUID interoperability.
+    ///
+    /// These values are copied verbatim from the upstream sources referenced
+    /// in the module docs. If this test ever fails, ndn-rs is on the wrong
+    /// side of the wire.
+    #[test]
+    fn gatt_uuids_match_ndnts_and_esp8266ndn() {
+        assert_eq!(BLE_SERVICE_UUID, "099577e3-0788-412a-8824-395084d97391");
+        // NDNts CS = client→server (write-without-response)
+        assert_eq!(BLE_CS_CHAR_UUID, "cc5abb89-a541-46d8-a351-2f95a6a81f49");
+        // NDNts SC = server→client (notify)
+        assert_eq!(BLE_SC_CHAR_UUID, "972f9527-0d83-4261-b95d-b1b2fc73bde4");
+    }
+
+    /// End-to-end wire-format regression for the BLE face's interop contract.
+    ///
+    /// The BLE face performs no local framing — outgoing packets take the
+    /// same path as other network faces (`encode_lp_packet` for small,
+    /// `fragment_packet` for oversized), and incoming BLE writes are handed
+    /// up raw to the pipeline's `TlvDecodeStage` which reassembles via
+    /// `ReassemblyBuffer`. This test exercises that exact path.
+    #[test]
+    fn oversized_packet_roundtrips_via_ndnlpv2() {
+        use ndn_packet::fragment::{ReassemblyBuffer, fragment_packet};
+        use ndn_packet::lp::LpPacket;
+
+        // Representative "realistic" BLE ATT MTU after negotiation. NDNts over
+        // Web Bluetooth on Android negotiates 517; on iOS, 185+. We pick a
+        // conservative value that still requires fragmentation for typical
+        // NDN Data packets.
+        let ble_mtu: usize = 185 - 3; // minus ATT overhead
+
+        // A ~4 KB NDN Data-ish packet. Must exceed ble_mtu so that
+        // fragmentation is exercised (not just the encode_lp_packet branch).
+        let original: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+        let original_bytes = Bytes::copy_from_slice(&original);
+
+        let fragments = fragment_packet(&original_bytes, ble_mtu, 7);
+        assert!(
+            fragments.len() > 1,
+            "test precondition: packet must be fragmented"
+        );
+        for (i, f) in fragments.iter().enumerate() {
+            assert!(
+                f.len() <= ble_mtu,
+                "fragment {i} is {} bytes, exceeds BLE MTU {}",
+                f.len(),
+                ble_mtu
+            );
+        }
+
+        // Simulate the RX side: each "BLE write" is one LpPacket fragment,
+        // handed to the decode/reassembly path.
+        let mut buf = ReassemblyBuffer::default();
+        let mut result: Option<Bytes> = None;
+        for frag_bytes in &fragments {
+            let lp = LpPacket::decode(frag_bytes.clone()).expect("decode LpPacket");
+            assert!(lp.is_fragmented());
+            let base_seq = lp.sequence.unwrap() - lp.frag_index.unwrap();
+            result = buf.process(
+                base_seq,
+                lp.frag_index.unwrap(),
+                lp.frag_count.unwrap(),
+                lp.fragment.unwrap(),
+            );
+        }
+
+        let reassembled = result.expect("all fragments delivered");
+        assert_eq!(
+            reassembled.as_ref(),
+            &original[..],
+            "reassembled bytes must equal the original packet"
+        );
+    }
+
+    /// A packet that fits inside one LpPacket envelope must NOT get
+    /// fragmented — the BLE face sends it as a single ATT write. Round-trip
+    /// through `encode_lp_packet` + `LpPacket::decode`.
+    #[test]
+    fn small_packet_single_lp_envelope() {
+        use ndn_packet::lp::{LpPacket, encode_lp_packet};
+
+        // 50-byte payload — comfortably fits in a single LpPacket at any
+        // negotiated BLE MTU.
+        let payload: Vec<u8> = (0..50).map(|i| i as u8).collect();
+        let wire = encode_lp_packet(&payload);
+        let lp = LpPacket::decode(wire).expect("decode small LpPacket");
+        assert!(!lp.is_fragmented(), "small packet should not be fragmented");
+        assert_eq!(lp.fragment.as_deref(), Some(&payload[..]));
     }
 }

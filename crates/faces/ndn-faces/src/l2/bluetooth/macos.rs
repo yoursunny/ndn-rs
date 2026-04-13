@@ -41,8 +41,13 @@ use objc2::{msg_send, sel};
 use tokio::sync::{Mutex, mpsc};
 use tracing::{debug, info, warn};
 
-use super::framing::{ATT_OVERHEAD, Assembler, fragment_to_vec};
-use super::{BLE_RX_CHAR_UUID, BLE_SERVICE_UUID, BLE_TX_CHAR_UUID, BleError, BleFace, CHAN_DEPTH};
+use ndn_packet::fragment::{FRAG_OVERHEAD, fragment_packet};
+use ndn_packet::lp::{encode_lp_packet, is_lp_packet};
+
+use super::{BLE_CS_CHAR_UUID, BLE_SC_CHAR_UUID, BLE_SERVICE_UUID, BleError, BleFace, CHAN_DEPTH};
+
+/// ATT protocol overhead per write/notify (1-byte opcode + 2-byte handle).
+const ATT_OVERHEAD: usize = 3;
 
 // ── GCD dispatch-queue FFI ────────────────────────────────────────────────────
 
@@ -67,14 +72,15 @@ unsafe extern "C" {
 struct MacosShared {
     /// Raw retained `CBPeripheralManager *` — only touch from `ble_queue`.
     manager: *mut AnyObject,
-    /// Raw retained `CBMutableCharacteristic *` for TX notifications.
-    tx_char: *mut AnyObject,
-    /// Whether a central is currently subscribed to the TX characteristic.
+    /// Raw retained `CBMutableCharacteristic *` for the SC (server→client)
+    /// notify characteristic.
+    sc_char: *mut AnyObject,
+    /// Whether a central is currently subscribed to the SC characteristic.
     subscribed: bool,
-    /// Channel to send reassembled RX packets to the tokio side.
+    /// Channel to send raw RX packets (LpPackets / LpPacket fragments) to
+    /// the tokio side. The pipeline's `TlvDecodeStage` handles NDNLPv2
+    /// reassembly via its per-face `ReassemblyBuffer` — no local assembler.
     rx_sender: mpsc::UnboundedSender<Bytes>,
-    /// Per-client fragment reassembler.
-    assembler: Assembler,
 }
 
 // SAFETY: `MacosShared` is accessed exclusively from the serial `ble_queue`
@@ -234,7 +240,7 @@ unsafe extern "C" fn cb_did_add_service(
     start_advertising(manager);
 }
 
-/// A central subscribed to the TX characteristic.
+/// A central subscribed to the SC (server→client) notify characteristic.
 unsafe extern "C" fn cb_did_subscribe(
     _this: *mut AnyObject,
     _sel: Sel,
@@ -243,13 +249,13 @@ unsafe extern "C" fn cb_did_subscribe(
     characteristic: *mut AnyObject,
 ) {
     let uuid = char_uuid_string(characteristic);
-    if uuid.eq_ignore_ascii_case(BLE_TX_CHAR_UUID) {
-        debug!("BLE/macOS: TX subscribed");
+    if uuid.eq_ignore_ascii_case(BLE_SC_CHAR_UUID) {
+        debug!("BLE/macOS: SC (server→client) subscribed");
         shared_ref().subscribed = true;
     }
 }
 
-/// A central unsubscribed from the TX characteristic.
+/// A central unsubscribed from the SC (server→client) notify characteristic.
 unsafe extern "C" fn cb_did_unsubscribe(
     _this: *mut AnyObject,
     _sel: Sel,
@@ -258,13 +264,17 @@ unsafe extern "C" fn cb_did_unsubscribe(
     characteristic: *mut AnyObject,
 ) {
     let uuid = char_uuid_string(characteristic);
-    if uuid.eq_ignore_ascii_case(BLE_TX_CHAR_UUID) {
-        debug!("BLE/macOS: TX unsubscribed");
+    if uuid.eq_ignore_ascii_case(BLE_SC_CHAR_UUID) {
+        debug!("BLE/macOS: SC (server→client) unsubscribed");
         shared_ref().subscribed = false;
     }
 }
 
-/// Incoming Write Without Response on the RX characteristic.
+/// Incoming Write Without Response on the CS (client→server) characteristic.
+///
+/// Each write carries exactly one LpPacket (whole or fragment); hand the raw
+/// bytes up to the face recv channel and let the pipeline's `TlvDecodeStage`
+/// handle NDNLPv2 reassembly via its per-face `ReassemblyBuffer`.
 unsafe extern "C" fn cb_did_receive_writes(
     _this: *mut AnyObject,
     _sel: Sel,
@@ -284,10 +294,8 @@ unsafe extern "C" fn cb_did_receive_writes(
         if bytes_ptr.is_null() || len == 0 {
             continue;
         }
-        let chunk = Bytes::copy_from_slice(std::slice::from_raw_parts(bytes_ptr, len));
-        if let Some(pkt) = shared.assembler.push(chunk) {
-            let _ = shared.rx_sender.send(pkt);
-        }
+        let pkt = Bytes::copy_from_slice(std::slice::from_raw_parts(bytes_ptr, len));
+        let _ = shared.rx_sender.send(pkt);
     }
 }
 
@@ -304,15 +312,16 @@ unsafe extern "C" fn cb_ready_to_update(
 
 // ── CoreBluetooth object helpers ──────────────────────────────────────────────
 
-/// Create the NDN GATT `CBMutableService` with its TX and RX characteristics.
-/// Returns a raw `CBMutableService *` with retain count +1 (caller must release).
+/// Create the NDN GATT `CBMutableService` with its SC (notify) and CS (write)
+/// characteristics. Returns a raw `CBMutableService *` with retain count +1
+/// (caller must release).
 unsafe fn create_ndn_service() -> *mut AnyObject {
-    let tx_char = create_char(BLE_TX_CHAR_UUID, CB_PROP_NOTIFY, 0);
-    let rx_char = create_char(BLE_RX_CHAR_UUID, CB_PROP_WRITE_NO_RESP, CB_PERM_WRITABLE);
+    let sc_char = create_char(BLE_SC_CHAR_UUID, CB_PROP_NOTIFY, 0);
+    let cs_char = create_char(BLE_CS_CHAR_UUID, CB_PROP_WRITE_NO_RESP, CB_PERM_WRITABLE);
 
-    // Store the TX characteristic pointer in shared state for later use.
-    // tx_char retain count is +1 from create_char; we keep that reference.
-    shared_ref().tx_char = tx_char;
+    // Store the SC characteristic pointer in shared state for later use.
+    // sc_char retain count is +1 from create_char; we keep that reference.
+    shared_ref().sc_char = sc_char;
 
     let svc_class = AnyClass::get("CBMutableService").expect("CBMutableService not found");
     let svc_uuid = make_cbuuid(BLE_SERVICE_UUID);
@@ -321,16 +330,16 @@ unsafe fn create_ndn_service() -> *mut AnyObject {
     // Release the UUID (svc has retained it).
     let _: () = msg_send![svc_uuid, release];
 
-    // characteristics = [tx_char, rx_char]
+    // characteristics = [sc_char, cs_char]
     let arr_class = AnyClass::get("NSArray").expect("NSArray not found");
-    let chars_ptrs: [*mut AnyObject; 2] = [tx_char, rx_char];
+    let chars_ptrs: [*mut AnyObject; 2] = [sc_char, cs_char];
     let chars: *mut AnyObject =
         msg_send![arr_class, arrayWithObjects: chars_ptrs.as_ptr(), count: 2usize];
     let _: () = msg_send![svc, setCharacteristics: chars];
 
     // Release temporary objects (NSArray has retained them).
-    let _: () = msg_send![rx_char, release];
-    // Keep tx_char alive via shared.tx_char (already retained once from create_char).
+    let _: () = msg_send![cs_char, release];
+    // Keep sc_char alive via shared.sc_char (already retained once from create_char).
 
     svc // +1 retain; caller must release
 }
@@ -435,6 +444,8 @@ unsafe fn start_advertising(manager: *mut AnyObject) {
 struct TxWork {
     shared_ptr: *mut MacosShared,
     pkt: Bytes,
+    /// Monotonic base sequence to use if NDNLPv2 fragmentation is required.
+    frag_seq: u64,
 }
 unsafe impl Send for TxWork {}
 
@@ -442,20 +453,39 @@ unsafe extern "C" fn do_tx_work(ctx: *mut c_void) {
     let work = Box::from_raw(ctx as *mut TxWork);
     let shared = &mut *work.shared_ptr;
 
-    if !shared.subscribed || shared.manager.is_null() || shared.tx_char.is_null() {
+    if !shared.subscribed || shared.manager.is_null() || shared.sc_char.is_null() {
         return;
     }
 
     let mtu: usize = msg_send![shared.manager, maximumUpdateValueLength];
-    let max_payload = mtu.saturating_sub(ATT_OVERHEAD).max(20);
-    let frags = fragment_to_vec(&work.pkt, max_payload);
+    let ble_mtu = mtu.saturating_sub(ATT_OVERHEAD);
+
+    if ble_mtu <= FRAG_OVERHEAD {
+        warn!(
+            ble_mtu,
+            needed = FRAG_OVERHEAD + 1,
+            "BLE/macOS: ATT MTU too small for NDNLPv2 fragmentation, dropping packet"
+        );
+        return;
+    }
+
+    // Build the on-wire LpPacket(s): passthrough if already framed, single
+    // LpPacket envelope if it fits, NDNLPv2 fragments otherwise. Mirrors the
+    // UDP / Ethernet / BLE/Linux send paths.
+    let frags: Vec<Bytes> = if is_lp_packet(&work.pkt) {
+        vec![work.pkt.clone()]
+    } else if work.pkt.len() + 4 <= ble_mtu {
+        vec![encode_lp_packet(&work.pkt)]
+    } else {
+        fragment_packet(&work.pkt, ble_mtu, work.frag_seq)
+    };
 
     for frag in &frags {
         let ns_data = make_nsdata(frag);
         let ok: bool = msg_send![
             shared.manager,
             updateValue: ns_data,
-            forCharacteristic: shared.tx_char,
+            forCharacteristic: shared.sc_char,
             onSubscribedCentrals: std::ptr::null_mut::<AnyObject>()
         ];
         let _: () = msg_send![ns_data, release];
@@ -491,10 +521,9 @@ pub async fn bind(id: ndn_transport::FaceId) -> Result<BleFace, BleError> {
     // Box up the shared state and install in the global singleton.
     let shared = Box::new(MacosShared {
         manager: std::ptr::null_mut(),
-        tx_char: std::ptr::null_mut(),
+        sc_char: std::ptr::null_mut(),
         subscribed: false,
         rx_sender,
-        assembler: Assembler::default(),
     });
     let shared_ptr = install_shared(shared);
 
@@ -530,15 +559,20 @@ pub async fn bind(id: ndn_transport::FaceId) -> Result<BleFace, BleError> {
     let queue_addr: usize = ble_queue as usize;
     let shared_addr: usize = shared_ptr as usize;
     tokio::spawn(async move {
+        // Monotonic NDNLPv2 base sequence for fragment groups.
+        let mut frag_seq: u64 = 0;
         while let Some(pkt) = tx_receiver.recv().await {
             let queue = queue_addr as DispatchQueue;
             if queue.is_null() {
                 break;
             }
             let sptr = shared_addr as *mut MacosShared;
+            let seq = frag_seq;
+            frag_seq = frag_seq.wrapping_add(1);
             let work = Box::new(TxWork {
                 shared_ptr: sptr,
                 pkt,
+                frag_seq: seq,
             });
             unsafe {
                 dispatch_async_f(queue, Box::into_raw(work) as *mut c_void, do_tx_work);

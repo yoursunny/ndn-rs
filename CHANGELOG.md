@@ -10,6 +10,34 @@ For the narrative behind each release — design decisions, rejected approaches,
 
 ## [Unreleased]
 
+### Fixed
+
+- **BLE face wire format now matches NDNts and esp8266ndn exactly** (#10).
+  The previous implementation used swapped CS/SC characteristic UUIDs, had
+  typo'd byte suffixes, and prefixed oversized packets with a non-standard
+  1-byte fragmentation header that neither NDNts nor esp8266ndn understand.
+  The CS/SC UUIDs are now `cc5abb89-a541-46d8-a351-2f95a6a81f49` and
+  `972f9527-0d83-4261-b95d-b1b2fc73bde4` (verified against yoursunny/NDNts
+  and yoursunny/esp8266ndn upstream source), and oversized packets are
+  fragmented with NDNLPv2 at the Face layer — the same code path used by
+  UDP, multicast, and Ethernet faces. The NDN-BLE protocol itself defines
+  no framing; this matches the NDNts README which states that BLE "can be
+  used with existing NDN fragmentation schemes such as NDNLPv2."
+
+- **Docker image now publishes a `:latest` tag on main** (#11). `docker pull
+  ghcr.io/quarmire/ndn-fwd` (without an explicit tag) now resolves to the
+  current main build. Once a semver tag is pushed, `:latest` tracks that
+  release via `docker/metadata-action`'s `latest=auto` flavor.
+
+### Docs
+
+- **Wiki spec-compliance page**: fixed the mdbook `edit-url-template`
+  double-`src/` 404, replaced the dead NDNCERT 0.3 link, corrected the
+  misattributed NFD Developer Guide reference (now NDN-0021), reframed
+  NDN-0001 as the architecture vision rather than a forwarding spec, and
+  added a "Not Yet Implemented" section documenting the partial forwarding
+  hint and PIT token support (#13 — link/reference half).
+
 ---
 
 ## [0.1.0] — 2026-04-11
