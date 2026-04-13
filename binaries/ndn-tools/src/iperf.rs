@@ -97,7 +97,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let (tx, mut rx) = mpsc::channel::<ToolEvent>(512);
-    tokio::spawn(async move {
+    // Spawn the event consumer; capture the handle so we can await it after the
+    // command finishes.  When the command drops `tx`, `rx.recv()` returns `None`
+    // and the consumer exits naturally.  Awaiting the handle ensures every queued
+    // event is printed before the process exits (avoids a Tokio runtime-shutdown
+    // race that could silently drop the results summary).
+    let consumer = tokio::spawn(async move {
         while let Some(ev) = rx.recv().await {
             match ev.level {
                 EventLevel::Summary | EventLevel::Info => println!("{}", ev.text),
@@ -106,7 +111,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    match cli.command {
+    let result = match cli.command {
         Command::Server {
             conn,
             prefix,
@@ -170,5 +175,8 @@ async fn main() -> Result<()> {
             )
             .await
         }
-    }
+    };
+    // Wait for all queued events to be printed.
+    let _ = consumer.await;
+    result
 }
