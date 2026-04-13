@@ -28,8 +28,8 @@
 //! `src/lvs.rs` accordingly.
 
 use bytes::Bytes;
-use ndn_security::TrustSchema;
 use ndn_packet::{Name, NameComponent};
+use ndn_security::TrustSchema;
 
 const NDND_TEST_MODEL: &[u8] = include_bytes!("fixtures/lvs_ndnd_test_model.tlv");
 

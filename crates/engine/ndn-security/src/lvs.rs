@@ -381,9 +381,11 @@ impl LvsModel {
     ) -> bool {
         // Every constraint must be satisfied (AND). If there are no
         // constraints, the edge always matches.
-        edge.constraints
-            .iter()
-            .all(|c| c.options.iter().any(|opt| self.option_matches(opt, comp, bindings)))
+        edge.constraints.iter().all(|c| {
+            c.options
+                .iter()
+                .any(|opt| self.option_matches(opt, comp, bindings))
+        })
     }
 
     fn option_matches(
@@ -565,8 +567,7 @@ impl LvsConstraintOption {
             }
         }
 
-        let set_count =
-            value.is_some() as u8 + tag.is_some() as u8 + fn_call.is_some() as u8;
+        let set_count = value.is_some() as u8 + tag.is_some() as u8 + fn_call.is_some() as u8;
         if set_count != 1 {
             return Err(LvsError::MalformedConstraintOption);
         }
@@ -651,10 +652,9 @@ impl LvsTagSymbol {
 
 /// Read a TLV from the start of `input`, returning (type, value_slice, rest).
 fn read_tlv(input: &[u8]) -> Result<(u64, &[u8], &[u8]), LvsError> {
-    let (t, tn) = ndn_tlv::read_varu64(input)
-        .map_err(|_| LvsError::Truncated("TLV type"))?;
-    let (l, ln) = ndn_tlv::read_varu64(&input[tn..])
-        .map_err(|_| LvsError::Truncated("TLV length"))?;
+    let (t, tn) = ndn_tlv::read_varu64(input).map_err(|_| LvsError::Truncated("TLV type"))?;
+    let (l, ln) =
+        ndn_tlv::read_varu64(&input[tn..]).map_err(|_| LvsError::Truncated("TLV length"))?;
     let header_len = tn + ln;
     let total = header_len
         .checked_add(l as usize)
@@ -697,8 +697,8 @@ fn read_string(v: &[u8]) -> Result<String, LvsError> {
 /// 59`. We parse the inner TLV here so that matching compares the full
 /// component (including type) against the walked Name's components.
 fn parse_name_component(value: &[u8]) -> Result<NameComponent, LvsError> {
-    let (t, tn) = ndn_tlv::read_varu64(value)
-        .map_err(|_| LvsError::Truncated("NameComponent type"))?;
+    let (t, tn) =
+        ndn_tlv::read_varu64(value).map_err(|_| LvsError::Truncated("NameComponent type"))?;
     let (l, ln) = ndn_tlv::read_varu64(&value[tn..])
         .map_err(|_| LvsError::Truncated("NameComponent length"))?;
     let start = tn + ln;
@@ -712,7 +712,10 @@ fn parse_name_component(value: &[u8]) -> Result<NameComponent, LvsError> {
             available: value.len(),
         });
     }
-    Ok(NameComponent::new(t, Bytes::copy_from_slice(&value[start..end])))
+    Ok(NameComponent::new(
+        t,
+        Bytes::copy_from_slice(&value[start..end]),
+    ))
 }
 
 #[cfg(test)]
@@ -975,7 +978,10 @@ mod tests {
     fn pattern_fixture_allows_data_signed_by_key() {
         let model = LvsModel::decode(&build_pattern_fixture()).unwrap();
         // /sensor/temp signed by /sensor/temp/KEY
-        assert!(model.check(&name(&["sensor", "temp"]), &name(&["sensor", "temp", "KEY"])));
+        assert!(model.check(
+            &name(&["sensor", "temp"]),
+            &name(&["sensor", "temp", "KEY"])
+        ));
     }
 
     #[test]

@@ -607,8 +607,7 @@ mod tests {
 
     #[test]
     fn trust_schema_from_lvs_binary_roundtrip() {
-        let schema = TrustSchema::from_lvs_binary(&lvs_hierarchical_fixture())
-            .expect("LVS import");
+        let schema = TrustSchema::from_lvs_binary(&lvs_hierarchical_fixture()).expect("LVS import");
         assert!(schema.lvs_model().is_some());
         assert!(schema.allows(&name(&["app"]), &name(&["key"])));
         assert!(!schema.allows(&name(&["app"]), &name(&["wrong"])));
