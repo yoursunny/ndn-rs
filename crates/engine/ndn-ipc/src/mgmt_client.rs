@@ -602,25 +602,45 @@ impl MgmtClient {
     }
 
     /// Send a dataset Interest (no ControlParameters) and return the full response.
+    ///
+    /// Dataset queries are sent **unsigned** (plain Interest with no
+    /// ApplicationParameters).  NFD and yanfd/ndnd require unsigned Interests
+    /// for dataset queries; ndn-fwd accepts both signed and unsigned.
     async fn dataset(
         &self,
         module_name: &[u8],
         verb_name: &[u8],
     ) -> Result<ControlResponse, ForwarderError> {
         let name = dataset_name(module_name, verb_name);
-        self.send_interest(name).await
+        self.send_unsigned_interest(name).await
     }
 
-    /// Send an Interest and decode the ControlResponse from the Data reply.
+    /// Send an unsigned dataset Interest and decode the ControlResponse.
     ///
-    /// Management Interests are signed with `DigestSha256` (SHA-256 of the
-    /// signed region) so that NFD and ndnd accept them. Without a signature
-    /// NFD silently drops the Interest and the client would hang forever.
+    /// Used for read-only queries (`faces/list`, `fib/list`, `status/general`,
+    /// etc.) where NFD and yanfd reject signed Interests.
+    ///
+    /// The Interest is LP-wrapped before sending so external forwarders accept it.
+    async fn send_unsigned_interest(&self, name: Name) -> Result<ControlResponse, ForwarderError> {
+        let interest_wire = InterestBuilder::new(name).build();
+        self.send_raw(interest_wire).await
+    }
+
+    /// Send a signed command Interest and decode the ControlResponse from the Data reply.
+    ///
+    /// Command Interests (`rib/register`, `faces/create`, etc.) are signed with
+    /// `DigestSha256` so that NFD and ndnd accept them as authenticated commands.
     ///
     /// The Interest is LP-wrapped before sending: external forwarders (NFD,
     /// yanfd/ndnd) require NDNLPv2 framing on their Unix socket faces.
     async fn send_interest(&self, name: Name) -> Result<ControlResponse, ForwarderError> {
         let interest_wire = InterestBuilder::new(name).sign_digest_sha256();
+        self.send_raw(interest_wire).await
+    }
+
+    /// Core send+recv: LP-wrap `interest_wire`, send to face, decode response.
+    async fn send_raw(&self, interest_wire: Bytes) -> Result<ControlResponse, ForwarderError> {
+        let interest_wire = interest_wire;
 
         // Serialise send+recv so concurrent callers don't interleave.
         let _guard = self.recv_lock.lock().await;
