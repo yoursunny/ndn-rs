@@ -10,7 +10,31 @@ For the narrative behind each release — design decisions, rejected approaches,
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`ndn-packet` default features** changed from `["std"]` to `[]`. Downstream
+  crates that rely on the old default must add `features = ["std"]` to their
+  `ndn-packet` dependency.
+- **`AppError` variants** replaced with typed enum — `AppError::Engine(anyhow)` is
+  gone; use `Connection(ForwarderError)`, `Closed`, `Protocol(String)` instead.
+- **`Producer::serve`** handler signature changed from `Fn(Interest) -> Option<Bytes>`
+  to `Fn(Interest, Responder) -> Future<Output = ()>` — use `Responder` to reply.
+- **Crate consolidation** — `ndn-face-net`, `ndn-face-local`, `ndn-face-serial`,
+  `ndn-face-l2`, and `ndn-pipeline` are removed. Use `ndn-faces` (feature-gated
+  modules) and `ndn-engine::pipeline` respectively.
+- **`RouterClient` / `RouterError`** renamed to `ForwarderClient` / `ForwarderError`.
+- **`AppFace` / `AppHandle`** renamed to `InProcFace` / `InProcHandle`.
+
 ### Added
+
+- **ndn-dashboard face counters and kind labels** — `faces_list_dataset` now reads
+  real `AtomicU64` traffic counters (interests/data/bytes) from the engine's face
+  state; `face_scope` and `link_type` are populated from `FaceKind`; local faces
+  use `internal://<kind>` URIs so the dashboard correctly labels App, Mgmt, and
+  SHM faces.
+- **Default socket path** — changed from `/tmp/ndn.sock` to `/run/nfd/nfd.sock` on
+  Unix for drop-in NFD compatibility; the parent directory (`/run/nfd/`) is created
+  automatically on first bind.
 
 - **LightVerSec (LVS) binary trust schema import** (#9). `TrustSchema` now
   has a `from_lvs_binary(&[u8])` constructor that parses the compiled LVS
@@ -27,86 +51,6 @@ For the narrative behind each release — design decisions, rejected approaches,
   and returns `true` if either accepts. Binary format version
   `0x00011000` is accepted; other versions raise
   `LvsError::UnsupportedVersion`.
-
-### Security
-
-- **BLAKE3 signature types split into distinct plain and keyed codes** (#12).
-  Previously `Blake3Signer` and `Blake3KeyedSigner` both emitted
-  `SignatureType::Other(6)` on the wire, which is unsafe: an attacker could
-  strip a keyed signature and substitute a plain BLAKE3 digest over forged
-  content, and a verifier dispatching on type code alone would accept the
-  forgery because both modes are indistinguishable in the TLV. The
-  implementation now uses two distinct experimental codes —
-  `SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN = 6` for plain digest and
-  `SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED = 7` for keyed — mirroring the
-  existing NDN pattern (`DigestSha256` = 0 vs. `SignatureHmacWithSha256`
-  = 4). The old `SIGNATURE_TYPE_DIGEST_BLAKE3` constant has been removed;
-  external callers should import the new split constants.
-
-  Both values remain **experimental** and require manual reservation on
-  the [NDN TLV SignatureType registry](https://redmine.named-data.net/projects/ndn-tlv/wiki/SignatureType)
-  before being considered stable. This is a one-time maintainer action
-  tracked as part of #12.
-
-### Fixed
-
-- **BLE face wire format now matches NDNts and esp8266ndn exactly** (#10).
-  The previous implementation used swapped CS/SC characteristic UUIDs, had
-  typo'd byte suffixes, and prefixed oversized packets with a non-standard
-  1-byte fragmentation header that neither NDNts nor esp8266ndn understand.
-  The CS/SC UUIDs are now `cc5abb89-a541-46d8-a351-2f95a6a81f49` and
-  `972f9527-0d83-4261-b95d-b1b2fc73bde4` (verified against yoursunny/NDNts
-  and yoursunny/esp8266ndn upstream source), and oversized packets are
-  fragmented with NDNLPv2 at the Face layer — the same code path used by
-  UDP, multicast, and Ethernet faces. The NDN-BLE protocol itself defines
-  no framing; this matches the NDNts README which states that BLE "can be
-  used with existing NDN fragmentation schemes such as NDNLPv2."
-
-- **Docker image now publishes a `:latest` tag on main** (#11). `docker pull
-  ghcr.io/quarmire/ndn-fwd` (without an explicit tag) now resolves to the
-  current main build. Once a semver tag is pushed, `:latest` tracks that
-  release via `docker/metadata-action`'s `latest=auto` flavor.
-
-### Docs
-
-- **Wiki spec-compliance page**: fixed the mdbook `edit-url-template`
-  double-`src/` 404, replaced the dead NDNCERT 0.3 link, corrected the
-  misattributed NFD Developer Guide reference (now NDN-0021), reframed
-  NDN-0001 as the architecture vision rather than a forwarding spec, and
-  added a "Not Yet Implemented" section documenting the partial forwarding
-  hint and PIT token support (#13 — link/reference half).
-
----
-
-## [0.1.0] — Unreleased (upcoming)
-
-> **Not yet tagged.** The workspace version reads `0.1.0`, but no `v0.1.0`
-> git tag exists and no GitHub Release has been published. This section
-> describes the scope of the upcoming first stable release; additional
-> fixes in [[Unreleased]](#unreleased) above will fold into it before the
-> tag is cut. Detailed narrative in the
-> [0.1.0 draft release notes](https://quarmire.github.io/ndn-rs/wiki/releases/v0-1-0.html).
-
-Stable 0.1.0 (target). Finalizes all public names, fills ergonomic gaps,
-and wires remaining stub features.
-
-### Breaking Changes
-
-- **`ndn-router` binary renamed to `ndn-fwd`** — update scripts and Docker images.
-- **`ndn-packet` default features** changed from `["std"]` to `[]`. Downstream
-  crates that rely on the old default must add `features = ["std"]` to their
-  `ndn-packet` dependency.
-- **`AppError` variants** replaced with typed enum — `AppError::Engine(anyhow)` is
-  gone; use `Connection(ForwarderError)`, `Closed`, `Protocol(String)` instead.
-- **`Producer::serve`** handler signature changed from `Fn(Interest) -> Option<Bytes>`
-  to `Fn(Interest, Responder) -> Future<Output = ()>` — use `Responder` to reply.
-- **Crate consolidation** — `ndn-face-net`, `ndn-face-local`, `ndn-face-serial`,
-  `ndn-face-l2`, and `ndn-pipeline` are removed. Use `ndn-faces` (feature-gated
-  modules) and `ndn-engine::pipeline` respectively.
-- **`RouterClient` / `RouterError`** renamed to `ForwarderClient` / `ForwarderError`.
-- **`AppFace` / `AppHandle`** renamed to `InProcFace` / `InProcHandle`.
-
-### Added
 
 #### API ergonomics (ndn-app)
 - `Responder` — single-use reply builder for `Producer::serve` handlers; supports
@@ -169,13 +113,60 @@ and wires remaining stub features.
 - **`ndn-sec keygen --skip-if-exists`**: idempotent key generation.
 - **NixOS flake module**: `identity`, `pibPath`, and `generateIdentity` options;
   `ExecStartPre` runs idempotent key generation on every boot; stable
-  `ndn-router` user/group replacing `DynamicUser = true`.
+  `ndn-fwd` user/group replacing `DynamicUser = true`.
 - **Dashboard identity status**: Security view shows ephemeral warning (yellow)
   or persistent identity info bar (green).
 
+### Security
+
+- **BLAKE3 signature types split into distinct plain and keyed codes** (#12).
+  Previously `Blake3Signer` and `Blake3KeyedSigner` both emitted
+  `SignatureType::Other(6)` on the wire, which is unsafe: an attacker could
+  strip a keyed signature and substitute a plain BLAKE3 digest over forged
+  content, and a verifier dispatching on type code alone would accept the
+  forgery because both modes are indistinguishable in the TLV. The
+  implementation now uses two distinct experimental codes —
+  `SIGNATURE_TYPE_DIGEST_BLAKE3_PLAIN = 6` for plain digest and
+  `SIGNATURE_TYPE_DIGEST_BLAKE3_KEYED = 7` for keyed — mirroring the
+  existing NDN pattern (`DigestSha256` = 0 vs. `SignatureHmacWithSha256`
+  = 4). The old `SIGNATURE_TYPE_DIGEST_BLAKE3` constant has been removed;
+  external callers should import the new split constants.
+
+  Both values remain **experimental** and require manual reservation on
+  the [NDN TLV SignatureType registry](https://redmine.named-data.net/projects/ndn-tlv/wiki/SignatureType)
+  before being considered stable. This is a one-time maintainer action
+  tracked as part of #12.
+
 ### Fixed
+
 - Validator chain-walk connected to `CertCache` on `Pending` result.
 - Spec compliance gaps documented in `docs/unimplemented.md`.
+
+- **BLE face wire format now matches NDNts and esp8266ndn exactly** (#10).
+  The previous implementation used swapped CS/SC characteristic UUIDs, had
+  typo'd byte suffixes, and prefixed oversized packets with a non-standard
+  1-byte fragmentation header that neither NDNts nor esp8266ndn understand.
+  The CS/SC UUIDs are now `cc5abb89-a541-46d8-a351-2f95a6a81f49` and
+  `972f9527-0d83-4261-b95d-b1b2fc73bde4` (verified against yoursunny/NDNts
+  and yoursunny/esp8266ndn upstream source), and oversized packets are
+  fragmented with NDNLPv2 at the Face layer — the same code path used by
+  UDP, multicast, and Ethernet faces. The NDN-BLE protocol itself defines
+  no framing; this matches the NDNts README which states that BLE "can be
+  used with existing NDN fragmentation schemes such as NDNLPv2."
+
+- **Docker image now publishes a `:latest` tag on main** (#11). `docker pull
+  ghcr.io/quarmire/ndn-fwd` (without an explicit tag) now resolves to the
+  current main build. Once a semver tag is pushed, `:latest` tracks that
+  release via `docker/metadata-action`'s `latest=auto` flavor.
+
+### Docs
+
+- **Wiki spec-compliance page**: fixed the mdbook `edit-url-template`
+  double-`src/` 404, replaced the dead NDNCERT 0.3 link, corrected the
+  misattributed NFD Developer Guide reference (now NDN-0021), reframed
+  NDN-0001 as the architecture vision rather than a forwarding spec, and
+  added a "Not Yet Implemented" section documenting the partial forwarding
+  hint and PIT token support (#13 — link/reference half).
 
 ---
 
