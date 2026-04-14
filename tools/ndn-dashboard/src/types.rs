@@ -286,6 +286,19 @@ impl FaceInfo {
             u if u.starts_with("ether://") => "Ether",
             u if u.starts_with("shm://") => "SHM",
             u if u.starts_with("unix://") => "Unix",
+            // Internal faces: "internal://<kind>" where kind is the Display of FaceKind.
+            u if u.starts_with("internal://") => {
+                let kind = &u["internal://".len()..];
+                match kind {
+                    "app" => "App",
+                    "shm" => "SHM",
+                    "management" => "Mgmt",
+                    "internal" => "Internal",
+                    "web-socket" => "WS",
+                    "unix" => "Unix",
+                    _ => "Local",
+                }
+            }
             _ => "?",
         }
     }
@@ -298,6 +311,11 @@ impl FaceInfo {
             "WS" => "badge badge-yellow",
             "Ether" => "badge badge-yellow",
             "SHM" => "badge badge-gray",
+            "Unix" => "badge badge-gray",
+            "App" => "badge badge-purple",
+            "Mgmt" => "badge badge-gray",
+            "Internal" => "badge badge-gray",
+            "Local" => "badge badge-gray",
             _ => "badge badge-gray",
         }
     }
