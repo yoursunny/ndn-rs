@@ -1496,11 +1496,11 @@ async fn poll_all(
         Err(e) => return Err(e.to_string()),
     }
     match client.face_list().await {
-        Ok(r) => faces.set(FaceInfo::parse_list(&r.status_text)),
+        Ok(faces_data) => faces.set(faces_data.into_iter().map(FaceInfo::from).collect()),
         Err(e) => return Err(e.to_string()),
     }
     match client.route_list().await {
-        Ok(r) => routes.set(FibEntry::parse_list(&r.status_text)),
+        Ok(fib_data) => routes.set(fib_data.into_iter().map(FibEntry::from).collect()),
         Err(e) => return Err(e.to_string()),
     }
     match client.cs_info().await {
@@ -1508,7 +1508,9 @@ async fn poll_all(
         Err(e) => return Err(e.to_string()),
     }
     match client.strategy_list().await {
-        Ok(r) => strategies.set(StrategyEntry::parse_list(&r.status_text)),
+        Ok(strategies_data) => {
+            strategies.set(strategies_data.into_iter().map(StrategyEntry::from).collect())
+        }
         Err(e) => return Err(e.to_string()),
     }
     // Phase 2 endpoints — best-effort: ignore errors so older routers still work.

@@ -1,4 +1,7 @@
 // Typed data models and text-response parsers for NDN management protocol.
+//
+// Phase 2 note: FaceInfo, FibEntry, and StrategyEntry now have `From` impls
+// that convert from the NFD TLV wire types in `ndn_config` (see end of file).
 
 // ── Log entries ──────────────────────────────────────────────────────────────
 
@@ -159,7 +162,8 @@ impl LogEntry {
 }
 // The current router returns human-readable text in ControlResponse::status_text.
 // Each parser converts that text into structured types for the UI.
-// Phase 2 will add structured JSON endpoints to replace these parsers.
+// Phase 2 note: the four list parsers below are retained for future use with
+// custom ndn-rs endpoints; the main data path now uses NFD TLV wire types.
 
 // ── Forwarder status ────────────────────────────────────────────────────────
 
@@ -209,6 +213,7 @@ impl FaceInfo {
     /// faceid=1 remote=udp4://192.168.1.1:6363 local=udp4://0.0.0.0:0 persistency=Persistent
     /// faceid=2 kind=App persistency=OnDemand
     /// ```
+    #[allow(dead_code)]
     pub fn parse_list(text: &str) -> Vec<Self> {
         let mut faces = Vec::new();
         for line in text.lines() {
@@ -295,6 +300,7 @@ impl FibEntry {
     /// ```text
     ///   /ndn nexthops=[faceid=1 cost=10, faceid=2 cost=5]
     /// ```
+    #[allow(dead_code)]
     pub fn parse_list(text: &str) -> Vec<Self> {
         let mut entries = Vec::new();
         for line in text.lines() {
@@ -315,6 +321,7 @@ impl FibEntry {
     }
 }
 
+#[allow(dead_code)]
 fn parse_nexthops(text: &str) -> Vec<NextHop> {
     let inner = text.trim_matches(|c| c == '[' || c == ']');
     inner
@@ -802,6 +809,7 @@ impl StrategyEntry {
     /// ```text
     ///   prefix=/ strategy=best-route
     /// ```
+    #[allow(dead_code)]
     pub fn parse_list(text: &str) -> Vec<Self> {
         let mut entries = Vec::new();
         for line in text.lines() {
@@ -1003,5 +1011,53 @@ impl SchemaRuleInfo {
             }
         }
         out
+    }
+}
+
+// ── Wire-type conversions (Phase 2) ──────────────────────────────────────────
+//
+// These `From` impls convert NFD TLV wire types (from `ndn_config`) into the
+// dashboard's display-oriented structs.  The text parsers above are retained
+// for use with custom ndn-rs endpoints that still return ControlResponse text.
+
+impl From<ndn_config::FaceStatus> for FaceInfo {
+    fn from(fs: ndn_config::FaceStatus) -> Self {
+        let persistency = fs.persistency_str().to_owned();
+        FaceInfo {
+            face_id: fs.face_id,
+            remote_uri: if fs.uri.is_empty() { None } else { Some(fs.uri) },
+            local_uri: if fs.local_uri.is_empty() {
+                None
+            } else {
+                Some(fs.local_uri)
+            },
+            persistency,
+            kind: None,
+        }
+    }
+}
+
+impl From<ndn_config::FibEntry> for FibEntry {
+    fn from(fe: ndn_config::FibEntry) -> Self {
+        FibEntry {
+            prefix: fe.name.to_string(),
+            nexthops: fe
+                .nexthops
+                .into_iter()
+                .map(|nh| NextHop {
+                    face_id: nh.face_id,
+                    cost: nh.cost as u32,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<ndn_config::StrategyChoice> for StrategyEntry {
+    fn from(sc: ndn_config::StrategyChoice) -> Self {
+        StrategyEntry {
+            prefix: sc.name.to_string(),
+            strategy: sc.strategy.to_string(),
+        }
     }
 }

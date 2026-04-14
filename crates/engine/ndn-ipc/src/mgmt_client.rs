@@ -107,8 +107,19 @@ impl MgmtClient {
     }
 
     /// List all FIB routes: `fib/list`.
-    pub async fn route_list(&self) -> Result<ControlResponse, ForwarderError> {
-        self.dataset(module::FIB, verb::LIST).await
+    ///
+    /// Returns NFD TLV `FibEntry` dataset entries (per-spec wire format).
+    pub async fn route_list(&self) -> Result<Vec<ndn_config::FibEntry>, ForwarderError> {
+        let bytes = self.dataset_raw(module::FIB, verb::LIST).await?;
+        Ok(ndn_config::FibEntry::decode_all(&bytes))
+    }
+
+    /// List all RIB routes: `rib/list`.
+    ///
+    /// Returns NFD TLV `RibEntry` dataset entries (per-spec wire format).
+    pub async fn rib_list(&self) -> Result<Vec<ndn_config::RibEntry>, ForwarderError> {
+        let bytes = self.dataset_raw(module::RIB, verb::LIST).await?;
+        Ok(ndn_config::RibEntry::decode_all(&bytes))
     }
 
     // ─── Face management ────────────────────────────────────────────────
@@ -132,8 +143,11 @@ impl MgmtClient {
     }
 
     /// List all faces: `faces/list`.
-    pub async fn face_list(&self) -> Result<ControlResponse, ForwarderError> {
-        self.dataset(module::FACES, verb::LIST).await
+    ///
+    /// Returns NFD TLV `FaceStatus` dataset entries (per-spec wire format).
+    pub async fn face_list(&self) -> Result<Vec<ndn_config::FaceStatus>, ForwarderError> {
+        let bytes = self.dataset_raw(module::FACES, verb::LIST).await?;
+        Ok(ndn_config::FaceStatus::decode_all(&bytes))
     }
 
     // ─── Strategy management ────────────────────────────────────────────
@@ -162,8 +176,11 @@ impl MgmtClient {
     }
 
     /// List all strategy choices: `strategy-choice/list`.
-    pub async fn strategy_list(&self) -> Result<ControlResponse, ForwarderError> {
-        self.dataset(module::STRATEGY, verb::LIST).await
+    ///
+    /// Returns NFD TLV `StrategyChoice` dataset entries (per-spec wire format).
+    pub async fn strategy_list(&self) -> Result<Vec<ndn_config::StrategyChoice>, ForwarderError> {
+        let bytes = self.dataset_raw(module::STRATEGY, verb::LIST).await?;
+        Ok(ndn_config::StrategyChoice::decode_all(&bytes))
     }
 
     // ─── Content store ──────────────────────────────────────────────────
@@ -599,6 +616,44 @@ impl MgmtClient {
         }
 
         Ok(resp.body.unwrap_or_default())
+    }
+
+    /// Send a dataset Interest and return raw content bytes.
+    ///
+    /// Used for the four NFD-standard list datasets (`faces/list`, `fib/list`,
+    /// `rib/list`, `strategy-choice/list`) whose content is concatenated TLV
+    /// entries rather than a ControlResponse.
+    async fn dataset_raw(
+        &self,
+        module_name: &[u8],
+        verb_name: &[u8],
+    ) -> Result<Bytes, ForwarderError> {
+        let name = dataset_name(module_name, verb_name);
+        let interest_wire = InterestBuilder::new(name).build();
+        self.send_content_bytes(interest_wire).await
+    }
+
+    /// Send an Interest and return the raw content bytes from the Data reply.
+    async fn send_content_bytes(
+        &self,
+        interest_wire: Bytes,
+    ) -> Result<Bytes, ForwarderError> {
+        let _guard = self.recv_lock.lock().await;
+
+        self.face
+            .send(ndn_packet::lp::encode_lp_packet(&interest_wire))
+            .await?;
+
+        let data_wire = self
+            .face
+            .recv()
+            .await
+            .map(crate::forwarder_client::strip_lp)?;
+        let data =
+            ndn_packet::Data::decode(data_wire).map_err(|_| ForwarderError::MalformedResponse)?;
+
+        let content = data.content().ok_or(ForwarderError::MalformedResponse)?;
+        Ok(Bytes::copy_from_slice(content))
     }
 
     /// Send a dataset Interest (no ControlParameters) and return the full response.

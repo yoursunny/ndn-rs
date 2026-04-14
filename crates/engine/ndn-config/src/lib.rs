@@ -17,6 +17,7 @@ pub mod control_response;
 pub mod error;
 pub mod mgmt;
 pub mod nfd_command;
+pub mod nfd_dataset;
 
 pub use config::{
     CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, FaceKind, ForwarderConfig,
@@ -26,3 +27,4 @@ pub use control_parameters::ControlParameters;
 pub use control_response::ControlResponse;
 pub use error::ConfigError;
 pub use nfd_command::{ParsedCommand, command_name, dataset_name, parse_command_name};
+pub use nfd_dataset::{FaceStatus, FibEntry, NextHopRecord, RibEntry, Route, StrategyChoice};

@@ -112,8 +112,10 @@ enum RouteAction {
         #[arg(long, alias = "nexthop")]
         face: u32,
     },
-    /// List all routes.
+    /// List all FIB routes (forwarding table).
     List,
+    /// List all RIB routes (routing information base).
+    RibList,
 }
 
 #[derive(Subcommand)]
@@ -288,11 +290,18 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
                 print_params(&resp);
             }
             RouteAction::List => {
-                let resp = mgmt
+                let entries = mgmt
                     .route_list()
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
-                print_control_response(&resp);
+                print_fib_list(&entries);
+            }
+            RouteAction::RibList => {
+                let entries = mgmt
+                    .rib_list()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_rib_list(&entries);
             }
         },
         Command::Face { action } => match action {
@@ -311,8 +320,8 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
                 print_params(&resp);
             }
             FaceAction::List => {
-                let resp = mgmt.face_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
-                print_control_response(&resp);
+                let entries = mgmt.face_list().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+                print_face_list(&entries);
             }
         },
         Command::Strategy { action } => match action {
@@ -342,11 +351,11 @@ async fn run_nfd(cli: &Cli) -> anyhow::Result<()> {
                 print_params(&resp);
             }
             StrategyAction::List => {
-                let resp = mgmt
+                let entries = mgmt
                     .strategy_list()
                     .await
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
-                print_control_response(&resp);
+                print_strategy_list(&entries);
             }
         },
         Command::Cs { action } => match action {
@@ -561,6 +570,46 @@ fn expand_tilde(path: &str) -> std::path::PathBuf {
 }
 
 // ─── Output ──────────────────────────────────────────────────────────────────
+
+fn print_face_list(faces: &[ndn_config::FaceStatus]) {
+    for f in faces {
+        println!(
+            "faceid={} remote={} local={} persistency={} scope={}",
+            f.face_id,
+            f.uri,
+            f.local_uri,
+            f.persistency_str(),
+            f.scope_str(),
+        );
+    }
+}
+
+fn print_fib_list(entries: &[ndn_config::FibEntry]) {
+    for entry in entries {
+        let prefix = entry.name.to_string();
+        for nh in &entry.nexthops {
+            println!("{prefix} faceid={} cost={}", nh.face_id, nh.cost);
+        }
+    }
+}
+
+fn print_rib_list(entries: &[ndn_config::RibEntry]) {
+    for entry in entries {
+        let prefix = entry.name.to_string();
+        for route in &entry.routes {
+            println!(
+                "{prefix} faceid={} origin={} cost={} flags={}",
+                route.face_id, route.origin, route.cost, route.flags,
+            );
+        }
+    }
+}
+
+fn print_strategy_list(entries: &[ndn_config::StrategyChoice]) {
+    for entry in entries {
+        println!("{} strategy={}", entry.name, entry.strategy);
+    }
+}
 
 fn print_params(params: &ndn_config::ControlParameters) {
     println!("200 OK");
