@@ -213,6 +213,7 @@ pub struct AppCtx {
     pub status: Signal<Option<ForwarderStatus>>,
     pub faces: Signal<Vec<FaceInfo>>,
     pub routes: Signal<Vec<FibEntry>>,
+    pub rib_entries: Signal<Vec<RibEntryInfo>>,
     pub cs: Signal<Option<CsInfo>>,
     pub strategies: Signal<Vec<StrategyEntry>>,
     pub counters: Signal<Vec<FaceCounter>>,
@@ -377,6 +378,7 @@ pub fn App() -> Element {
     let status: Signal<Option<ForwarderStatus>> = use_signal(|| None);
     let faces: Signal<Vec<FaceInfo>> = use_signal(Vec::new);
     let routes: Signal<Vec<FibEntry>> = use_signal(Vec::new);
+    let rib_entries: Signal<Vec<RibEntryInfo>> = use_signal(Vec::new);
     let cs: Signal<Option<CsInfo>> = use_signal(|| None);
     let strategies: Signal<Vec<StrategyEntry>> = use_signal(Vec::new);
     let counters: Signal<Vec<FaceCounter>> = use_signal(Vec::new);
@@ -583,6 +585,7 @@ pub fn App() -> Element {
                 status,
                 faces,
                 routes,
+                rib_entries,
                 cs,
                 strategies,
                 counters,
@@ -618,7 +621,7 @@ pub fn App() -> Element {
             'session: loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        if let Err(e) = poll_all(&client, status, faces, routes, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await {
+                        if let Err(e) = poll_all(&client, status, faces, routes, rib_entries, cs, strategies, counters, measurements, config_toml, throughput, prev_counters, neighbors, security_keys, security_anchors, ca_info, schema_rules, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await {
                             conn_state.set(ConnState::Disconnected);
                             error_msg.set(Some(e));
                             break 'session;
@@ -628,7 +631,7 @@ pub fn App() -> Element {
                         if matches!(cmd_msg, DashCmd::Reconnect) {
                             break 'session;
                         }
-                        run_cmd(cmd_msg, &client, status, faces, routes, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, schema_rules, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await;
+                        run_cmd(cmd_msg, &client, status, faces, routes, rib_entries, cs, strategies, counters, measurements, error_msg, config_toml, throughput, prev_counters, session_log, recording, neighbors, security_keys, security_anchors, ca_info, schema_rules, yubikey_status, cs_hit_history, face_throughput, face_prev_ctr, discovery_status, dvr_status, identity_name, identity_is_ephemeral, identity_pib_path).await;
                     }
                 }
             }
@@ -1134,6 +1137,7 @@ pub fn App() -> Element {
         status,
         faces,
         routes,
+        rib_entries,
         cs,
         strategies,
         counters,
@@ -1470,6 +1474,7 @@ async fn poll_all(
     mut status: Signal<Option<ForwarderStatus>>,
     mut faces: Signal<Vec<FaceInfo>>,
     mut routes: Signal<Vec<FibEntry>>,
+    mut rib_entries: Signal<Vec<RibEntryInfo>>,
     mut cs: Signal<Option<CsInfo>>,
     mut strategies: Signal<Vec<StrategyEntry>>,
     mut counters: Signal<Vec<FaceCounter>>,
@@ -1495,13 +1500,32 @@ async fn poll_all(
         Ok(r) => status.set(Some(ForwarderStatus::parse(&r.status_text))),
         Err(e) => return Err(e.to_string()),
     }
+    // face_list returns FaceStatus which includes traffic counters — derive
+    // FaceCounter from it so we don't need a separate face_counters() call.
     match client.face_list().await {
-        Ok(faces_data) => faces.set(faces_data.into_iter().map(FaceInfo::from).collect()),
+        Ok(faces_data) => {
+            let face_infos: Vec<FaceInfo> = faces_data.iter().map(|fs| FaceInfo::from(fs.clone())).collect();
+            let derived_counters: Vec<FaceCounter> = face_infos.iter().map(|f| FaceCounter {
+                face_id: f.face_id,
+                in_interests: f.n_in_interests,
+                in_data: f.n_in_data,
+                out_interests: f.n_out_interests,
+                out_data: f.n_out_data,
+                in_bytes: f.n_in_bytes,
+                out_bytes: f.n_out_bytes,
+            }).collect();
+            faces.set(face_infos);
+            counters.set(derived_counters);
+        }
         Err(e) => return Err(e.to_string()),
     }
     match client.route_list().await {
         Ok(fib_data) => routes.set(fib_data.into_iter().map(FibEntry::from).collect()),
         Err(e) => return Err(e.to_string()),
+    }
+    // RIB — best-effort (older routers may not support it).
+    if let Ok(rib_data) = client.rib_list().await {
+        rib_entries.set(rib_data.into_iter().map(RibEntryInfo::from).collect());
     }
     match client.cs_info().await {
         Ok(r) => cs.set(CsInfo::parse(&r.status_text)),
@@ -1513,10 +1537,7 @@ async fn poll_all(
         }
         Err(e) => return Err(e.to_string()),
     }
-    // Phase 2 endpoints — best-effort: ignore errors so older routers still work.
-    if let Ok(r) = client.face_counters().await {
-        counters.set(FaceCounter::parse_list(&r.status_text));
-    }
+    // Best-effort endpoints — ignore errors so older routers still work.
     if let Ok(r) = client.measurements_list().await {
         measurements.set(MeasurementEntry::parse_list(&r.status_text));
     }
@@ -1765,6 +1786,7 @@ async fn run_cmd(
     status: Signal<Option<ForwarderStatus>>,
     faces: Signal<Vec<FaceInfo>>,
     routes: Signal<Vec<FibEntry>>,
+    rib_entries: Signal<Vec<RibEntryInfo>>,
     cs: Signal<Option<CsInfo>>,
     strategies: Signal<Vec<StrategyEntry>>,
     counters: Signal<Vec<FaceCounter>>,
@@ -1917,6 +1939,7 @@ async fn run_cmd(
                         status,
                         faces,
                         routes,
+                        rib_entries,
                         cs,
                         strategies,
                         counters,
@@ -2049,6 +2072,7 @@ async fn run_cmd(
                 status,
                 faces,
                 routes,
+                rib_entries,
                 cs,
                 strategies,
                 counters,

@@ -569,84 +569,252 @@ fn expand_tilde(path: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(path)
 }
 
+// ─── Output helpers ──────────────────────────────────────────────────────────
+
+fn face_kind(uri: &str) -> &'static str {
+    if uri.starts_with("udp4://") || uri.starts_with("udp6://") || uri.starts_with("udp://") {
+        "UDP"
+    } else if uri.starts_with("tcp4://") || uri.starts_with("tcp6://") || uri.starts_with("tcp://") {
+        "TCP"
+    } else if uri.starts_with("ws://") || uri.starts_with("wss://") {
+        "WS"
+    } else if uri.starts_with("ether://") {
+        "Ether"
+    } else if uri.starts_with("shm://") {
+        "SHM"
+    } else if uri.starts_with("unix://") {
+        "Unix"
+    } else if uri.starts_with("null://") {
+        "Null"
+    } else {
+        "?"
+    }
+}
+
+fn link_type_str(v: u64) -> &'static str {
+    match v {
+        0 => "point-to-point",
+        1 => "multi-access",
+        254 => "ad-hoc",
+        _ => "?",
+    }
+}
+
+fn origin_str(v: u64) -> String {
+    match v {
+        0 => "app".to_string(),
+        64 => "autoreg".to_string(),
+        65 => "client".to_string(),
+        66 => "autoconf".to_string(),
+        127 => "dvr".to_string(),
+        128 => "nlsr".to_string(),
+        129 => "prefix-ann".to_string(),
+        255 => "static".to_string(),
+        n => n.to_string(),
+    }
+}
+
+fn route_flags_str(flags: u64) -> String {
+    let mut parts = Vec::new();
+    if flags & 0x01 != 0 {
+        parts.push("child-inherit");
+    }
+    if flags & 0x02 != 0 {
+        parts.push("capture");
+    }
+    if parts.is_empty() {
+        "\u{2014}".to_string()
+    } else {
+        parts.join(",")
+    }
+}
+
+fn fmt_bytes(n: u64) -> String {
+    if n < 1024 {
+        format!("{n} B")
+    } else if n < 1_048_576 {
+        format!("{:.1} KiB", n as f64 / 1024.0)
+    } else if n < 1_073_741_824 {
+        format!("{:.1} MiB", n as f64 / 1_048_576.0)
+    } else {
+        format!("{:.2} GiB", n as f64 / 1_073_741_824.0)
+    }
+}
+
 // ─── Output ──────────────────────────────────────────────────────────────────
 
 fn print_face_list(faces: &[ndn_config::FaceStatus]) {
-    for f in faces {
+    for (i, f) in faces.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        // Determine the kind label from whichever URI is non-empty.
+        let kind = if !f.uri.is_empty() {
+            face_kind(&f.uri)
+        } else {
+            face_kind(&f.local_uri)
+        };
+        // First line: faceid, kind, persistency, scope, link-type, optional mtu.
+        let mtu_suffix = if let Some(mtu) = f.mtu {
+            format!("  mtu={mtu}")
+        } else {
+            String::new()
+        };
         println!(
-            "faceid={} remote={} local={} persistency={} scope={}",
+            "faceid={}  {}  {}  {}  {}{}",
             f.face_id,
-            f.uri,
-            f.local_uri,
+            kind,
             f.persistency_str(),
             f.scope_str(),
+            link_type_str(f.link_type),
+            mtu_suffix,
+        );
+        // Remote URI line (only when non-empty).
+        if !f.uri.is_empty() {
+            println!("  remote: {}", f.uri);
+        }
+        // Local URI line (only when non-empty).
+        if !f.local_uri.is_empty() {
+            println!("  local:  {}", f.local_uri);
+        }
+        // Counter lines.
+        println!(
+            "  in:  interests={}  data={}  nacks={}  bytes={}",
+            f.n_in_interests,
+            f.n_in_data,
+            f.n_in_nacks,
+            fmt_bytes(f.n_in_bytes),
+        );
+        println!(
+            "  out: interests={}  data={}  nacks={}  bytes={}",
+            f.n_out_interests,
+            f.n_out_data,
+            f.n_out_nacks,
+            fmt_bytes(f.n_out_bytes),
         );
     }
 }
 
 fn print_fib_list(entries: &[ndn_config::FibEntry]) {
+    // Compute column width for the prefix column.
+    let prefix_w = entries
+        .iter()
+        .flat_map(|e| {
+            let p = e.name.to_string();
+            std::iter::repeat_n(p.len(), e.nexthops.len().max(1))
+        })
+        .max()
+        .unwrap_or(0)
+        .max(6);
+
+    println!(
+        "{:<prefix_w$}  {:>6}  {:>6}",
+        "Prefix", "FaceID", "Cost"
+    );
+    println!("{}", "\u{2500}".repeat(prefix_w + 16));
+
     for entry in entries {
         let prefix = entry.name.to_string();
         for nh in &entry.nexthops {
-            println!("{prefix} faceid={} cost={}", nh.face_id, nh.cost);
+            println!(
+                "{:<prefix_w$}  {:>6}  {:>6}",
+                prefix, nh.face_id, nh.cost
+            );
         }
     }
 }
 
 fn print_rib_list(entries: &[ndn_config::RibEntry]) {
+    // Compute column width for the prefix column.
+    let prefix_w = entries
+        .iter()
+        .flat_map(|e| {
+            let p = e.name.to_string();
+            std::iter::repeat_n(p.len(), e.routes.len().max(1))
+        })
+        .max()
+        .unwrap_or(0)
+        .max(6);
+
+    println!(
+        "{:<prefix_w$}  {:>6}  {:>8}  {:>6}  Flags",
+        "Prefix", "FaceID", "Origin", "Cost"
+    );
+    println!("{}", "\u{2500}".repeat(prefix_w + 36));
+
     for entry in entries {
         let prefix = entry.name.to_string();
         for route in &entry.routes {
+            let origin = origin_str(route.origin);
+            let flags = route_flags_str(route.flags);
+            let expiry = if let Some(ep) = route.expiration_period {
+                format!("  expiry={}s", ep / 1000)
+            } else {
+                String::new()
+            };
             println!(
-                "{prefix} faceid={} origin={} cost={} flags={}",
-                route.face_id, route.origin, route.cost, route.flags,
+                "{:<prefix_w$}  {:>6}  {:>8}  {:>6}  {}{}",
+                prefix, route.face_id, origin, route.cost, flags, expiry,
             );
         }
     }
 }
 
 fn print_strategy_list(entries: &[ndn_config::StrategyChoice]) {
+    // Compute column width for the prefix column.
+    let prefix_w = entries
+        .iter()
+        .map(|e| e.name.to_string().len())
+        .max()
+        .unwrap_or(0)
+        .max(6);
+
+    println!("{:<prefix_w$}  Strategy", "Prefix");
+    println!("{}", "\u{2500}".repeat(prefix_w + 2 + 32));
+
     for entry in entries {
-        println!("{} strategy={}", entry.name, entry.strategy);
+        let prefix = entry.name.to_string();
+        println!("{:<prefix_w$}  {}", prefix, entry.strategy);
     }
 }
 
 fn print_params(params: &ndn_config::ControlParameters) {
-    println!("200 OK");
+    println!("\u{2713} 200 OK");
     if let Some(ref name) = params.name {
-        println!("  Name:    {}", name);
+        println!("  name:      {name}");
     }
     if let Some(id) = params.face_id {
-        println!("  FaceId:  {id}");
+        println!("  face-id:   {id}");
     }
     if let Some(ref uri) = params.uri {
-        println!("  Uri:     {uri}");
+        println!("  uri:       {uri}");
     }
     if let Some(ref local_uri) = params.local_uri {
-        println!("  LocalUri: {local_uri}");
+        println!("  local-uri: {local_uri}");
     }
     if let Some(cost) = params.cost {
-        println!("  Cost:    {cost}");
+        println!("  cost:      {cost}");
     }
     if let Some(origin) = params.origin {
-        println!("  Origin:  {origin}");
+        println!("  origin:    {} ({origin})", origin_str(origin));
     }
     if let Some(flags) = params.flags {
-        println!("  Flags:   {flags:#x}");
+        println!("  flags:     {} ({flags:#x})", route_flags_str(flags));
     }
     if let Some(ref strategy) = params.strategy {
-        println!("  Strategy: {}", strategy);
+        println!("  strategy:  {strategy}");
     }
     if let Some(capacity) = params.capacity {
-        println!("  Capacity: {capacity}");
+        println!("  capacity:  {}", fmt_bytes(capacity));
     }
     if let Some(count) = params.count {
-        println!("  Count:   {count}");
+        println!("  count:     {count}");
     }
 }
 
 fn print_control_response(resp: &ControlResponse) {
-    println!("{} {}", resp.status_code, resp.status_text);
+    let symbol = if resp.is_ok() { "\u{2713}" } else { "\u{2717}" };
+    println!("{symbol} {} {}", resp.status_code, resp.status_text);
     if let Some(ref body) = resp.body {
         print_params(body);
     }

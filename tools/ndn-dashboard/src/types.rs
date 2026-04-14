@@ -203,6 +203,19 @@ pub struct FaceInfo {
     pub local_uri: Option<String>,
     pub persistency: String,
     pub kind: Option<String>,
+    // NFD TLV fields (populated from FaceStatus dataset).
+    pub face_scope: u64,
+    pub link_type: u64,
+    pub mtu: Option<u64>,
+    // Traffic counters (from FaceStatus — no separate faces/counters call needed).
+    pub n_in_interests: u64,
+    pub n_out_interests: u64,
+    pub n_in_data: u64,
+    pub n_out_data: u64,
+    pub n_in_bytes: u64,
+    pub n_out_bytes: u64,
+    pub n_in_nacks: u64,
+    pub n_out_nacks: u64,
 }
 
 impl FaceInfo {
@@ -227,6 +240,17 @@ impl FaceInfo {
                 local_uri: None,
                 persistency: "Unknown".into(),
                 kind: None,
+                face_scope: 0,
+                link_type: 0,
+                mtu: None,
+                n_in_interests: 0,
+                n_out_interests: 0,
+                n_in_data: 0,
+                n_out_data: 0,
+                n_in_bytes: 0,
+                n_out_bytes: 0,
+                n_in_nacks: 0,
+                n_out_nacks: 0,
             };
             for token in line.split_whitespace() {
                 if let Some((k, v)) = token.split_once('=') {
@@ -279,7 +303,7 @@ impl FaceInfo {
     }
 }
 
-// ── FIB routes ──────────────────────────────────────────────────────────────
+// ── FIB / RIB routes ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct NextHop {
@@ -428,10 +452,14 @@ pub struct FaceCounter {
 impl FaceCounter {
     /// Parse from `faces/counters` response text.
     ///
+    /// Retained for compatibility with older routers that don't return counter data
+    /// in `FaceStatus`; the main path now derives counters from `face_list()`.
+    ///
     /// Format per line:
     /// ```text
     ///   faceid=1 in_interests=10 in_data=5 out_interests=2 out_data=3 in_bytes=1024 out_bytes=512
     /// ```
+    #[allow(dead_code)]
     pub fn parse_list(text: &str) -> Vec<Self> {
         let mut out = Vec::new();
         for line in text.lines() {
@@ -1026,13 +1054,20 @@ impl From<ndn_config::FaceStatus> for FaceInfo {
         FaceInfo {
             face_id: fs.face_id,
             remote_uri: if fs.uri.is_empty() { None } else { Some(fs.uri) },
-            local_uri: if fs.local_uri.is_empty() {
-                None
-            } else {
-                Some(fs.local_uri)
-            },
+            local_uri: if fs.local_uri.is_empty() { None } else { Some(fs.local_uri) },
             persistency,
             kind: None,
+            face_scope: fs.face_scope,
+            link_type: fs.link_type,
+            mtu: fs.mtu,
+            n_in_interests: fs.n_in_interests,
+            n_out_interests: fs.n_out_interests,
+            n_in_data: fs.n_in_data,
+            n_out_data: fs.n_out_data,
+            n_in_bytes: fs.n_in_bytes,
+            n_out_bytes: fs.n_out_bytes,
+            n_in_nacks: fs.n_in_nacks,
+            n_out_nacks: fs.n_out_nacks,
         }
     }
 }
@@ -1058,6 +1093,72 @@ impl From<ndn_config::StrategyChoice> for StrategyEntry {
         StrategyEntry {
             prefix: sc.name.to_string(),
             strategy: sc.strategy.to_string(),
+        }
+    }
+}
+
+// ── RIB (Routing Information Base) ──────────────────────────────────────────
+
+/// A single route entry inside a RIB entry (one per nexthop / origin).
+#[derive(Debug, Clone)]
+pub struct RibRoute {
+    pub face_id: u64,
+    /// Origin code: 0=app, 65=client, 128=nlsr, 255=static.
+    pub origin: u64,
+    pub cost: u64,
+    /// Route flags bitmask: 0x1=child-inherit, 0x2=capture.
+    pub flags: u64,
+    /// Expiration in milliseconds, if set.
+    pub expiration_period: Option<u64>,
+}
+
+impl RibRoute {
+    #[allow(dead_code)] // called inside rsx! closures; not visible to dead_code lint
+    pub fn origin_label(&self) -> String {
+        match self.origin {
+            0 => "app".to_string(),
+            64 => "autoreg".to_string(),
+            65 => "client".to_string(),
+            66 => "autoconf".to_string(),
+            127 => "dvr".to_string(),
+            128 => "nlsr".to_string(),
+            129 => "prefix-ann".to_string(),
+            255 => "static".to_string(),
+            n => n.to_string(),
+        }
+    }
+
+    #[allow(dead_code)] // called inside rsx! closures; not visible to dead_code lint
+    pub fn flags_label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.flags & 0x01 != 0 { parts.push("child-inherit"); }
+        if self.flags & 0x02 != 0 { parts.push("capture"); }
+        if parts.is_empty() { "—".to_string() } else { parts.join(",") }
+    }
+}
+
+/// A RIB entry — one name prefix with one or more routes.
+#[derive(Debug, Clone)]
+pub struct RibEntryInfo {
+    pub prefix: String,
+    pub routes: Vec<RibRoute>,
+}
+
+impl From<ndn_config::RibEntry> for RibEntryInfo {
+    fn from(re: ndn_config::RibEntry) -> Self {
+        RibEntryInfo {
+            prefix: re.name.to_string(),
+            routes: re
+                .routes
+                .into_iter()
+                .map(|r| RibRoute {
+                    face_id: r.face_id,
+                    origin: r.origin,
+                    cost: r.cost,
+                    flags: r.flags,
+                    expiration_period: r.expiration_period,
+                })
+                .collect(),
         }
     }
 }
