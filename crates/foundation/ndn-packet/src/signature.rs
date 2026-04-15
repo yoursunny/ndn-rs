@@ -45,12 +45,21 @@ impl SignatureType {
 
 /// SignatureInfo TLV — algorithm and optional key locator.
 ///
+/// The `KeyLocator` TLV may carry either a `Name` (0x07) referencing the
+/// signer's certificate, or a `KeyDigest` (0x1d) carrying a SHA-256 of the
+/// public key. Both forms are decoded; the unused field is `None`. At most
+/// one of `key_locator` or `key_digest` is populated for a given packet.
+///
 /// Also decodes the anti-replay fields from InterestSignatureInfo:
 /// SignatureNonce (0x26), SignatureTime (0x28), SignatureSeqNum (0x2A).
 #[derive(Clone, Debug)]
 pub struct SignatureInfo {
     pub sig_type: SignatureType,
+    /// `KeyLocator` → `Name` form: the signer's certificate name.
     pub key_locator: Option<Arc<Name>>,
+    /// `KeyLocator` → `KeyDigest` form: a hash of the signer's public key.
+    /// Implementations resolve this against a local certificate cache.
+    pub key_digest: Option<Bytes>,
     /// Random nonce for anti-replay (NDN Packet Format v0.3 §5.4).
     pub sig_nonce: Option<Bytes>,
     /// Timestamp in milliseconds since Unix epoch (NDN Packet Format v0.3 §5.4).
@@ -64,6 +73,7 @@ impl SignatureInfo {
         let mut reader = TlvReader::new(value);
         let mut sig_type = SignatureType::Other(0);
         let mut key_locator = None;
+        let mut key_digest = None;
         let mut sig_nonce = None;
         let mut sig_time = None;
         let mut sig_seq_num = None;
@@ -79,12 +89,16 @@ impl SignatureInfo {
                     sig_type = SignatureType::from_code(code);
                 }
                 t if t == tlv_type::KEY_LOCATOR => {
+                    // KeyLocator carries exactly one of Name (0x07) or
+                    // KeyDigest (0x1d). NDN Packet Format §3.2.5.
                     let mut inner = TlvReader::new(val);
                     if !inner.is_empty() {
                         let (kt, kv) = inner.read_tlv()?;
                         if kt == tlv_type::NAME {
                             let name = Name::decode(kv)?;
                             key_locator = Some(Arc::new(name));
+                        } else if kt == tlv_type::KEY_DIGEST {
+                            key_digest = Some(kv);
                         }
                     }
                 }
@@ -111,6 +125,7 @@ impl SignatureInfo {
         Ok(Self {
             sig_type,
             key_locator,
+            key_digest,
             sig_nonce,
             sig_time,
             sig_seq_num,
@@ -188,6 +203,24 @@ mod tests {
         assert_eq!(kl.len(), 4);
         assert_eq!(kl.components()[0].value.as_ref(), b"sensor");
         assert_eq!(kl.components()[3].value.as_ref(), b"abc");
+        assert!(si.key_digest.is_none(), "Name-form locator must not populate key_digest");
+    }
+
+    #[test]
+    fn decode_with_key_digest_locator() {
+        // KeyLocator → KeyDigest form: the 32-byte SHA-256 of the public key.
+        let digest = [0xABu8; 32];
+        let mut w = TlvWriter::new();
+        w.write_tlv(crate::tlv_type::SIGNATURE_TYPE, &[5]);
+        w.write_nested(crate::tlv_type::KEY_LOCATOR, |w| {
+            w.write_tlv(crate::tlv_type::KEY_DIGEST, &digest);
+        });
+        let si = SignatureInfo::decode(w.finish()).unwrap();
+        assert_eq!(si.sig_type, SignatureType::SignatureEd25519);
+        assert!(si.key_locator.is_none(), "KeyDigest form must not populate key_locator");
+        let kd = si.key_digest.expect("key_digest present");
+        assert_eq!(kd.len(), 32);
+        assert!(kd.iter().all(|&b| b == 0xAB));
     }
 
     #[test]
