@@ -134,10 +134,21 @@ fn bench_signing(c: &mut Criterion) {
     }
 
     // SHA256 plain digest — DigestSha256 (type 0). No key material.
-    // Uses ring::digest directly since the NDN spec's DigestSha256 is just
-    // a raw SHA256 over the signed region.
+    //
+    // Two backends are benched in parallel so the SHA extension cost can be
+    // isolated on the same CI run without rebooting or masking CPU features:
+    //
+    // * `signing/sha256-digest-hw` — `ring::digest::SHA256`, which performs
+    //   runtime CPUID dispatch and uses Intel SHA-NI / ARMv8 SHA crypto
+    //   extensions when present. This is what the rest of ndn-security uses.
+    // * `signing/sha256-digest-sw` — `sha2::Sha256` from rustcrypto with
+    //   `default-features = false` (no asm, no SIMD), forcing the pure-Rust
+    //   software path. CPU extensions are not consulted.
+    //
+    // The ratio of (hw / sw) on a given CPU is the practical SHA-NI speedup.
+    // A negligible ratio (< 1.2x) means the runner's CPU lacks the extension.
     {
-        let mut group = c.benchmark_group("signing/sha256-digest");
+        let mut group = c.benchmark_group("signing/sha256-digest-hw");
         for (label, region) in &regions {
             group.throughput(Throughput::Bytes(region.len() as u64));
             group.bench_with_input(BenchmarkId::new("sign_sync", label), region, |b, r| {
@@ -145,6 +156,23 @@ fn bench_signing(c: &mut Criterion) {
                     let digest = ring::digest::digest(&ring::digest::SHA256, r);
                     debug_assert_eq!(digest.as_ref().len(), 32);
                     digest
+                });
+            });
+        }
+        group.finish();
+    }
+    {
+        use sha2::{Digest, Sha256};
+        let mut group = c.benchmark_group("signing/sha256-digest-sw");
+        for (label, region) in &regions {
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(BenchmarkId::new("sign_sync", label), region, |b, r| {
+                b.iter(|| {
+                    let mut h = Sha256::new();
+                    h.update(r);
+                    let out = h.finalize();
+                    debug_assert_eq!(out.len(), 32);
+                    out
                 });
             });
         }
@@ -234,9 +262,13 @@ fn bench_verification(c: &mut Criterion) {
         group.finish();
     }
 
-    // SHA256 plain-digest verification — re-hash and compare.
+    // SHA256 plain-digest verification — re-hash and compare. Hardware
+    // (ring with SHA-NI / ARMv8 crypto when present) and software (rustcrypto
+    // sha2 with default-features off — pure Rust, no asm) backends are
+    // benched in parallel; see the matching `signing/sha256-digest-{hw,sw}`
+    // groups for the rationale.
     {
-        let mut group = c.benchmark_group("verification/sha256-digest");
+        let mut group = c.benchmark_group("verification/sha256-digest-hw");
         for (label, region, _, _, _) in &presigned {
             let expected = ring::digest::digest(&ring::digest::SHA256, region);
             let expected_bytes: Bytes = Bytes::copy_from_slice(expected.as_ref());
@@ -248,6 +280,31 @@ fn bench_verification(c: &mut Criterion) {
                     b.iter(|| {
                         let got = ring::digest::digest(&ring::digest::SHA256, r);
                         debug_assert_eq!(got.as_ref(), s);
+                        got
+                    });
+                },
+            );
+        }
+        group.finish();
+    }
+    {
+        use sha2::{Digest, Sha256};
+        let mut group = c.benchmark_group("verification/sha256-digest-sw");
+        for (label, region, _, _, _) in &presigned {
+            let mut h = Sha256::new();
+            h.update(region);
+            let expected = h.finalize();
+            let expected_bytes: Bytes = Bytes::copy_from_slice(expected.as_slice());
+            group.throughput(Throughput::Bytes(region.len() as u64));
+            group.bench_with_input(
+                BenchmarkId::new("verify", label),
+                &(region.as_slice(), expected_bytes.as_ref()),
+                |b, &(r, s)| {
+                    b.iter(|| {
+                        let mut h = Sha256::new();
+                        h.update(r);
+                        let got = h.finalize();
+                        debug_assert_eq!(got.as_slice(), s);
                         got
                     });
                 },
