@@ -31,6 +31,8 @@ pub mod profile;
 pub mod safe_data;
 pub mod sign_ext;
 pub mod signer;
+#[cfg(feature = "sqlite-pib")]
+pub mod sqlite_pib;
 pub mod trust_schema;
 pub mod validator;
 pub mod verifier;

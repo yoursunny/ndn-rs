@@ -12,6 +12,10 @@ bytes         = { workspace = true, features = ["std"] }
 dashmap       = { workspace = true }
 thiserror     = { workspace = true }
 ring          = { workspace = true }
+# SQLite for the ndn-cxx-compatible pib-sqlite3 backend. `bundled` builds
+# SQLite from source (~5 s) so we don't depend on a system library, which
+# matters for cross-compilation to Android, iOS, musl, and bare-metal.
+rusqlite      = { version = "0.32", features = ["bundled"], optional = true }
 ed25519-dalek = { workspace = true }
 blake3        = { workspace = true }
 # DID support (formerly ndn-did)
@@ -27,7 +31,13 @@ tokio         = { workspace = true, features = ["sync", "time", "rt"] }
 yubikey = { version = "0.8", optional = true }
 
 [features]
+default     = ["sqlite-pib"]
 yubikey-piv = ["dep:yubikey"]
+# SQLite-backed PIB compatible with ndn-cxx pib-sqlite3 (default-on so
+# existing builds get the new backend without flag changes). Pulls in
+# rusqlite with the `bundled` feature so SQLite is built from source —
+# no system libsqlite3 required, identical behaviour on every target.
+sqlite-pib  = ["dep:rusqlite"]
 
 [dev-dependencies]
 tokio      = { workspace = true, features = ["rt", "macros", "sync", "time"] }
