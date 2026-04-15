@@ -29,6 +29,7 @@ pub mod lvs;
 pub mod manager;
 pub mod pib;
 pub mod profile;
+pub mod safe_bag;
 pub mod safe_data;
 pub mod sign_ext;
 pub mod signer;

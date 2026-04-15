@@ -335,6 +335,73 @@ impl FileTpm {
             TpmKeyKind::Ed25519 => public_key_ed25519(&der),
         }
     }
+
+    // ── SafeBag import / export ──────────────────────────────────────────
+
+    /// Export `key_name` as a [`crate::safe_bag::SafeBag`] for transfer
+    /// to another machine. Bundles the password-encrypted private key
+    /// with the certificate the caller looked up from the PIB.
+    ///
+    /// The on-disk private key is converted to an unencrypted PKCS#8
+    /// `PrivateKeyInfo` first (RSA goes PKCS#1 → PKCS#8, ECDSA goes
+    /// SEC1 → PKCS#8, Ed25519 is already PKCS#8 on disk) and then
+    /// encrypted via PBES2 + PBKDF2-HMAC-SHA256 + AES-256-CBC inside
+    /// the rustcrypto `pkcs8` crate's `encrypt` method. The resulting
+    /// `EncryptedPrivateKeyInfo` is wire-compatible with what
+    /// `ndnsec export` and OpenSSL `i2d_PKCS8PrivateKey_bio` produce.
+    ///
+    /// **Caveat:** Ed25519 SafeBags roundtrip ndn-rs ↔ ndn-rs but not
+    /// to ndn-cxx, because ndn-cxx `tpm-file` has no Ed25519 path
+    /// regardless of how the bytes arrive on disk
+    /// (`back-end-file.cpp:130-139` rejects Ed25519 at the algorithm
+    /// switch). RSA and ECDSA-P256 SafeBags roundtrip with `ndnsec`
+    /// in both directions.
+    pub fn export_to_safebag(
+        &self,
+        key_name: &Name,
+        certificate: Bytes,
+        password: &[u8],
+    ) -> Result<crate::safe_bag::SafeBag, crate::safe_bag::SafeBagError> {
+        let (kind, der) = self.load_raw(key_name)?;
+        let pkcs8_der: Vec<u8> = match kind {
+            TpmKeyKind::Rsa => crate::safe_bag::rsa_pkcs1_to_pkcs8(&der)?,
+            TpmKeyKind::EcdsaP256 => crate::safe_bag::ec_sec1_to_pkcs8(&der)?,
+            TpmKeyKind::Ed25519 => der, // already PKCS#8 on disk
+        };
+        crate::safe_bag::SafeBag::encrypt(certificate, &pkcs8_der, password)
+    }
+
+    /// Import a [`crate::safe_bag::SafeBag`] as a stored private key
+    /// under `key_name`. Decrypts the embedded `EncryptedPrivateKeyInfo`
+    /// with `password`, dispatches on the PKCS#8 algorithm OID to
+    /// pick the on-disk format, converts back to the FileTpm form
+    /// (PKCS#1 / SEC1 / PKCS#8), and writes it.
+    ///
+    /// Returns the certificate Data wire bytes from the SafeBag so
+    /// the caller can insert them into their PIB. FileTpm itself
+    /// does not store certs — the certificate side of the bag is
+    /// the PIB's responsibility.
+    ///
+    /// `key_name` is an explicit argument because the SafeBag does
+    /// not record where the key should land in any particular PIB —
+    /// the caller is expected to extract it from the certificate's
+    /// Name (typically a prefix of the cert name) and pass it in.
+    pub fn import_from_safebag(
+        &self,
+        safebag: &crate::safe_bag::SafeBag,
+        key_name: &Name,
+        password: &[u8],
+    ) -> Result<Bytes, crate::safe_bag::SafeBagError> {
+        let pkcs8_der = safebag.decrypt_key(password)?;
+        let kind = crate::safe_bag::detect_pkcs8_algorithm(&pkcs8_der)?;
+        let on_disk: Vec<u8> = match kind {
+            TpmKeyKind::Rsa => crate::safe_bag::rsa_pkcs8_to_pkcs1(&pkcs8_der)?,
+            TpmKeyKind::EcdsaP256 => crate::safe_bag::ec_pkcs8_to_sec1(&pkcs8_der)?,
+            TpmKeyKind::Ed25519 => pkcs8_der, // on-disk form IS pkcs8
+        };
+        self.save_raw(key_name, kind, &on_disk)?;
+        Ok(safebag.certificate.clone())
+    }
 }
 
 // ─── Algorithm autodetection (RSA vs ECDSA from DER) ────────────────────────
@@ -444,7 +511,7 @@ fn public_key_rsa(pkcs1_der: &[u8]) -> Result<Vec<u8>, FileTpmError> {
 ///
 /// We only need the privateKey OCTET STRING to construct an ECDSA
 /// signing key; the rest of the envelope is intentionally ignored.
-fn parse_sec1_p256_priv_scalar(sec1: &[u8]) -> Result<[u8; 32], FileTpmError> {
+pub(crate) fn parse_sec1_p256_priv_scalar(sec1: &[u8]) -> Result<[u8; 32], FileTpmError> {
     if sec1.len() < 9 || sec1[0] != 0x30 {
         return Err(FileTpmError::InvalidKey("not a SEC1 SEQUENCE".into()));
     }
@@ -755,5 +822,152 @@ mod tests {
     /// `OsRng` satisfies the `CryptoRngCore` bound both crates need.
     fn rand_core_compat() -> rsa::rand_core::OsRng {
         rsa::rand_core::OsRng
+    }
+
+    // ── SafeBag roundtrip tests ───────────────────────────────────────────
+    //
+    // For each supported algorithm, generate or import a key into TPM
+    // A, export to a SafeBag, decode the SafeBag wire bytes, import
+    // into a fresh TPM B, and verify the imported key produces a
+    // signature that the original key's public key can verify. This
+    // exercises the full path:
+    //
+    //   on-disk → PKCS#8 → encrypt → SafeBag TLV → decode → decrypt
+    //   → PKCS#8 → on-disk → load → sign
+    //
+    // If any link in that chain has a format error, the verify at the
+    // end fails. A wrong password also fails decryption (separately
+    // tested in safe_bag.rs).
+
+    fn fake_cert_bytes() -> Bytes {
+        // SafeBag treats the certificate as opaque; any well-formed
+        // Data TLV is fine for a roundtrip test.
+        use ndn_tlv::TlvWriter;
+        let mut w = TlvWriter::new();
+        w.write_tlv(0x06, b"placeholder cert body");
+        w.finish()
+    }
+
+    #[test]
+    fn safebag_ed25519_roundtrip() {
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        let tpm_a = FileTpm::open(dir_a.path()).unwrap();
+        let tpm_b = FileTpm::open(dir_b.path()).unwrap();
+        let kn = name(&["alice", "KEY", "k1"]);
+        let pw = b"transfer-password";
+
+        // Generate Ed25519 in tpm_a, export to SafeBag, transport
+        // through wire bytes, import into tpm_b.
+        tpm_a.generate_ed25519(&kn).unwrap();
+        let region = b"hello safe bag";
+        let sig_a = tpm_a.sign(&kn, region).unwrap();
+
+        let sb = tpm_a.export_to_safebag(&kn, fake_cert_bytes(), pw).unwrap();
+        let wire = sb.encode();
+        let sb2 = crate::safe_bag::SafeBag::decode(&wire).unwrap();
+        let cert_back = tpm_b.import_from_safebag(&sb2, &kn, pw).unwrap();
+        assert_eq!(cert_back, fake_cert_bytes());
+
+        // The imported key must produce identical signatures (Ed25519
+        // is deterministic, so byte-equality holds).
+        let sig_b = tpm_b.sign(&kn, region).unwrap();
+        assert_eq!(sig_a, sig_b, "imported Ed25519 must produce same sig");
+    }
+
+    #[test]
+    fn safebag_ecdsa_roundtrip() {
+        use p256_ecdsa::SecretKey;
+
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        let tpm_a = FileTpm::open(dir_a.path()).unwrap();
+        let tpm_b = FileTpm::open(dir_b.path()).unwrap();
+        let kn = name(&["bob", "KEY", "k1"]);
+        let pw = b"transfer-password";
+
+        // Generate an ECDSA key, save as SEC1 (FileTpm on-disk form).
+        let sk = SecretKey::random(&mut rand_core_compat());
+        let der = sk.to_sec1_der().unwrap();
+        tpm_a
+            .save_raw(&kn, TpmKeyKind::EcdsaP256, der.as_slice())
+            .unwrap();
+
+        // Export → wire → decode → import.
+        let sb = tpm_a.export_to_safebag(&kn, fake_cert_bytes(), pw).unwrap();
+        let wire = sb.encode();
+        let sb2 = crate::safe_bag::SafeBag::decode(&wire).unwrap();
+        tpm_b.import_from_safebag(&sb2, &kn, pw).unwrap();
+
+        // ECDSA is non-deterministic so signatures won't byte-match;
+        // verify both signatures against both public keys instead.
+        let region = b"ecdsa safe bag region";
+        let sig_b = tpm_b.sign(&kn, region).unwrap();
+
+        // Recover the public key from tpm_a (the original) and verify
+        // the imported tpm_b's signature against it. If the SafeBag
+        // chain corrupted the key in any way, this verify fails.
+        use p256_ecdsa::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+        use pkcs8::DecodePublicKey;
+        let pk_a_der = tpm_a.public_key(&kn).unwrap();
+        let vk_a = VerifyingKey::from_public_key_der(&pk_a_der).unwrap();
+        let sig_obj = Signature::from_der(&sig_b).unwrap();
+        vk_a.verify(region, &sig_obj)
+            .expect("imported ECDSA signature must verify against original public key");
+    }
+
+    #[test]
+    fn safebag_rsa_roundtrip() {
+        use pkcs1::EncodeRsaPrivateKey;
+        use rsa::RsaPrivateKey;
+
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        let tpm_a = FileTpm::open(dir_a.path()).unwrap();
+        let tpm_b = FileTpm::open(dir_b.path()).unwrap();
+        let kn = name(&["carol", "KEY", "k1"]);
+        let pw = b"transfer-password";
+
+        // 1024-bit key for test speed.
+        let mut rng = rand_core_compat();
+        let sk = RsaPrivateKey::new(&mut rng, 1024).unwrap();
+        let der = sk.to_pkcs1_der().unwrap();
+        tpm_a
+            .save_raw(&kn, TpmKeyKind::Rsa, der.as_bytes())
+            .unwrap();
+
+        let sb = tpm_a.export_to_safebag(&kn, fake_cert_bytes(), pw).unwrap();
+        let wire = sb.encode();
+        let sb2 = crate::safe_bag::SafeBag::decode(&wire).unwrap();
+        tpm_b.import_from_safebag(&sb2, &kn, pw).unwrap();
+
+        // RSA PKCS#1 v1.5 signing is deterministic — the imported key
+        // must produce byte-identical signatures.
+        let region = b"rsa safe bag region";
+        let sig_a = tpm_a.sign(&kn, region).unwrap();
+        let sig_b = tpm_b.sign(&kn, region).unwrap();
+        assert_eq!(
+            sig_a, sig_b,
+            "imported RSA must produce same deterministic sig"
+        );
+    }
+
+    #[test]
+    fn safebag_wrong_password_fails_import() {
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        let tpm_a = FileTpm::open(dir_a.path()).unwrap();
+        let tpm_b = FileTpm::open(dir_b.path()).unwrap();
+        let kn = name(&["alice", "KEY", "k1"]);
+
+        tpm_a.generate_ed25519(&kn).unwrap();
+        let sb = tpm_a
+            .export_to_safebag(&kn, fake_cert_bytes(), b"correct")
+            .unwrap();
+
+        match tpm_b.import_from_safebag(&sb, &kn, b"wrong") {
+            Err(crate::safe_bag::SafeBagError::Pkcs8(_)) => {}
+            other => panic!("expected Pkcs8 decrypt error, got {other:?}"),
+        }
     }
 }
