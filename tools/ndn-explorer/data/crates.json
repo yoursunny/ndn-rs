@@ -1,17 +1,24 @@
 {
   "generated": "2026-04-08",
   "layers": [
-    { "num": 4,   "id": "foundation", "label": "Foundation" },
-    { "num": 3,   "id": "faces",      "label": "Face Implementations" },
-    { "num": 2,   "id": "pipeline",   "label": "Pipeline, Strategy, Security" },
-    { "num": 1.5, "id": "identity",   "label": "Identity & PKI" },
-    { "num": 1,   "id": "engine",     "label": "Engine & Application" },
-    { "num": 0,   "id": "binaries",   "label": "Binaries" },
-    { "num": -1,  "id": "simulation", "label": "Simulation" },
-    { "num": -2,  "id": "research",   "label": "Research Extensions" },
-    { "num": -3,  "id": "embedded",   "label": "Embedded" },
-    { "num": -4,  "id": "bindings",   "label": "Language Bindings" },
-    { "num": -5,  "id": "examples",   "label": "Examples" }
+    { "num": 4,   "id": "foundation", "label": "Foundation",                   "zone": "core",       "zone_depth": 0 },
+    { "num": 3,   "id": "faces",      "label": "Face Implementations",         "zone": "core",       "zone_depth": 1 },
+    { "num": 2,   "id": "pipeline",   "label": "Pipeline, Strategy, Security", "zone": "core",       "zone_depth": 2 },
+    { "num": 1.5, "id": "identity",   "label": "Identity & PKI",               "zone": "core",       "zone_depth": 3 },
+    { "num": 1,   "id": "engine",     "label": "Engine & Application",         "zone": "core",       "zone_depth": 4 },
+    { "num": 0,   "id": "binaries",   "label": "Applications",                 "zone": "apps",       "zone_depth": 0 },
+    { "num": -1,  "id": "simulation", "label": "Simulation",                   "zone": "extensions", "zone_depth": 0 },
+    { "num": -2,  "id": "research",   "label": "Research Extensions",          "zone": "extensions", "zone_depth": 1 },
+    { "num": -3,  "id": "embedded",   "label": "Embedded",                     "zone": "targets",    "zone_depth": 0 },
+    { "num": -4,  "id": "bindings",   "label": "Language Bindings",            "zone": "targets",    "zone_depth": 1 },
+    { "num": -5,  "id": "examples",   "label": "Examples",                     "zone": "examples",   "zone_depth": 0 }
+  ],
+  "zones": [
+    { "id": "core",       "label": "Core",       "description": "Foundation through engine — the forwarding stack",     "order": 0 },
+    { "id": "apps",       "label": "Applications","description": "Standalone binaries built on the engine",             "order": 1 },
+    { "id": "extensions", "label": "Extensions",  "description": "Simulation, research, and experimental crates",       "order": 2 },
+    { "id": "targets",    "label": "Targets",     "description": "Platform-specific builds: embedded, language bindings","order": 3 },
+    { "id": "examples",   "label": "Examples",    "description": "Example crates demonstrating extension points",       "order": 4 }
   ],
   "crates": [
     {

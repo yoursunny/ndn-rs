@@ -1,4 +1,5 @@
 import { LayerMap } from './views/layer-map.js';
+import { ArchMap } from './views/arch-map.js';
 import { initWasm } from './wasm-types.js';
 import { CrateDetail } from './views/crate-detail.js';
 import { TypeDetail } from './views/type-detail.js';
@@ -34,8 +35,12 @@ class App {
   }
 
   async init() {
-    const resp = await fetch('data/crates.json');
-    this.data = await resp.json();
+    const [cratesResp, engineResp] = await Promise.all([
+      fetch('data/crates.json'),
+      fetch('data/engine.json'),
+    ]);
+    this.data = await cratesResp.json();
+    this.engineData = await engineResp.json();
 
     const containers = {};
     document.querySelectorAll('.view').forEach(el => {
@@ -44,6 +49,7 @@ class App {
 
     this.views = {
       'layer-map':      new LayerMap(containers['layer-map'], this),
+      'arch-map':       new ArchMap(containers['arch-map'], this),
       'crate-detail':   new CrateDetail(containers['crate-detail'], this),
       'type-detail':    new TypeDetail(containers['type-detail'], this),
       'dep-graph':      new DepGraph(containers['dep-graph'], this),

@@ -579,13 +579,32 @@ const STEPS = [
     action: { type: 'crate', target: 'ndn-strategy' },
   },
   {
+    title: '3D Architecture Map',
+    body: `The <strong>Architecture</strong> view is an interactive 3D visualization of the ndn-rs engine.
+      <br><br><strong>Galaxy View</strong> — concentric zone shells with crate nodes and dependency edges.
+      Click <em>ndn-engine</em> to zoom into the <strong>Engine Circuit Board</strong>.
+      <br><br><strong>Circuit Board</strong> — pipeline stages as IC chips, faces as edge connectors,
+      tables as memory chips, security as a verification subsystem. Copper traces carry
+      <code>PacketContext</code> between stages. Click <strong>Send Interest</strong> to watch a packet
+      flow through with live <code>Bytes</code> ref-count tracking and <code>PacketContext</code> field evolution.
+      <br><br>Toggle the <strong>Tasks</strong> overlay to see the Tokio task topology: face reader/sender
+      pairs, the pipeline runner, per-packet spawn fan-out, and background timer tasks.
+      <br><br>Click any chip and choose <strong>Deep Dive</strong> for a shader-graph style type map
+      showing traits, structs, and data flow edges.`,
+    spotlight: '.nav-btn[data-view="arch-map"]',
+    action: { type: 'view', target: 'arch-map', label: 'Open Architecture →' },
+  },
+  {
     title: 'NDN Security & Signing',
     body: `Every NDN Data packet is <strong>signed</strong> — not just transport-layer TLS, but
       content-layer cryptographic binding. The <em>signed region</em> covers Name + MetaInfo +
       Content + SignatureInfo; SignatureValue holds the result.
-      <br><br>Supported algorithms: <code>DigestSha256</code>, <code>ECDSA-P256</code>,
-      <code>HMAC-SHA256</code>. Keys are identified by NDN name (KeyLocator), enabling
-      a hierarchical <em>trust schema</em> rooted at a pre-installed trust anchor.`,
+      <br><br>Algorithms: <code>Ed25519</code>, <code>HMAC-SHA256</code>,
+      <code>BLAKE3</code> (keyed, type code 7), <code>DigestSha256</code>.
+      The <code>SafeData</code> typestate makes the compiler enforce that unverified data
+      cannot reach code expecting verified data.
+      <br><br>On the circuit board, the security subsystem shows <strong>KeyChain → Signers → Validator
+      → CertCache → SafeData</strong> with a DIP switch for <code>SecurityProfile</code> modes.`,
     spotlight: '.nav-btn[data-view="security"]',
     demo: demoSecurity,
     action: { type: 'view', target: 'security', label: 'Open Security View →' },
@@ -606,12 +625,13 @@ const STEPS = [
   {
     title: 'Explore!',
     body: `You've seen the highlights. Dive deeper:
-      <br>&bull; <strong>Layers</strong> — all 31 crates sorted by architectural layer
-      <br>&bull; <strong>Graph</strong> — interactive dependency graph with hover highlighting
-      <br>&bull; <strong>Pipeline</strong> — run scenarios through the Interest/Data pipeline with live stage state
+      <br>&bull; <strong>Layers</strong> — all crates grouped by zone (Core, Apps, Extensions, Targets, Examples)
+      <br>&bull; <strong>Architecture</strong> — 3D galaxy view → engine circuit board → type-level deep dive
+      <br>&bull; <strong>2D Graph</strong> — interactive dependency graph with hover highlighting
+      <br>&bull; <strong>Pipeline</strong> — run scenarios with live Bytes tracking and PacketContext evolution
       <br>&bull; <strong>Packets</strong> — TLV encoder and hex inspector
       <br>&bull; <strong>Topology</strong> — multi-node NDN network simulation
-      <br>&bull; <strong>Security</strong> — step-by-step signing and cert chain
+      <br>&bull; <strong>Security</strong> — step-by-step signing, verification, and cert chain
       <br>&bull; <strong>Search</strong> — find any crate or type (press <code>/</code>)`,
     action: { type: 'view', target: 'layer-map', label: 'Start Exploring →' },
   },

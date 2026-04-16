@@ -1,0 +1,750 @@
+{
+  "generated": "2026-04-16",
+  "pipeline": {
+    "interest_path": ["decode", "cs_lookup", "pit_check", "strategy"],
+    "data_path": ["decode", "validation", "pit_match", "cs_insert"],
+    "nack_path": ["decode", "nack_strategy"],
+    "stages": {
+      "decode": {
+        "chip_label": "TLV Decode",
+        "circuit_type": "ic_chip",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["raw_bytes", "face_id"],
+        "writes": ["name", "packet", "name_hashes"],
+        "short_circuits": [
+          { "action": "Drop", "reason": "ScopeViolation", "description": "/localhost packets from non-local faces are rejected" },
+          { "action": "Drop", "reason": "MalformedPacket", "description": "TLV parse failure — invalid wire format" },
+          { "action": "Drop", "reason": "FragmentCollect", "description": "Fragment received, buffered for reassembly — not an error" }
+        ],
+        "timescale": { "interest_4comp": "681 ns", "interest_8comp": "872 ns", "data_4comp": "595 ns", "data_8comp": "791 ns", "pipeline_share": 0.30 },
+        "bytes_ops": [
+          { "op": "raw_bytes.clone()", "effect": "ref-count 1→2", "cost": "~1ns (atomic increment)", "note": "Interest::decode() gets a clone — same allocation" },
+          { "op": "Bytes::slice(range)", "effect": "ref-count stays", "cost": "~1ns", "note": "Each Name component is a zero-copy slice into original buffer" }
+        ],
+        "design_note": "NDNLPv2 fragment reassembly handled inline. Name is always decoded eagerly; Nonce and Lifetime are behind OnceLock<T> for lazy decode on cache hits.",
+        "wiki_link": "/deep-dive/pipeline-walkthrough.html#decode-wire-bytes--structured-packet",
+        "source": "crates/engine/ndn-engine/src/stages/decode.rs"
+      },
+      "cs_lookup": {
+        "chip_label": "CS Lookup",
+        "circuit_type": "memory_chip",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["name"],
+        "writes": ["cs_hit"],
+        "short_circuits": [
+          { "action": "Satisfy", "reason": "CacheHit", "description": "Cached Data found — sent directly to consumer, skipping PIT/FIB/strategy entirely" }
+        ],
+        "timescale": { "hit": "856 ns", "miss": "622 ns", "pipeline_share": 0.10 },
+        "bytes_ops": [
+          { "op": "cache.get() → CsEntry.data.clone()", "effect": "ref-count +1", "cost": "~1ns", "note": "Cache hit returns wire-format Bytes — zero re-encoding, straight to face.send()" }
+        ],
+        "design_note": "CS is checked BEFORE PIT. A cache hit satisfies with zero PIT state — no entry created, no cleanup needed. This is the fastest path through the forwarder: single-digit microseconds.",
+        "wiki_link": "/deep-dive/pipeline-walkthrough.html#cs-lookup-the-short-circuit",
+        "source": "crates/engine/ndn-engine/src/stages/cs.rs"
+      },
+      "pit_check": {
+        "chip_label": "PIT Check",
+        "circuit_type": "capacitor_bank",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["name", "name_hashes"],
+        "writes": ["pit_token"],
+        "short_circuits": [
+          { "action": "Drop", "reason": "LoopDetected", "description": "Same nonce + same name seen from different face — forwarding loop" },
+          { "action": "Drop", "reason": "Aggregated", "description": "PIT entry already exists — Interest aggregated, not forwarded again" }
+        ],
+        "timescale": { "new_entry": "1.40 µs", "aggregation": "2.58 µs", "pipeline_share": 0.15 },
+        "bytes_ops": [],
+        "design_note": "DashMap provides sharded concurrent access. Different PIT entries hash to different shards, so operations on unrelated Interests never contend. PitToken is a stable u64 hash computed once at decode.",
+        "wiki_link": "/concepts/pit-fib-cs.html#pending-interest-table-is-someone-already-looking",
+        "source": "crates/engine/ndn-engine/src/stages/pit.rs"
+      },
+      "strategy": {
+        "chip_label": "Strategy",
+        "circuit_type": "logic_gate",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["name", "pit_token"],
+        "writes": ["out_faces"],
+        "short_circuits": [
+          { "action": "Nack", "reason": "NoRoute", "description": "No FIB entry matches the Interest name" },
+          { "action": "Drop", "reason": "Suppressed", "description": "Strategy chose to suppress forwarding" }
+        ],
+        "timescale": { "fib_lpm_10": "33 ns", "fib_lpm_100": "94 ns", "fib_lpm_1000": "94 ns", "pipeline_share": 0.20 },
+        "bytes_ops": [],
+        "design_note": "Two-phase: FIB longest-prefix match finds candidates, then strategy selects nexthops. Strategy receives immutable StrategyContext — cannot mutate global state. Default is BestRoute (lowest cost). decide_sync() avoids Box::pin for BestRoute/Multicast.",
+        "wiki_link": "/deep-dive/pipeline-walkthrough.html#strategy-stage-the-forwarding-decision",
+        "source": "crates/engine/ndn-engine/src/stages/strategy.rs"
+      },
+      "validation": {
+        "chip_label": "Validation",
+        "circuit_type": "filter",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["packet"],
+        "writes": ["verified"],
+        "short_circuits": [
+          { "action": "Drop", "reason": "ValidationFailed", "description": "Signature invalid or trust schema violated" },
+          { "action": "Drop", "reason": "ValidationTimeout", "description": "Certificate fetch timed out" }
+        ],
+        "timescale": { "disabled_passthrough": "724 ns", "ed25519_verify": "46.30 µs", "schema_mismatch_reject": "158 ns", "cert_missing": "212 ns", "pipeline_share_disabled": 0.0, "pipeline_share_enabled": 0.95 },
+        "bytes_ops": [],
+        "design_note": "Always runs when security is enabled. Missing certificates trigger side-channel Interest fetches; pending packets are queued and re-validated on cert arrival. SafeData typestate enforces verification at compile time. Ed25519 verification dominates at 46µs — 20× the rest of the pipeline combined.",
+        "wiki_link": "/deep-dive/security-model.html",
+        "source": "crates/engine/ndn-engine/src/stages/validation.rs"
+      },
+      "pit_match": {
+        "chip_label": "PIT Match",
+        "circuit_type": "capacitor_bank",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["name", "name_hashes"],
+        "writes": ["out_faces"],
+        "short_circuits": [
+          { "action": "Drop", "reason": "Unsolicited", "description": "No PIT entry matches — nobody asked for this Data" }
+        ],
+        "timescale": { "hit": "1.91 µs", "miss_unsolicited": "1.31 µs" },
+        "bytes_ops": [],
+        "design_note": "Probes all selector combinations (can_be_prefix, must_be_fresh). Collects in-record faces, removes PIT entry atomically via DashMap entry API. Unsolicited Data is a security feature: prevents cache pollution.",
+        "wiki_link": "/concepts/pit-fib-cs.html#pending-interest-table-is-someone-already-looking",
+        "source": "crates/engine/ndn-engine/src/stages/pit.rs"
+      },
+      "cs_insert": {
+        "chip_label": "CS Insert",
+        "circuit_type": "memory_chip",
+        "trait": "PipelineStage",
+        "signature": "fn process(&self, ctx: PacketContext) -> Result<Action, DropReason>",
+        "reads": ["name", "packet"],
+        "writes": [],
+        "short_circuits": [],
+        "timescale": { "cold_insert": "7.62 µs", "warm_replace": "1.10 µs" },
+        "bytes_ops": [
+          { "op": "cs.insert(ctx.raw_bytes.clone(), ...)", "effect": "ref-count +1", "cost": "~1ns", "note": "CS stores the same Bytes allocation — wire-format preserved for zero-copy cache hits" }
+        ],
+        "design_note": "Stores wire-format Bytes, not decoded structs. Future cache hits send stored bytes directly without re-encoding — zero-copy in, zero-copy out. Respects NDNLPv2 CachePolicy and FreshnessPeriod.",
+        "wiki_link": "/concepts/pit-fib-cs.html#content-store-do-i-already-have-this",
+        "source": "crates/engine/ndn-engine/src/stages/cs.rs"
+      },
+      "nack_strategy": {
+        "chip_label": "Nack Handler",
+        "circuit_type": "logic_gate",
+        "trait": "PipelineStage",
+        "signature": "fn on_nack_erased(&self, ...) -> ForwardingAction",
+        "reads": ["name", "pit_token"],
+        "writes": ["out_faces"],
+        "short_circuits": [
+          { "action": "Nack", "reason": "Propagate", "description": "Strategy gives up — propagate Nack to all in-record consumers" },
+          { "action": "Drop", "reason": "Suppressed", "description": "Strategy already initiated retry via ForwardAfter" }
+        ],
+        "design_note": "Strategy can retry on alternate nexthops (automatic failover) or propagate the Nack downstream. BestRoute with two nexthops tries the second when the first Nacks.",
+        "wiki_link": "/deep-dive/pipeline-walkthrough.html#nack-pipeline",
+        "source": "crates/engine/ndn-engine/src/stages/strategy.rs"
+      }
+    }
+  },
+  "tables": {
+    "pit": {
+      "label": "Pending Interest Table",
+      "circuit_type": "capacitor_bank",
+      "struct": "Pit",
+      "backing": "DashMap<PitToken, PitEntry>",
+      "fields": [
+        { "name": "name", "type": "Arc<Name>", "description": "Interest name" },
+        { "name": "selector", "type": "Option<Selector>", "description": "MustBeFresh, CanBePrefix" },
+        { "name": "in_records", "type": "Vec<InRecord>", "description": "Downstream consumers waiting for Data" },
+        { "name": "out_records", "type": "Vec<OutRecord>", "description": "Upstream faces Interest was forwarded to" },
+        { "name": "nonces_seen", "type": "SmallVec<[u32; 4]>", "description": "Loop detection — stack-allocated for 1-4 nonces" },
+        { "name": "expires_at", "type": "u64", "description": "Nanoseconds since epoch — timing wheel eviction" }
+      ],
+      "design_note": "DashMap gives lock-free reads on the hot path. PitToken is a stable u64 hash of (name, selector, forwarding_hint) computed once at decode and reused. Interest aggregation: second Interest for same name adds in-record but doesn't forward again.",
+      "wiki_link": "/concepts/pit-fib-cs.html#pending-interest-table-is-someone-already-looking",
+      "source": "crates/foundation/ndn-store/src/pit.rs"
+    },
+    "fib": {
+      "label": "Forwarding Information Base",
+      "circuit_type": "routing_bus",
+      "struct": "Fib",
+      "backing": "NameTrie<Arc<FibEntry>>",
+      "fields": [
+        { "name": "nexthops", "type": "Vec<FibNexthop>", "description": "Face ID + cost pairs" }
+      ],
+      "design_note": "Hand-over-hand locking via Arc<RwLock<TrieNode>> per child — concurrent lookups on different branches never contend after diverging from their common ancestor. Longest-prefix match is O(k) where k = name components.",
+      "wiki_link": "/concepts/pit-fib-cs.html#forwarding-information-base-where-should-i-look",
+      "source": "crates/foundation/ndn-store/src/fib.rs"
+    },
+    "cs": {
+      "label": "Content Store",
+      "circuit_type": "memory_chip",
+      "struct": "dyn ContentStore",
+      "backing": "LruCs | ShardedCs | FjallCs",
+      "fields": [
+        { "name": "data", "type": "Bytes", "description": "Wire-format Data packet — zero-copy on hit" },
+        { "name": "stale_at", "type": "u64", "description": "FreshnessPeriod decoded once at insert" },
+        { "name": "name", "type": "Arc<Name>", "description": "Cached entry name" }
+      ],
+      "design_note": "Trait-based: LruCs (byte-bounded LRU, default), ShardedCs (concurrent wrapper), FjallCs (persistent on-disk). Stores wire-format Bytes, not decoded structs — cache hits send directly without re-encoding.",
+      "wiki_link": "/concepts/pit-fib-cs.html#content-store-do-i-already-have-this",
+      "source": "crates/foundation/ndn-store/src/content_store.rs"
+    },
+    "strategy_table": {
+      "label": "Strategy Table",
+      "circuit_type": "logic_gate",
+      "struct": "StrategyTable<dyn ErasedStrategy>",
+      "backing": "NameTrie<Arc<dyn ErasedStrategy>>",
+      "fields": [],
+      "design_note": "Per-prefix strategy assignment via longest-prefix match. Default strategy (BestRoute) applies if no entry matches. Strategies receive immutable context — they can read FIB, measurements, and extensions but cannot mutate global state.",
+      "wiki_link": "/design/strategy-composition.html",
+      "source": "crates/engine/ndn-engine/src/stages/strategy.rs"
+    },
+    "measurements": {
+      "label": "Measurements Table",
+      "circuit_type": "sensor",
+      "struct": "MeasurementsTable",
+      "backing": "DashMap<PitToken, MeasurementEntry>",
+      "fields": [],
+      "design_note": "Per-name statistics (RTT, loss rate) used by strategies to make informed forwarding decisions. Populated from PIT out-record timestamps when Data satisfies entries.",
+      "wiki_link": "/design/strategy-composition.html",
+      "source": "crates/engine/ndn-engine/src/engine.rs"
+    }
+  },
+  "faces": {
+    "circuit_type": "edge_connector",
+    "trait": "Face",
+    "trait_source": "crates/foundation/ndn-transport/src/face.rs",
+    "key_methods": [
+      { "name": "recv", "signature": "fn recv(&self) -> impl Future<Output = Result<Bytes, FaceError>> + Send", "description": "Receive raw packet bytes" },
+      { "name": "send", "signature": "fn send(&self, pkt: Bytes) -> impl Future<Output = Result<(), FaceError>> + Send", "description": "Send raw packet bytes" },
+      { "name": "id", "signature": "fn id(&self) -> FaceId", "description": "Opaque u32 face identifier" },
+      { "name": "kind", "signature": "fn kind(&self) -> FaceKind", "description": "Transport type (15 variants)" }
+    ],
+    "kinds": [
+      { "id": "Unix",     "shape": "rounded_rect", "category": "local",   "description": "Unix domain socket" },
+      { "id": "App",      "shape": "rounded_rect", "category": "local",   "description": "In-process application face" },
+      { "id": "Shm",      "shape": "diamond",      "category": "local",   "description": "Shared memory (zero-copy IPC)" },
+      { "id": "Internal", "shape": "rounded_rect", "category": "local",   "description": "Internal management face" },
+      { "id": "Management","shape": "rounded_rect", "category": "local",   "description": "NFD management protocol" },
+      { "id": "WebSocket","shape": "hexagon",       "category": "local",   "description": "WebSocket transport" },
+      { "id": "Udp",      "shape": "circle",        "category": "network", "description": "UDP unicast" },
+      { "id": "Tcp",      "shape": "square",        "category": "network", "description": "TCP stream" },
+      { "id": "Ethernet", "shape": "hexagon",       "category": "network", "description": "Raw Ethernet (layer 2)" },
+      { "id": "EtherMulticast", "shape": "hexagon",  "category": "network", "description": "Ethernet multicast" },
+      { "id": "Serial",   "shape": "triangle",      "category": "network", "description": "Serial port" },
+      { "id": "Bluetooth","shape": "triangle",      "category": "network", "description": "Bluetooth transport" },
+      { "id": "Wfb",      "shape": "triangle",      "category": "network", "description": "Wi-Fi broadcast (ad-hoc)" },
+      { "id": "Compute",  "shape": "octagon",       "category": "special", "description": "In-network compute function" },
+      { "id": "Multicast","shape": "hexagon",       "category": "network", "description": "Generic multicast" }
+    ],
+    "design_note": "Faces are the I/O boundary of the engine. Every face runs its own Tokio recv task feeding a shared mpsc channel. The single-channel design ensures Interest aggregation works correctly across face types.",
+    "wiki_link": "/guides/implementing-face.html"
+  },
+  "context_fields": [
+    { "name": "raw_bytes",   "type": "Bytes",                  "set_by": "inbound",    "description": "Wire-format packet — zero-copy from socket buffer" },
+    { "name": "face_id",     "type": "FaceId",                 "set_by": "inbound",    "description": "Which face received this packet" },
+    { "name": "name",        "type": "Option<Arc<Name>>",      "set_by": "decode",     "description": "Parsed NDN name — always decoded eagerly" },
+    { "name": "packet",      "type": "DecodedPacket",          "set_by": "decode",     "description": "Interest | Data | Nack (after TLV parse)" },
+    { "name": "name_hashes", "type": "Option<NameHashes>",     "set_by": "decode",     "description": "Cumulative prefix hashes — reused by PIT/FIB to avoid re-hashing" },
+    { "name": "pit_token",   "type": "Option<PitToken>",       "set_by": "pit_check",  "description": "Stable u64 hash for PIT entry lookup" },
+    { "name": "lp_pit_token","type": "Option<Bytes>",          "set_by": "decode",     "description": "NDNLPv2 hop-by-hop token (echoed in Data/Nack)" },
+    { "name": "out_faces",   "type": "SmallVec<[FaceId; 4]>",  "set_by": "strategy",   "description": "Selected nexthop faces (strategy) or in-record faces (PIT match)" },
+    { "name": "cs_hit",      "type": "bool",                   "set_by": "cs_lookup",  "description": "True if Content Store had a match" },
+    { "name": "verified",    "type": "bool",                   "set_by": "validation", "description": "True after successful signature verification" },
+    { "name": "arrival",     "type": "u64",                    "set_by": "inbound",    "description": "Monotonic nanosecond timestamp at packet arrival" },
+    { "name": "tags",        "type": "AnyMap",                 "set_by": "any",        "description": "Extensible inter-stage communication map" }
+  ],
+  "actions": [
+    { "variant": "Continue", "fields": "PacketContext", "description": "Pass to next pipeline stage" },
+    { "variant": "Send",     "fields": "PacketContext, SmallVec<[FaceId; 4]>", "description": "Forward Interest to selected faces" },
+    { "variant": "Satisfy",  "fields": "PacketContext", "description": "Fan Data back to in-record faces" },
+    { "variant": "Drop",     "fields": "DropReason", "description": "Discard packet — context consumed" },
+    { "variant": "Nack",     "fields": "PacketContext, NackReason", "description": "Send Nack upstream" }
+  ],
+  "dispatcher": {
+    "label": "Pipeline Runner",
+    "circuit_type": "bus_controller",
+    "description": "Drains inbound packets in batches (up to 64), runs fragment sieve inline, routes to Interest/Data/Nack paths. Configurable: single-threaded (inline) or parallel (tokio::spawn per packet).",
+    "design_note": "Single mpsc channel from all faces. Batch drain amortizes tokio::select! wakeup cost — 64 packets share one wakeup, reducing scheduling overhead by up to 60x under load.",
+    "source": "crates/engine/ndn-engine/src/dispatcher/mod.rs",
+    "wiki_link": "/deep-dive/pipeline-walkthrough.html#the-batch-drain"
+  },
+  "channels": [
+    {
+      "id": "inbound",
+      "label": "Inbound Channel",
+      "circuit_type": "bus",
+      "from": "face_readers",
+      "to": "pipeline_runner",
+      "type": "mpsc::Sender<InboundPacket>",
+      "design_note": "All face types feed one channel — ensures Interest aggregation works across face types. Bounded queue provides backpressure."
+    },
+    {
+      "id": "outbound",
+      "label": "Per-Face Send Queue",
+      "circuit_type": "bus",
+      "from": "pipeline_runner",
+      "to": "face_sender",
+      "type": "mpsc::Sender<Bytes>",
+      "design_note": "One per face. Bounded (default 2048). try_send drops on full (congestion backpressure). Per-face ordering preserved (critical for TCP framing)."
+    }
+  ],
+  "engine": {
+    "struct": "ForwarderEngine",
+    "inner_struct": "EngineInner",
+    "source": "crates/engine/ndn-engine/src/engine.rs",
+    "components": ["fib", "rib", "routing", "pit", "cs", "face_table", "measurements", "strategy_table", "security", "validator", "discovery", "neighbors"],
+    "design_note": "Engine as library — no daemon/client split. ForwarderEngine wraps Arc<EngineInner> so cloning is cheap. All shared tables are Arc-wrapped for concurrent access. Shutdown via cooperative CancellationToken.",
+    "wiki_link": "/design/overview.html"
+  },
+  "security": {
+    "keychain": {
+      "label": "KeyChain",
+      "circuit_type": "key_generator",
+      "struct": "KeyChain",
+      "source": "crates/engine/ndn-security/src/keychain.rs:44-48",
+      "fields": [
+        { "name": "mgr", "type": "Arc<SecurityManager>", "description": "Shared across all tasks — single source of truth" },
+        { "name": "name", "type": "Name", "description": "Identity name (e.g. /sensor/node1)" },
+        { "name": "key_name", "type": "Name", "description": "Key name (e.g. /sensor/node1/KEY/k1)" }
+      ],
+      "constructors": [
+        { "name": "ephemeral()", "description": "In-memory Ed25519, self-signed 365-day cert, registered as trust anchor. Tests and short-lived producers.", "source": "keychain.rs:63-83" },
+        { "name": "open_or_create()", "description": "File-backed PIB. Generates Ed25519 on first run, reloads on subsequent runs. Production use.", "source": "keychain.rs:89-105" },
+        { "name": "from_parts()", "description": "Framework escape hatch for NDNCERT enrollment and device provisioning.", "source": "keychain.rs:115-121" }
+      ],
+      "design_note": "Single entry point for NDN security. Vends Arc<dyn Signer> so signing state is shared across tasks without cloning keys."
+    },
+    "signers": {
+      "label": "Signers",
+      "circuit_type": "crypto_chip",
+      "trait": "Signer",
+      "trait_source": "crates/engine/ndn-security/src/signer.rs:14-37",
+      "key_methods": [
+        { "name": "sign", "signature": "fn sign<'a>(&'a self, region: &'a [u8]) -> BoxFuture<'a, Result<Bytes, TrustError>>", "description": "Async signing (boxes a future)" },
+        { "name": "sign_sync", "signature": "fn sign_sync(&self, region: &[u8]) -> Result<Bytes, TrustError>", "description": "Sync fast path — CPU-only signers override to avoid Box::pin" }
+      ],
+      "implementations": [
+        { "name": "Ed25519Signer", "sig_size": 64, "speed": "~100µs", "source": "signer.rs:40-97", "design_note": "sign() just calls sign_sync() — no async overhead for elliptic curve math" },
+        { "name": "HmacSha256Signer", "sig_size": 32, "speed": "~10µs", "source": "signer.rs:99-135", "design_note": "Pre-shared key. ~10x faster than Ed25519" },
+        { "name": "Blake3Signer", "sig_size": 32, "speed": "~2µs", "source": "signer.rs:169-208", "design_note": "Unauthenticated digest. Dispatches to update_rayon for ≥128KiB. SignatureType code 6" },
+        { "name": "Blake3KeyedSigner", "sig_size": 32, "speed": "~3µs", "source": "signer.rs:249-290", "design_note": "Keyed authentication. SignatureType code 7. Distinct code prevents downgrade attacks" }
+      ],
+      "design_note": "sign_sync() avoids Box::pin heap allocation for CPU-only signers (Ed25519, HMAC, Blake3). Only truly async signers (hardware TPM, remote KMS) need the boxed path."
+    },
+    "validator": {
+      "label": "Validator",
+      "circuit_type": "verification_chip",
+      "struct": "Validator",
+      "source": "crates/engine/ndn-security/src/validator/mod.rs:31-40",
+      "fields": [
+        { "name": "schema", "type": "Arc<RwLock<TrustSchema>>", "description": "Readers (hot path) shared lock; writers (mgmt API) exclusive lock" },
+        { "name": "cert_cache", "type": "Arc<CertCache>", "description": "DashMap dual-index: by name + by SHA-256 digest" },
+        { "name": "trust_anchors", "type": "Arc<DashMap<Arc<Name>, Certificate>>", "description": "Self-signed roots configured at startup" },
+        { "name": "max_chain", "type": "usize", "description": "Maximum certificate chain depth before rejection" }
+      ],
+      "chain_walk": [
+        "Extract KeyLocator from Data (name or key digest)",
+        "Trust schema check: data_name + key_name match a rule",
+        "Loop until trust anchor or max depth:",
+        "  → Check CertCache (DashMap lookup, O(1))",
+        "  → If miss: spawn CertFetcher Interest, return Pending",
+        "  → If hit: verify signature with cert's public key",
+        "  → Move to issuer key, detect cycles via HashSet",
+        "Trust anchor reached → verify final sig → return SafeData"
+      ],
+      "design_note": "Schema stored in Arc<RwLock<TrustSchema>>. Reads (hot validation path) acquire shared lock for ~µs. Writes (management API) acquire exclusive lock — no rebuild needed, rules take effect atomically."
+    },
+    "cert_cache": {
+      "label": "Certificate Cache",
+      "circuit_type": "memory_chip",
+      "struct": "CertCache",
+      "source": "crates/engine/ndn-security/src/cert_cache.rs:118-121",
+      "indices": [
+        { "name": "local", "type": "DashMap<Arc<Name>, Certificate>", "description": "Primary: lookup by certificate name" },
+        { "name": "by_digest", "type": "DashMap<[u8; 32], Arc<Name>>", "description": "Secondary: lookup by SHA-256(public_key)" }
+      ],
+      "design_note": "Both DashMaps populated on every insert(). Lookups handle both KeyLocator forms without linear search. Sharded for concurrent access."
+    },
+    "safe_data": {
+      "label": "SafeData",
+      "circuit_type": "output_gate",
+      "struct": "SafeData",
+      "source": "crates/engine/ndn-security/src/safe_data.rs:24-28",
+      "fields": [
+        { "name": "inner", "type": "Data", "visibility": "pub(crate)", "description": "The verified Data packet" },
+        { "name": "trust_path", "type": "TrustPath", "visibility": "pub(crate)", "description": "How trust was established" },
+        { "name": "verified_at", "type": "u64", "visibility": "pub(crate)", "description": "Nanosecond timestamp of verification" }
+      ],
+      "trust_paths": [
+        { "variant": "CertChain(Vec<Name>)", "description": "Full certificate chain names from data to trust anchor" },
+        { "variant": "LocalFace { uid: u32 }", "description": "Trusted via OS-level SO_PEERCRED on Unix socket" },
+        { "variant": "DigestSha256", "description": "Self-contained hash verification (no external key)" }
+      ],
+      "construction_points": [
+        { "location": "validator/mod.rs:172-179", "method": "Validator::validate() after signature verification" },
+        { "location": "validator/chain.rs:102-106", "method": "Validator::validate_chain() after full chain walk" },
+        { "location": "safe_data.rs:34-39", "method": "SafeData::from_local_trusted() for local faces" }
+      ],
+      "design_note": "pub(crate) fields make SafeData unconstructable outside ndn-security. The compiler enforces that code expecting verified data cannot receive unverified data — the type IS the proof."
+    },
+    "profiles": [
+      { "name": "Default", "schema": "Hierarchical", "sig_verify": true, "chain_fetch": true, "use_case": "Production with trust anchors provisioned" },
+      { "name": "AcceptSigned", "schema": "Accept-all", "sig_verify": true, "chain_fetch": false, "use_case": "Flat trust domains, no hierarchy" },
+      { "name": "Disabled", "schema": "None", "sig_verify": false, "chain_fetch": false, "use_case": "NFD-compatible default; benchmarking" },
+      { "name": "Custom", "schema": "User-defined", "sig_verify": true, "chain_fetch": "User-defined", "use_case": "Advanced policy, custom Validator" }
+    ],
+    "trust_schema": {
+      "label": "Trust Schema",
+      "struct": "TrustSchema",
+      "source": "crates/engine/ndn-security/src/trust_schema.rs:230-233",
+      "pattern_types": [
+        { "syntax": "/literal", "meaning": "Exact component match" },
+        { "syntax": "/<var>", "meaning": "Captures one component into named variable" },
+        { "syntax": "/<**var>", "meaning": "Captures all remaining components (must be last)" }
+      ],
+      "example_rule": "/sensor/<node>/<type> => /sensor/<node>/KEY/<id>",
+      "design_note": "Capture variables must be consistent across data and key patterns. A few rules express hierarchical trust, scope restriction, and role-based signing."
+    }
+  },
+  "performance": [
+    {
+      "id": "ownership",
+      "label": "PacketContext by Value",
+      "icon": "🔒",
+      "source": "crates/engine/ndn-engine/src/pipeline/context.rs:19-24",
+      "what": "PacketContext is passed by value (move) through PipelineStage::process(). Stages that short-circuit simply don't return the context.",
+      "why": "Rust's ownership system prevents use-after-hand-off at compile time. No runtime check needed — if it compiles, the packet lifecycle is correct.",
+      "annotation": "Ownership enforces short-circuits",
+      "applies_to": ["decode", "cs_lookup", "pit_check", "strategy", "validation", "pit_match", "cs_insert"]
+    },
+    {
+      "id": "zero_copy",
+      "label": "bytes::Bytes Zero-Copy",
+      "icon": "📋",
+      "source": "crates/engine/ndn-engine/src/pipeline/context.rs:26",
+      "what": "raw_bytes: Bytes — reference-counted, zero-copy buffer from kernel socket through to CS storage and face.send().",
+      "why": "A packet passes through 6+ stages without a single memcpy of the wire bytes. CS stores wire-format Bytes; cache hits send directly without re-encoding.",
+      "annotation": "Zero-copy end-to-end",
+      "applies_to": ["decode", "cs_lookup", "cs_insert", "cs"]
+    },
+    {
+      "id": "smallvec",
+      "label": "SmallVec Inlining",
+      "icon": "📦",
+      "source": "crates/engine/ndn-engine/src/pipeline/context.rs:45",
+      "what": "out_faces: SmallVec<[FaceId; 4]> — stack-allocated for ≤4 nexthops. nonces_seen: SmallVec<[u32; 4]> — stack-allocated for ≤4 nonces per PIT entry.",
+      "why": "Typical Interest has 1-2 nexthops, typical PIT entry sees 1 nonce. SmallVec keeps common case on stack (no heap alloc), spills only for unusual scenarios. Array lookup stays in L1 cache.",
+      "annotation": "Stack-allocated for common case",
+      "applies_to": ["strategy", "pit_check", "pit_match", "pit"]
+    },
+    {
+      "id": "dashmap",
+      "label": "DashMap Sharded Locking",
+      "icon": "⚡",
+      "source": "crates/foundation/ndn-store/src/pit.rs:220-225",
+      "what": "PIT uses DashMap — internally a fixed number of RwLock<HashMap> shards. Different PIT entries hash to different shards.",
+      "why": "Operations on unrelated Interests never contend. N cores process N unrelated packets in parallel with zero lock contention. with_entry() closure holds lock only during callback.",
+      "annotation": "Lock-free on hot path",
+      "applies_to": ["pit_check", "pit_match", "pit"]
+    },
+    {
+      "id": "handover",
+      "label": "Hand-Over-Hand FIB Locking",
+      "icon": "🔗",
+      "source": "crates/foundation/ndn-store/src/trie.rs:36-61",
+      "what": "FIB NameTrie: Arc<RwLock<TrieNode>> per child. LPM grabs child Arc, releases parent lock, descends. Explicit drop() before each level.",
+      "why": "Concurrent lookups on different subtrees never contend after diverging from common ancestor. Only the current node is locked at any moment.",
+      "annotation": "Per-node locking, never holds parent",
+      "applies_to": ["strategy", "fib"]
+    },
+    {
+      "id": "decide_sync",
+      "label": "decide_sync() Fast Path",
+      "icon": "⏩",
+      "source": "crates/engine/ndn-engine/src/stages/strategy.rs:24-26,143-147",
+      "what": "ErasedStrategy::decide_sync() returns Option<SmallVec<[ForwardingAction; 2]>>. Called first; only falls through to async path if None.",
+      "why": "BestRoute and Multicast compute decisions synchronously — skip Box::pin heap allocation entirely. Only strategies needing async I/O (cert fetch) use the boxed path. Saves ~50ns per packet.",
+      "annotation": "BestRoute skips Box::pin",
+      "applies_to": ["strategy"]
+    },
+    {
+      "id": "batch_drain",
+      "label": "64-Packet Batch Drain",
+      "icon": "🔄",
+      "source": "crates/engine/ndn-engine/src/dispatcher/pipeline.rs:24,31-49",
+      "what": "const BATCH_SIZE: usize = 64. One blocking recv(), then up to 63 non-blocking try_recv() calls. Fragment sieve runs inline on batch before spawning tasks.",
+      "why": "Amortizes tokio::select! wakeup cost across 64 packets. Under load, reduces per-packet scheduling overhead by up to 60x. Fragment sieve at ~2µs/packet runs inline to avoid pipeline entry for fragments.",
+      "annotation": "60x scheduling reduction under load",
+      "applies_to": ["dispatcher"]
+    },
+    {
+      "id": "sign_sync",
+      "label": "Signer::sign_sync() Override",
+      "icon": "🔐",
+      "source": "crates/engine/ndn-security/src/signer.rs:28-36,92-96",
+      "what": "CPU-only signers (Ed25519, HMAC, Blake3) override sign_sync() to avoid Box::pin and async state machine overhead.",
+      "why": "Ed25519 signing is ~100µs of pure CPU. Boxing a Future adds ~50ns + heap allocation. sign_sync() eliminates both for the common path.",
+      "annotation": "No async overhead for CPU crypto",
+      "applies_to": ["validation", "signers"]
+    }
+  ],
+  "bytes_lifecycle": {
+    "description": "Lifecycle of a single Bytes buffer from socket recv through to face send. No semantic copies on the happy path — only ref-count increments via Bytes::clone() and zero-copy views via Bytes::slice().",
+    "source": "pipeline-benchmarks.md, context.rs, decode.rs, cs.rs, outbound.rs",
+    "stages": [
+      { "stage": "socket",   "op": "BytesMut::split_to().freeze()", "refcount": 1, "label": "Kernel recv → Bytes", "color": "#79c0ff" },
+      { "stage": "decode",   "op": "raw_bytes.clone() → Interest::decode()", "refcount": 2, "label": "Clone for decode", "color": "#d2a8ff" },
+      { "stage": "decode",   "op": "Bytes::slice() per NameComponent", "refcount": 2, "label": "Name slices into same buf", "color": "#d2a8ff", "slice": true },
+      { "stage": "cs_insert","op": "cs.insert(raw_bytes.clone())", "refcount": 3, "label": "CS stores same buf", "color": "#3fb950" },
+      { "stage": "satisfy",  "op": "data_bytes.clone() per face", "refcount": "3+N", "label": "Fan-out to N faces", "color": "#f0883e" },
+      { "stage": "send",     "op": "face.send(&pkt)", "refcount": "3+N", "label": "Network TX (reference)", "color": "#ff7b72" },
+      { "stage": "drop",     "op": "all refs dropped", "refcount": 0, "label": "Freed", "color": "#8b949e" }
+    ]
+  },
+  "context_evolution": {
+    "description": "PacketContext fields light up as the packet traverses pipeline stages. Passed by value (move semantics) — a stage that short-circuits simply doesn't return the context.",
+    "interest_path": [
+      { "stage": "inbound",   "fields_set": ["raw_bytes", "face_id", "arrival"], "note": "Socket recv populates base fields" },
+      { "stage": "decode",    "fields_set": ["name", "packet", "name_hashes"], "note": "TLV parse; Nonce/Lifetime behind OnceLock" },
+      { "stage": "cs_lookup", "fields_set": ["cs_hit"], "note": "true → short-circuit Satisfy; false → continue" },
+      { "stage": "pit_check", "fields_set": ["pit_token"], "note": "PitToken = stable u64 hash, computed once" },
+      { "stage": "strategy",  "fields_set": ["out_faces"], "note": "SmallVec<[FaceId; 4]> — stack-allocated for ≤4" }
+    ],
+    "data_path": [
+      { "stage": "inbound",   "fields_set": ["raw_bytes", "face_id", "arrival"], "note": "" },
+      { "stage": "decode",    "fields_set": ["name", "packet", "name_hashes"], "note": "Identified as Data (TLV type 0x06)" },
+      { "stage": "validation","fields_set": ["verified"], "note": "true → SafeData; false → Drop" },
+      { "stage": "pit_match", "fields_set": ["out_faces"], "note": "In-record faces from PIT entry" },
+      { "stage": "cs_insert", "fields_set": [], "note": "Wire-format Bytes stored; ref-count +1" }
+    ]
+  },
+  "pipeline_totals": {
+    "interest_cs_hit": "1.24 µs",
+    "interest_cs_miss_4comp": "1.73 µs",
+    "interest_cs_miss_8comp": "1.91 µs",
+    "data_4comp": "2.21 µs",
+    "data_8comp": "2.70 µs",
+    "throughput_decode_batch_1k": "1.396M pkt/s",
+    "throughput_forwarder_internal": "3.22 Gbps / 50918 Int/s",
+    "throughput_forwarder_external": "3.35 Gbps / 52175 Int/s",
+    "benchmark_source": "docs/wiki/src/benchmarks/pipeline-benchmarks.md"
+  },
+  "type_graphs": {
+    "pipeline_stage": {
+      "title": "PipelineStage Trait Flow",
+      "nodes": [
+        { "id": "PipelineStage", "kind": "trait", "label": "PipelineStage", "methods": ["process(ctx) -> Result<Action>"], "source": "pipeline/stage.rs", "x": 0, "y": 0 },
+        { "id": "PacketContext", "kind": "struct", "label": "PacketContext", "fields": ["raw_bytes: Bytes", "name: Option<Arc<Name>>", "packet: DecodedPacket", "pit_token: Option<PitToken>", "out_faces: SmallVec<[FaceId;4]>", "cs_hit: bool", "verified: bool"], "source": "pipeline/context.rs:19", "x": 5, "y": 0 },
+        { "id": "Action", "kind": "enum", "label": "Action", "variants": ["Continue(ctx)", "Send(ctx, faces)", "Satisfy(ctx)", "Drop(reason)", "Nack(ctx, reason)"], "source": "pipeline/action.rs", "x": 10, "y": 0 },
+        { "id": "TlvDecodeStage", "kind": "impl", "label": "TlvDecodeStage", "implements": "PipelineStage", "source": "stages/decode.rs", "x": 0, "y": 3 },
+        { "id": "CsLookupStage", "kind": "impl", "label": "CsLookupStage", "implements": "PipelineStage", "source": "stages/cs.rs", "x": 3, "y": 3 },
+        { "id": "PitCheckStage", "kind": "impl", "label": "PitCheckStage", "implements": "PipelineStage", "source": "stages/pit.rs", "x": 6, "y": 3 },
+        { "id": "StrategyStage", "kind": "impl", "label": "StrategyStage", "implements": "PipelineStage", "source": "stages/strategy.rs", "x": 9, "y": 3 },
+        { "id": "ValidationStage", "kind": "impl", "label": "ValidationStage", "implements": "PipelineStage", "source": "stages/validation.rs", "x": 12, "y": 3 }
+      ],
+      "edges": [
+        { "from": "PipelineStage", "to": "PacketContext", "label": "takes by value (move)", "style": "solid" },
+        { "from": "PipelineStage", "to": "Action", "label": "returns", "style": "solid" },
+        { "from": "TlvDecodeStage", "to": "PipelineStage", "label": "impl", "style": "dashed" },
+        { "from": "CsLookupStage", "to": "PipelineStage", "label": "impl", "style": "dashed" },
+        { "from": "PitCheckStage", "to": "PipelineStage", "label": "impl", "style": "dashed" },
+        { "from": "StrategyStage", "to": "PipelineStage", "label": "impl", "style": "dashed" },
+        { "from": "ValidationStage", "to": "PipelineStage", "label": "impl", "style": "dashed" },
+        { "from": "Action", "to": "PacketContext", "label": "contains (owned)", "style": "dotted" }
+      ]
+    },
+    "face_trait": {
+      "title": "Face Trait & Table",
+      "nodes": [
+        { "id": "Face", "kind": "trait", "label": "Face", "methods": ["recv() -> Bytes", "send(Bytes)", "id() -> FaceId", "kind() -> FaceKind"], "source": "ndn-transport/src/face.rs", "x": 0, "y": 0 },
+        { "id": "FaceTable", "kind": "struct", "label": "FaceTable", "fields": ["faces: DashMap<FaceId, Arc<dyn ErasedFace>>", "next_id: AtomicU32"], "source": "ndn-transport/src/face_table.rs", "x": 6, "y": 0 },
+        { "id": "FaceId", "kind": "struct", "label": "FaceId(u32)", "fields": [], "source": "ndn-transport/src/face.rs", "x": 3, "y": -2 },
+        { "id": "FaceKind", "kind": "enum", "label": "FaceKind", "variants": ["Unix", "App", "Shm", "Udp", "Tcp", "Ethernet", "WebSocket", "...15 variants"], "source": "ndn-transport/src/face.rs", "x": 3, "y": 2 },
+        { "id": "FaceState", "kind": "struct", "label": "FaceState", "fields": ["cancel: CancellationToken", "counters: FaceCounters", "send_tx: mpsc::Sender<Bytes>", "last_activity: AtomicU64"], "source": "ndn-engine/src/engine.rs", "x": 9, "y": 0 }
+      ],
+      "edges": [
+        { "from": "Face", "to": "FaceId", "label": "id()", "style": "solid" },
+        { "from": "Face", "to": "FaceKind", "label": "kind()", "style": "solid" },
+        { "from": "FaceTable", "to": "Face", "label": "stores Arc<dyn>", "style": "solid" },
+        { "from": "FaceTable", "to": "FaceId", "label": "keyed by", "style": "dotted" },
+        { "from": "FaceState", "to": "FaceId", "label": "per face", "style": "dotted" }
+      ]
+    },
+    "content_store": {
+      "title": "Content Store Trait",
+      "nodes": [
+        { "id": "ContentStore", "kind": "trait", "label": "ContentStore", "methods": ["get(&Interest) -> Option<CsEntry>", "insert(Bytes, Arc<Name>, CsMeta)", "evict(&Name) -> bool", "capacity() -> CsCapacity", "stats() -> CsStats"], "source": "ndn-store/src/content_store.rs", "x": 0, "y": 0 },
+        { "id": "CsEntry", "kind": "struct", "label": "CsEntry", "fields": ["data: Bytes (wire-format)", "stale_at: u64", "name: Arc<Name>"], "source": "ndn-store/src/content_store.rs:14", "x": 6, "y": 0 },
+        { "id": "LruCs", "kind": "impl", "label": "LruCs", "implements": "ContentStore", "source": "ndn-store/src/lru_cs.rs", "x": 0, "y": 3 },
+        { "id": "ShardedCs", "kind": "impl", "label": "ShardedCs", "implements": "ContentStore", "source": "ndn-store/src/sharded_cs.rs", "x": 3, "y": 3 },
+        { "id": "FjallCs", "kind": "impl", "label": "FjallCs", "implements": "ContentStore", "source": "ndn-store/src/fjall_cs.rs", "x": 6, "y": 3 }
+      ],
+      "edges": [
+        { "from": "ContentStore", "to": "CsEntry", "label": "returns", "style": "solid" },
+        { "from": "LruCs", "to": "ContentStore", "label": "impl", "style": "dashed" },
+        { "from": "ShardedCs", "to": "ContentStore", "label": "impl (wraps inner)", "style": "dashed" },
+        { "from": "FjallCs", "to": "ContentStore", "label": "impl", "style": "dashed" }
+      ]
+    },
+    "security_chain": {
+      "title": "Security: Sign → Verify → SafeData",
+      "nodes": [
+        { "id": "KeyChain", "kind": "struct", "label": "KeyChain", "fields": ["mgr: Arc<SecurityManager>", "name: Name", "key_name: Name"], "source": "ndn-security/src/keychain.rs:44", "x": 0, "y": 0 },
+        { "id": "Signer", "kind": "trait", "label": "Signer", "methods": ["sign(region) -> BoxFuture<Bytes>", "sign_sync(region) -> Bytes", "sig_type()", "key_name()"], "source": "ndn-security/src/signer.rs:14", "x": 4, "y": 0 },
+        { "id": "Validator", "kind": "struct", "label": "Validator", "fields": ["schema: Arc<RwLock<TrustSchema>>", "cert_cache: Arc<CertCache>", "trust_anchors: Arc<DashMap>"], "source": "ndn-security/src/validator/mod.rs:31", "x": 8, "y": 0 },
+        { "id": "SafeData", "kind": "struct", "label": "SafeData", "fields": ["inner: Data (pub(crate))", "trust_path: TrustPath (pub(crate))", "verified_at: u64 (pub(crate))"], "source": "ndn-security/src/safe_data.rs:24", "x": 12, "y": 0 },
+        { "id": "TrustSchema", "kind": "struct", "label": "TrustSchema", "fields": ["rules: Vec<SchemaRule>"], "source": "ndn-security/src/trust_schema.rs:230", "x": 8, "y": 3 },
+        { "id": "CertCache", "kind": "struct", "label": "CertCache", "fields": ["local: DashMap<Name, Certificate>", "by_digest: DashMap<[u8;32], Name>"], "source": "ndn-security/src/cert_cache.rs:118", "x": 10, "y": -3 }
+      ],
+      "edges": [
+        { "from": "KeyChain", "to": "Signer", "label": "signer() -> Arc<dyn>", "style": "solid" },
+        { "from": "KeyChain", "to": "Validator", "label": "validator()", "style": "solid" },
+        { "from": "Validator", "to": "SafeData", "label": "validate_chain() -> Valid(Box<SafeData>)", "style": "solid" },
+        { "from": "Validator", "to": "TrustSchema", "label": "schema.read().allows()", "style": "dotted" },
+        { "from": "Validator", "to": "CertCache", "label": "cert_cache.get()", "style": "dotted" },
+        { "from": "Signer", "to": "SafeData", "label": "signs Data, Validator verifies", "style": "dotted" }
+      ]
+    }
+  },
+  "tasks": {
+    "description": "Tokio task topology. Each task is a long-lived or short-lived async function spawned via tasks.spawn(). Communication via mpsc channels; shared state via DashMap/Arc/RwLock.",
+    "permanent": [
+      {
+        "id": "pipeline_runner",
+        "label": "Pipeline Runner",
+        "source": "dispatcher/pipeline.rs:26",
+        "kind": "cpu",
+        "period": "event-driven (batch drain)",
+        "reads_channel": "inbound (mpsc, cap=4096)",
+        "writes_channel": "per-face send queues",
+        "touches": ["PIT", "FIB", "CS", "StrategyTable", "Measurements", "FaceStates"],
+        "design_note": "Single task drains all inbound packets. Batch of up to 64, then spawns per-packet tasks if pipeline_threads > 1, else processes inline."
+      },
+      {
+        "id": "pit_expiry",
+        "label": "PIT Expiry",
+        "source": "expiry.rs:19",
+        "kind": "timer",
+        "period": "1 ms",
+        "reads_channel": null,
+        "writes_channel": null,
+        "touches": ["PIT"],
+        "design_note": "Timing-wheel based. O(1) insertion and expiry notification — no periodic scan of the full table."
+      },
+      {
+        "id": "rib_expiry",
+        "label": "RIB → FIB Recompute",
+        "source": "expiry.rs:41",
+        "kind": "timer",
+        "period": "1 s",
+        "reads_channel": null,
+        "writes_channel": null,
+        "touches": ["RIB", "FIB"],
+        "design_note": "Recomputes FIB from RIB on expiry. Separate from hot-path FIB reads."
+      },
+      {
+        "id": "validation_drain",
+        "label": "Validation Drain",
+        "source": "dispatcher/pipeline.rs:362",
+        "kind": "timer",
+        "period": "100 ms",
+        "reads_channel": null,
+        "writes_channel": null,
+        "touches": ["PendingQueue (Mutex)", "CertCache", "Validator"],
+        "design_note": "Re-validates queued packets whose certificates arrived. Injects back into CS insert stage."
+      },
+      {
+        "id": "idle_sweep",
+        "label": "Idle Face Sweep",
+        "source": "expiry.rs:69",
+        "kind": "timer",
+        "period": "30 s",
+        "reads_channel": null,
+        "writes_channel": null,
+        "touches": ["FaceStates", "FaceTable", "FIB", "RIB"],
+        "design_note": "Removes OnDemand faces with no activity for 5 minutes."
+      },
+      {
+        "id": "discovery_tick",
+        "label": "Discovery Tick",
+        "source": "builder.rs:407-424",
+        "kind": "timer",
+        "period": "configurable",
+        "reads_channel": null,
+        "writes_channel": null,
+        "touches": ["DiscoveryProtocol", "NeighborTable"],
+        "design_note": "Invokes discovery protocol's periodic handler (hello, service announcements)."
+      }
+    ],
+    "per_face": [
+      {
+        "id": "face_reader",
+        "label": "Face Reader",
+        "source": "dispatcher/inbound.rs:30",
+        "kind": "io",
+        "reads_channel": "face.recv_bytes_with_addr()",
+        "writes_channel": "inbound (mpsc, try_send — drops on full)",
+        "touches": ["FaceStates (last_activity atomic)", "uses_lp atomic"],
+        "design_note": "One per face. Blocks on recv(). On error: Permanent retries, OnDemand cleans up. Non-blocking try_send — NDN-correct to drop on overload."
+      },
+      {
+        "id": "face_sender",
+        "label": "Face Sender",
+        "source": "engine.rs:500",
+        "kind": "io",
+        "reads_channel": "per-face mpsc (cap=2048)",
+        "writes_channel": "face.send_bytes()",
+        "touches": ["LpReliability (if UDP, Mutex per-face)"],
+        "design_note": "One per face. Sequential send preserves per-face ordering (critical for TCP framing). Reliability layer fragments, assigns TxSeq, piggybacks Acks."
+      }
+    ],
+    "dynamic": [
+      {
+        "id": "per_packet",
+        "label": "Per-Packet Task",
+        "source": "dispatcher/pipeline.rs:83,97",
+        "kind": "cpu",
+        "lifetime": "single packet",
+        "condition": "pipeline_threads > 1",
+        "touches": ["PIT", "FIB", "CS", "StrategyTable"],
+        "design_note": "Spawned by pipeline runner for each complete packet in parallel mode. Up to pipeline_threads active simultaneously."
+      },
+      {
+        "id": "cert_fetch",
+        "label": "Certificate Fetch",
+        "source": "stages/validation.rs:199-201",
+        "kind": "io",
+        "lifetime": "per missing cert",
+        "touches": ["CertCache"],
+        "design_note": "Spawned when validation needs a certificate not in cache. Sends Interest for cert, inserts response into CertCache."
+      }
+    ],
+    "channels": [
+      {
+        "id": "inbound_pipeline",
+        "from": "face_reader (all)",
+        "to": "pipeline_runner",
+        "type": "mpsc",
+        "capacity": 4096,
+        "item": "InboundPacket",
+        "design_note": "All face types feed ONE channel. Ensures Interest aggregation works across face types."
+      },
+      {
+        "id": "face_send_queue",
+        "from": "pipeline_runner / per-packet tasks",
+        "to": "face_sender (per face)",
+        "type": "mpsc",
+        "capacity": 2048,
+        "item": "Bytes",
+        "design_note": "One per face. try_send() drops on full = congestion backpressure. Per-face ordering preserved."
+      }
+    ],
+    "cancellation": {
+      "root": "Engine CancellationToken",
+      "children": ["pipeline_runner", "pit_expiry", "rib_expiry", "validation_drain", "idle_sweep", "discovery_tick"],
+      "per_face_children": "FaceState::cancel (one per face → reader + sender)",
+      "per_protocol_children": "one per routing protocol",
+      "shutdown": "ShutdownHandle::shutdown() cancels root → all children cancelled → tasks.join_all()"
+    }
+  }
+}
