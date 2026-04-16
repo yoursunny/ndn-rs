@@ -1,6 +1,5 @@
 import { LayerMap } from './views/layer-map.js';
 import { EngineView } from './views/engine-view.js';
-import { ArchMap } from './views/arch-map.js';
 import { initWasm } from './wasm-types.js';
 import { CrateDetail } from './views/crate-detail.js';
 import { TypeDetail } from './views/type-detail.js';
@@ -51,7 +50,6 @@ class App {
     this.views = {
       'layer-map':      new LayerMap(containers['layer-map'], this),
       'engine-view':    new EngineView(containers['engine-view'], this),
-      'arch-map':       new ArchMap(containers['arch-map'], this),
       'crate-detail':   new CrateDetail(containers['crate-detail'], this),
       'type-detail':    new TypeDetail(containers['type-detail'], this),
       'dep-graph':      new DepGraph(containers['dep-graph'], this),

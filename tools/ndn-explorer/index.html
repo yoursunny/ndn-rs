@@ -6,14 +6,6 @@
   <title>ndn-rs Explorer</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/engine-view.css">
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
-    }
-  }
-  </script>
 </head>
 <body>
   <nav>
@@ -21,7 +13,6 @@
     <div class="nav-links">
       <button class="nav-btn active" data-view="layer-map">Layers</button>
       <button class="nav-btn" data-view="engine-view">Engine</button>
-      <button class="nav-btn" data-view="arch-map">3D Map</button>
       <button class="nav-btn" data-view="dep-graph">2D Graph</button>
       <button class="nav-btn" data-view="pipeline-trace">Pipeline</button>
       <button class="nav-btn" data-view="packet-explorer">Packets</button>
@@ -37,7 +28,6 @@
   <main>
     <div id="layer-map" class="view active"></div>
     <div id="engine-view" class="view"></div>
-    <div id="arch-map" class="view"></div>
     <div id="crate-detail" class="view"></div>
     <div id="type-detail" class="view"></div>
     <div id="dep-graph" class="view"></div>

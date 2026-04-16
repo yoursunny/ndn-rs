@@ -154,6 +154,37 @@ const PRESETS = {
     certCached: true,
     schemaRule: '/sensor/<node>/<type> => /sensor/<node>/KEY/<id>',
   },
+  'nack-retry': {
+    label: 'Nack → strategy retries alternate nexthop',
+    type: 'nack',
+    name: '/ndn/edu/ucla/cs/class',
+    nackReason: 'NoRoute',
+    pitExists: true,
+    altFaceId: 5,
+    altCost: 20,
+  },
+  'nack-propagate': {
+    label: 'Nack → propagated to consumers',
+    type: 'nack',
+    name: '/ndn/edu/ucla/cs/class',
+    nackReason: 'Congestion',
+    pitExists: true,
+    noAlternate: true,
+  },
+  'discovery-consumed': {
+    label: 'Discovery hello consumed (never enters pipeline)',
+    type: 'interest',
+    name: '/localhop/_discovery/hello',
+    discoveryConsumed: true,
+  },
+  'concurrent-2pkt': {
+    label: 'Two concurrent Interests (DashMap sharding)',
+    type: 'concurrent',
+    packets: [
+      { name: '/ndn/edu/ucla/paper', csHit: false, pitExists: false, fibMatch: '/ndn/edu/ucla', fibFaceId: 3 },
+      { name: '/ndn/com/google/search', csHit: false, pitExists: false, fibMatch: '/ndn/com/google', fibFaceId: 2 },
+    ],
+  },
 };
 
 function buildSteps(scenario, engineData) {
@@ -402,6 +433,103 @@ function buildSteps(scenario, engineData) {
         terminal: true,
       });
     }
+  } else if (scenario.type === 'nack') {
+    // ── Nack pipeline ─────────────────────────────────────────────────
+    add({
+      stage: 'inbound',
+      fieldsSet: ['raw_bytes', 'face_id', 'arrival'],
+      fieldValues: { raw_bytes: `Bytes(Nack:${scenario.name})`, face_id: 'face:3', arrival: 'now()' },
+      bytesOp: { label: 'BytesMut::freeze()', rc: 1, note: 'Nack arrives from upstream' },
+      detail: `Nack for ${scenario.name} arrives (reason: ${scenario.nackReason}).`,
+    });
+
+    add({
+      stage: 'decode',
+      durationNs: 500,
+      fieldsSet: ['name', 'packet'],
+      fieldValues: { name: `Arc<Name>(${scenario.name})`, packet: `Nack(${scenario.nackReason})` },
+      detail: 'TLV parse identifies Nack with embedded Interest and reason code.',
+    });
+
+    // PIT lookup — the pending entry is still there
+    add({
+      stage: 'nack_pit_lookup',
+      durationNs: 800,
+      fieldsSet: ['pit_token'],
+      fieldValues: { pit_token: 'PitToken(existing)' },
+      tableOp: { table: 'pit', op: 'highlight', name: scenario.name },
+      detail: 'PIT entry found — Interest is still pending. Strategy gets full context.',
+    });
+
+    // Strategy decision on Nack
+    if (scenario.noAlternate) {
+      add({
+        stage: 'nack_strategy',
+        durationNs: 200,
+        action: 'Nack(propagate)',
+        detail: `No alternate nexthops — Nack propagated to all ${scenario.pitExists ? 'in-record consumers' : 'requesters'}. Strategy gives up.`,
+        terminal: true,
+      });
+    } else {
+      add({
+        stage: 'nack_strategy',
+        durationNs: 200,
+        fieldsSet: ['out_faces'],
+        fieldValues: { out_faces: `SmallVec[face:${scenario.altFaceId || 5}]` },
+        rustFeature: 'decide_sync',
+        action: 'Forward(retry)',
+        detail: `BestRoute retries on alternate nexthop: face ${scenario.altFaceId || 5} (cost ${scenario.altCost || 20}). Automatic failover — no application retry logic needed.`,
+        terminal: true,
+      });
+    }
+  }
+
+  // ── Discovery consumed (special Interest case) ──────────────────────
+  if (scenario.type === 'interest' && scenario.discoveryConsumed) {
+    // Override: only inbound + decode + discovery consumed
+    steps.length = 0;
+    add({
+      stage: 'inbound',
+      fieldsSet: ['raw_bytes', 'face_id', 'arrival'],
+      fieldValues: { raw_bytes: `Bytes(${scenario.name})`, face_id: 'face:1', arrival: 'now()' },
+      detail: `Interest for ${scenario.name} arrives on face 1.`,
+    });
+    add({
+      stage: 'decode',
+      durationNs: 681,
+      fieldsSet: ['name', 'packet'],
+      fieldValues: { name: `Arc<Name>(${scenario.name})`, packet: 'Interest' },
+      detail: 'TLV parse identifies as Interest.',
+    });
+    add({
+      stage: 'discovery',
+      durationNs: 100,
+      action: 'Consumed',
+      detail: `Discovery hook: on_inbound() returns true — packet consumed by discovery subsystem. Never enters forwarding pipeline.`,
+      terminal: true,
+    });
+  }
+
+  // ── Concurrent packets (multi-step interleaved) ─────────────────────
+  if (scenario.type === 'concurrent' && scenario.packets) {
+    steps.length = 0;
+    // Build steps for each packet, tag with packet index
+    for (let pi = 0; pi < scenario.packets.length; pi++) {
+      const pkt = scenario.packets[pi];
+      const pktSteps = buildSteps({ type: 'interest', ...pkt }, engineData);
+      for (const s of pktSteps) {
+        s.packetIndex = pi;
+        s.detail = `[Pkt ${pi + 1}] ${s.detail}`;
+        steps.push(s);
+      }
+    }
+    // Interleave: sort by stage order, keeping packet index as tiebreaker
+    const stageOrder = ['inbound', 'decode', 'discovery', 'cs_lookup', 'pit_check', 'strategy'];
+    steps.sort((a, b) => {
+      const oa = stageOrder.indexOf(a.stage), ob = stageOrder.indexOf(b.stage);
+      if (oa !== ob) return oa - ob;
+      return (a.packetIndex || 0) - (b.packetIndex || 0);
+    });
   }
 
   return steps;
@@ -566,7 +694,7 @@ export class EngineView {
     wrap.className = 'ev-pipeline-wrap';
 
     // SVG viewBox designed for a clear left-to-right flow
-    const W = 1100, H = 420;
+    const W = 1100, H = 520;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.classList.add('ev-pipeline-svg');
@@ -684,21 +812,95 @@ export class EngineView {
     this._svgPath(svg, `M${pmStage.x + stageW/2},${pmStage.y + stageH} L${pmStage.x + stageW/2},${pmStage.y + stageH + 30}`,
       '#ff7b72', true, 'Unsolicited → Drop');
 
-    // ── Packet dot (animated) ───────────────────────────────────────────
-    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    dot.setAttribute('r', '8');
-    dot.setAttribute('fill', '#58a6ff');
-    dot.setAttribute('cx', '-20');
-    dot.setAttribute('cy', '-20');
-    dot.classList.add('ev-packet-dot');
-    // Glow filter
+    // ── Nack path (third lane) ──────────────────────────────────────────
+    const laneY_nack = 390;
+    this._svgText(svg, 20, laneY_nack + stageH/2, 'NACK PATH', 13, '#ff7b72', 'bold');
+
+    const nackStages = [
+      { id: 'decode', x: 200, y: laneY_nack, label: 'TLV Decode', time: '~500 ns', share: 0.20 },
+      { id: 'nack_pit_lookup', x: 400, y: laneY_nack, label: 'PIT Lookup', time: '~800 ns', share: 0.10 },
+      { id: 'nack_strategy', x: 600, y: laneY_nack, label: 'Strategy', time: '~200 ns', share: 0.05 },
+    ];
+    for (const s of nackStages) {
+      this._renderStage(svg, s, stageW, stageH, '#2d1a1a', '#ff7b72');
+    }
+    for (let i = 0; i < nackStages.length - 1; i++) {
+      const from = nackStages[i], to = nackStages[i + 1];
+      this._svgArrow(svg, from.x + stageW, from.y + stageH/2, to.x, to.y + stageH/2, '#ff7b72');
+    }
+    // Nack strategy → faces out (retry) or → faces in (propagate)
+    const nackLast = nackStages[nackStages.length - 1];
+    this._svgPath(svg, `M${nackLast.x + stageW},${nackLast.y + stageH/2} L${910},${nackLast.y + stageH/2 - 15}`,
+      '#58a6ff', true, 'Retry → alternate face');
+    this._svgPath(svg, `M${nackLast.x + stageW},${nackLast.y + stageH/2} L${910},${nackLast.y + stageH/2 + 15}`,
+      '#ff7b72', true, 'Propagate → consumers');
+
+    // mpsc → nack decode
+    this._svgArrow(svg, 180, 170, 200, laneY_nack + stageH/2, '#ff7b72');
+
+    // ── Batch drain visualization ───────────────────────────────────────
+    // Small batch buffer indicator on the mpsc box
+    this._svgRect(svg, 132, 122, 46, 14, 2, '#1a1a1a', '#c87533');
+    this._svgText(svg, 155, 130, 'batch ≤64', 7, '#c87533');
+    // Individual packet dots in the batch buffer (decorative)
+    for (let i = 0; i < 6; i++) {
+      const bx = 135 + i * 6;
+      const bdot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      bdot.setAttribute('cx', bx); bdot.setAttribute('cy', 129);
+      bdot.setAttribute('r', '2');
+      bdot.setAttribute('fill', i < 4 ? '#58a6ff' : '#30363d');
+      bdot.setAttribute('opacity', i < 4 ? '0.8' : '0.3');
+      bdot.id = `ev-batch-dot-${i}`;
+      svg.appendChild(bdot);
+    }
+
+    // ── Discovery hook (between mpsc and decode) ────────────────────────
+    // Small diamond between the channel and decode stages
+    const discX = 190, discY_i = laneY_interest + stageH/2, discY_d = laneY_data + stageH/2;
+    const discSize = 8;
+    const discDiamond = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    discDiamond.setAttribute('points', `${discX},${discY_i - discSize} ${discX + discSize},${discY_i} ${discX},${discY_i + discSize} ${discX - discSize},${discY_i}`);
+    discDiamond.setAttribute('fill', '#d29922');
+    discDiamond.setAttribute('opacity', '0.5');
+    discDiamond.id = 'ev-discovery-hook';
+    discDiamond.style.cursor = 'pointer';
+    discDiamond.addEventListener('mouseenter', (e) => {
+      this.tooltipEl.innerHTML = `<strong>Discovery Hook</strong><div>on_inbound() checks for /localhop/_discovery/ packets.</div><div>Hello/probe/SWIM packets are consumed here and never enter the forwarding pipeline.</div><div class="ev-tt-src">dispatcher/pipeline.rs</div>`;
+      this._showTooltip(e);
+    });
+    discDiamond.addEventListener('mouseleave', () => this._hideTooltip());
+    discDiamond.addEventListener('mousemove', (e) => this._moveTooltip(e));
+    svg.appendChild(discDiamond);
+    this._svgText(svg, discX, discY_i + discSize + 8, 'disc', 7, '#d29922');
+
+    // Store nack stage positions
+    for (const s of nackStages) {
+      this.stagePositions[s.id + '_nack'] = { cx: s.x + stageW/2, cy: s.y + stageH/2 };
+    }
+    // Discovery stage position (for the consumed animation)
+    this.stagePositions['discovery_interest'] = { cx: discX, cy: discY_i };
+
+    // ── Packet dots (animated — supports multiple for concurrent scenarios)
+    const PACKET_COLORS = ['#58a6ff', '#d2a8ff', '#ffa657'];
+    this.packetDots = [];
     const glow = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
     glow.id = 'ev-glow';
     glow.innerHTML = '<feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>';
     svg.querySelector('defs').appendChild(glow);
-    dot.setAttribute('filter', 'url(#ev-glow)');
-    svg.appendChild(dot);
-    this.packetDot = dot;
+
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('r', i === 0 ? '8' : '6');
+      dot.setAttribute('fill', PACKET_COLORS[i]);
+      dot.setAttribute('cx', '-20');
+      dot.setAttribute('cy', '-20');
+      dot.classList.add('ev-packet-dot');
+      dot.setAttribute('filter', 'url(#ev-glow)');
+      dot.style.display = i === 0 ? 'block' : 'none';
+      svg.appendChild(dot);
+      this.packetDots.push(dot);
+    }
+    this.packetDot = this.packetDots[0]; // backwards compat
 
     // Store stage positions for animation
     this.stagePositions = {};
@@ -771,6 +973,14 @@ export class EngineView {
     });
     g.addEventListener('mouseleave', () => this._hideTooltip());
     g.addEventListener('mousemove', (e) => this._moveTooltip(e));
+
+    // Click: open wiki link in new tab
+    g.addEventListener('click', () => {
+      const stageData = this.ed?.pipeline?.stages?.[s.id];
+      if (stageData?.wiki_link) {
+        window.open(`../wiki/${stageData.wiki_link}`, '_blank', 'noopener');
+      }
+    });
 
     svg.appendChild(g);
     this.stageEls[s.id + '_' + (s.y < 200 ? 'interest' : 'data')] = g;
@@ -1129,11 +1339,34 @@ export class EngineView {
           </select>
         </div>
       </div>
-      <button class="ev-btn" style="width:100%;margin-top:0.5rem;" onclick="document.getElementById('ev-config-panel').classList.remove('open')">
+      <button class="ev-btn" id="ev-config-apply" style="width:100%;margin-top:0.5rem;">
         Apply & Close
       </button>
     `;
     document.body.appendChild(panel);
+
+    // Apply button reads inputs and rebuilds scenario
+    panel.querySelector('#ev-config-apply').addEventListener('click', () => {
+      const type = panel.querySelector('#ev-cfg-type').value;
+      const name = panel.querySelector('#ev-cfg-name').value || '/ndn/test';
+      const csHit = panel.querySelector('#ev-cfg-cs').value === '1';
+      const pitExists = panel.querySelector('#ev-cfg-pit').value === '1';
+      const secProfile = panel.querySelector('#ev-cfg-sec').value;
+
+      this.scenario = {
+        type,
+        name,
+        csHit,
+        pitExists,
+        securityProfile: secProfile,
+        fibMatch: '/ndn',
+        fibFaceId: 3,
+        fibCost: 10,
+      };
+      this.currentPreset = '(custom)';
+      this._loadScenario();
+      panel.classList.remove('open');
+    });
   }
 
   _toggleConfig() {
@@ -1164,9 +1397,12 @@ export class EngineView {
     document.getElementById('ev-pit-body').innerHTML = '';
     this.pitEntries = [];
 
-    // Reset packet dot
-    this.packetDot.setAttribute('cx', '-20');
-    this.packetDot.setAttribute('cy', '-20');
+    // Reset packet dots
+    for (const dot of this.packetDots) {
+      dot.setAttribute('cx', '-20');
+      dot.setAttribute('cy', '-20');
+      dot.style.display = dot === this.packetDots[0] ? 'block' : 'none';
+    }
 
     // Reset stage highlights
     Object.values(this.stageEls).forEach(g => g.classList.remove('ev-stage-active'));
@@ -1190,13 +1426,39 @@ export class EngineView {
     if (info) info.textContent = `Step ${idx + 1}/${this.engine.steps.length} | ${step.stage} | ${step.action} | ${formatNs(step.durationNs)}`;
 
     // ── Move packet dot ──────────────────────────────────────────────
-    const path = this.scenario.type === 'interest' ? 'interest' : 'data';
+    const path = this.scenario.type === 'nack' ? 'nack'
+               : this.scenario.type === 'data' ? 'data' : 'interest';
+    const pktIdx = step.packetIndex || 0;
+    const dot = this.packetDots[pktIdx] || this.packetDots[0];
+    dot.style.display = 'block';
+
     const posKey = step.stage + '_' + path;
-    const pos = this.stagePositions[posKey] || this.stagePositions[step.stage + '_interest'];
+    const pos = this.stagePositions[posKey]
+             || this.stagePositions[step.stage + '_interest']
+             || this.stagePositions[step.stage + '_data'];
     if (pos) {
-      this.packetDot.setAttribute('cx', pos.cx);
-      this.packetDot.setAttribute('cy', pos.cy);
-      this.packetDot.setAttribute('fill', path === 'interest' ? '#58a6ff' : '#3fb950');
+      dot.setAttribute('cx', pos.cx);
+      dot.setAttribute('cy', pos.cy);
+      const fillColor = path === 'nack' ? '#ff7b72' : path === 'data' ? '#3fb950' : '#58a6ff';
+      dot.setAttribute('fill', pktIdx > 0 ? ['#58a6ff', '#d2a8ff', '#ffa657'][pktIdx] : fillColor);
+    }
+
+    // For concurrent: show additional dots
+    if (this.scenario.type === 'concurrent') {
+      const totalPkts = this.scenario.packets?.length || 1;
+      for (let i = 0; i < totalPkts && i < this.packetDots.length; i++) {
+        this.packetDots[i].style.display = 'block';
+      }
+    }
+
+    // Discovery consumed: flash the discovery diamond
+    if (step.stage === 'discovery') {
+      const disc = document.getElementById('ev-discovery-hook');
+      if (disc) {
+        disc.setAttribute('opacity', '1');
+        disc.setAttribute('fill', '#ffa657');
+        setTimeout(() => { disc.setAttribute('opacity', '0.5'); disc.setAttribute('fill', '#d29922'); }, 800);
+      }
     }
 
     // ── Highlight active stage ───────────────────────────────────────

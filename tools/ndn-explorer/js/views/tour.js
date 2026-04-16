@@ -579,20 +579,21 @@ const STEPS = [
     action: { type: 'crate', target: 'ndn-strategy' },
   },
   {
-    title: '3D Architecture Map',
-    body: `The <strong>Architecture</strong> view is an interactive 3D visualization of the ndn-rs engine.
-      <br><br><strong>Galaxy View</strong> — concentric zone shells with crate nodes and dependency edges.
-      Click <em>ndn-engine</em> to zoom into the <strong>Engine Circuit Board</strong>.
-      <br><br><strong>Circuit Board</strong> — pipeline stages as IC chips, faces as edge connectors,
-      tables as memory chips, security as a verification subsystem. Copper traces carry
-      <code>PacketContext</code> between stages. Click <strong>Send Interest</strong> to watch a packet
-      flow through with live <code>Bytes</code> ref-count tracking and <code>PacketContext</code> field evolution.
-      <br><br>Toggle the <strong>Tasks</strong> overlay to see the Tokio task topology: face reader/sender
-      pairs, the pipeline runner, per-packet spawn fan-out, and background timer tasks.
-      <br><br>Click any chip and choose <strong>Deep Dive</strong> for a shader-graph style type map
-      showing traits, structs, and data flow edges.`,
-    spotlight: '.nav-btn[data-view="arch-map"]',
-    action: { type: 'view', target: 'arch-map', label: 'Open Architecture →' },
+    title: 'Engine Pipeline Visualizer',
+    body: `The <strong>Engine</strong> view is an interactive SVG visualization of the ndn-fwd forwarding pipeline.
+      <br><br><strong>Three pipeline lanes</strong> — Interest (blue), Data (green), Nack (red) — flow
+      left to right through stages with CI benchmark timings on each.
+      <br><br><strong>Living data structures</strong> — PIT table rows appear/disappear during packet flow
+      with SmallVec slot visualization. FIB trie animates hand-over-hand locking during LPM.
+      CS grid shows cache hit/miss/insert with freshness bars.
+      <br><br><strong>Rust feature animations</strong> — PacketContext ownership transfer between stages,
+      Bytes ref-count lifecycle, DashMap sharding, decide_sync() fast path badges.
+      <br><br><strong>Security chain walk</strong> — Validation stage expands inline to show schema check,
+      CertCache lookup, Ed25519 verification, trust anchor resolution, and SafeData typestate transition.
+      <br><br>12 scenario presets including concurrent packets, Nack retry, and discovery consumed.
+      Step through with Play/Pause/Step controls at configurable speed.`,
+    spotlight: '.nav-btn[data-view="engine-view"]',
+    action: { type: 'view', target: 'engine-view', label: 'Open Engine View →' },
   },
   {
     title: 'NDN Security & Signing',
@@ -626,7 +627,7 @@ const STEPS = [
     title: 'Explore!',
     body: `You've seen the highlights. Dive deeper:
       <br>&bull; <strong>Layers</strong> — all crates grouped by zone (Core, Apps, Extensions, Targets, Examples)
-      <br>&bull; <strong>Architecture</strong> — 3D galaxy view → engine circuit board → type-level deep dive
+      <br>&bull; <strong>Engine</strong> — pipeline stages, living data structures, Rust feature animations
       <br>&bull; <strong>2D Graph</strong> — interactive dependency graph with hover highlighting
       <br>&bull; <strong>Pipeline</strong> — run scenarios with live Bytes tracking and PacketContext evolution
       <br>&bull; <strong>Packets</strong> — TLV encoder and hex inspector
