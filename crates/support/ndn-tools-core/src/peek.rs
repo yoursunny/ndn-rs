@@ -152,15 +152,30 @@ async fn fetch_segmented(
     let mut seq: u64 = 0;
 
     loop {
-        while in_flight.len() < pipeline && next_seg < total_segs {
-            if next_seg == seg0_idx {
+        // Build the batch of Interests to fill the pipeline window,
+        // then send them all in one ring transition. The per-Interest
+        // cost of this loop is now dominated by InterestBuilder
+        // allocation (~200 ns) rather than scheduler round-trips
+        // (~5–20 µs per yield_now().await in the old per-send path).
+        {
+            let mut batch = Vec::new();
+            let now = Instant::now();
+            while in_flight.len() + batch.len() < pipeline && next_seg < total_segs {
+                if next_seg == seg0_idx {
+                    next_seg += 1;
+                    continue;
+                }
+                batch.push((next_seg, make_interest(next_seg)));
                 next_seg += 1;
-                continue;
             }
-            client.send(make_interest(next_seg)).await?;
-            in_flight.insert(seq, (next_seg, Instant::now()));
-            seq += 1;
-            next_seg += 1;
+            if !batch.is_empty() {
+                let wires: Vec<Bytes> = batch.iter().map(|(_, w)| w.clone()).collect();
+                client.send_batch(&wires).await?;
+                for (seg, _) in batch {
+                    in_flight.insert(seq, (seg, now));
+                    seq += 1;
+                }
+            }
         }
         if received == total_segs {
             break;
@@ -206,11 +221,18 @@ async fn fetch_segmented(
                     .filter(|(_, (_, t0))| t0.elapsed() >= lifetime)
                     .map(|(&sq, &(idx, _))| (idx, sq))
                     .collect();
-                for (idx, old_seq) in stale {
-                    in_flight.remove(&old_seq);
-                    client.send(make_interest(idx)).await?;
-                    in_flight.insert(seq, (idx, Instant::now()));
-                    seq += 1;
+                if !stale.is_empty() {
+                    let now = Instant::now();
+                    let wires: Vec<Bytes> =
+                        stale.iter().map(|&(idx, _)| make_interest(idx)).collect();
+                    for (_, old_seq) in &stale {
+                        in_flight.remove(old_seq);
+                    }
+                    client.send_batch(&wires).await?;
+                    for (idx, _) in stale {
+                        in_flight.insert(seq, (idx, now));
+                        seq += 1;
+                    }
                 }
             }
         }
