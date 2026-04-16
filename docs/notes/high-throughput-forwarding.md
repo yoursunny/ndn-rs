@@ -335,12 +335,125 @@ crates — **zero pipeline changes** required.
 
 ---
 
+## Name LPM: improvement ladder to the theoretical floor
+
+The current `NameTrie` LPM is ~200ns for a 5-component name.  The
+theoretical software floor is ~10-15ns (one L1 cache hit + one hash).
+This section maps the full improvement path from current to floor,
+ordered by implementation complexity.
+
+### Tier 1: eliminate synchronization (~200ns → ~100ns)
+
+**`ArcSwap` frozen trie** — readers do one atomic load (~1ns) to get
+an immutable snapshot, then traverse a read-only tree with zero locks.
+Eliminates N `RwLock::read` acquisitions per lookup.
+
+```
+current:  5 components × (RwLock::read ~15ns + HashMap probe ~20ns + Arc deref ~5ns) ≈ 200ns
+arcswap:  1 atomic load + 5 × (HashMap probe ~20ns) ≈ 100ns
+```
+
+Writers (routing updates) build a new snapshot and `ArcSwap::store` it.
+Cost of copy-on-write rebuild is O(trie_size) but happens at routing-
+update rates (seconds, not packets).  The `arc-swap` crate is zero-
+unsafe and widely used.
+
+### Tier 2: eliminate pointer chasing (~100ns → ~50ns)
+
+**2-stage hash LPM** (described above) replaces per-component trie
+traversal with 1-2 probes into a flat `HashMap<u64, FibEntry>`.  No
+pointer graph to chase — all data lives in a contiguous allocation.
+
+```
+arcswap trie:  1 atomic + 5 pointer follows ≈ 100ns
+2-stage hash:  1 atomic + 1-2 hash probes ≈ 50ns
+```
+
+NDN-DPDK uses this as its primary FIB structure, with `startDepth`
+tuned to the p90 of prefix lengths in the deployment.  `NameHashes`
+(completed) provides the prefix hashes needed as lookup keys.
+
+> Ref: NDN-DPDK `container/fib` — 2-stage with virtual entries.
+> <https://pkg.go.dev/github.com/usnistgov/ndn-dpdk/container/fib>
+
+### Tier 3: cache-line packing (~50ns → ~30ns)
+
+**Cache-line-aligned FIB slots** — pack each FIB entry (name hash +
+nexthops) into a single 64-byte cache line.  A hash probe touches
+exactly one line, eliminating secondary cache misses from chasing
+`Arc<FibEntry>` pointers into separate allocations.
+
+```rust
+#[repr(align(64))]
+struct PackedFibSlot {
+    name_hash: u64,           //  8 bytes
+    nexthops: [FibNexthop; 3], // 24 bytes (3 × {face_id: u32, cost: u32})
+    next_slot: u32,           //  4 bytes (overflow chain)
+    flags: u32,               //  4 bytes (virtual, valid, etc.)
+    _pad: [u8; 24],           // 24 bytes → 64 total
+}
+```
+
+This is an open-addressing hash table with linear probing, where each
+probe is guaranteed to touch at most one cache line.  Entries with >3
+nexthops overflow to a secondary heap-allocated `Vec` (rare in
+practice — most FIB entries have 1-2 nexthops).
+
+**Gain:** eliminates the ~20ns per-probe overhead from HashMap's
+bucket chasing and `Arc` indirection.  The hash probe itself (~5ns
+with `foldhash`) dominates.
+
+### Tier 4: compiled dispatch (~30ns → ~10-15ns)
+
+**Perfect hash / jump table** — for a static or slowly-changing FIB,
+compute a minimal perfect hash function (e.g. via `phf` or
+`boomphf`) at route-install time.  LPM becomes a single array-indexed
+load:
+
+```rust
+let slot = &table[perfect_hash(name_hash) % table.len()];
+```
+
+One hash (~5ns with `foldhash`), one array index (~1ns), one cache
+miss (~10ns cold / ~1ns hot).  **~10-15ns cold, ~6-7ns hot.**
+
+Trade-off: rebuilding the perfect hash on every route change takes
+O(N) time.  Acceptable at routing-update rates (~1/sec) but not for
+workloads with very frequent FIB mutations.  NDN-DPDK's NDT
+(Name Dispatch Table) is conceptually similar — a fixed-size array
+indexed by name hash.
+
+### Tier 5: hardware acceleration (~10ns → ~5ns)
+
+Beyond software optimization, SmartNIC TCAM or P4 match-action
+pipelines can perform name LPM at line rate in ~5ns.  This requires
+dedicated hardware (e.g. Intel Tofino, Xilinx Alveo) and is outside
+the scope of ndn-rs's software stack — but the `Face` trait's
+abstraction makes it possible to offload FIB lookup to a NIC while
+keeping the rest of the pipeline in software.
+
+### Summary
+
+| Technique | Est. latency | Speedup | Complexity | Depends on |
+|-----------|-------------|---------|------------|------------|
+| Current `NameTrie` | ~200ns | 1× | — | — |
+| `ArcSwap` frozen trie | ~100ns | 2× | Low | `arc-swap` dep |
+| 2-stage hash LPM | ~50ns | 4× | Medium | `NameHashes` |
+| Cache-line packing | ~30ns | 7× | Medium | 2-stage hash |
+| Compiled perfect hash | ~10-15ns | 15× | High | Static FIB |
+| SmartNIC / P4 offload | ~5ns | 40× | Very high | Hardware |
+
+Each tier builds on the previous.  Tiers 1-2 are the most
+cost-effective targets for ndn-rs; tier 3 is worthwhile if benchmarks
+show hash-table probing (not hashing) is the bottleneck; tiers 4-5
+are research territory.
+
+---
+
 ## What we intentionally do NOT do
 
 - **Don't replace `bytes::Bytes`** with custom arenas.  Arc refcount
   cost is negligible; ecosystem compatibility is valuable.
-- **Don't SIMD-vectorize FIB/PIT lookup.**  NDN-DPDK doesn't either.
-  SIMD helps at TLV parse and hash, which ring/ahash already exploit.
 - **Don't break `PipelineStage` or `PacketContext`-by-value.**  These
   are the clearest design win; ownership-enforced short-circuits are
   better than NDN-DPDK's convention-based flags.
