@@ -1,6 +1,10 @@
 use crate::app::{AppCtx, DashCmd};
+#[cfg(feature = "desktop")]
 use crate::tool_runner::fmt_bytes;
+#[cfg(not(feature = "desktop"))]
+fn fmt_bytes(b: u64) -> String { if b > 1_000_000_000 { format!("{:.1} GB", b as f64 / 1e9) } else if b > 1_000_000 { format!("{:.1} MB", b as f64 / 1e6) } else if b > 1000 { format!("{:.1} KB", b as f64 / 1e3) } else { format!("{b} B") } }
 use crate::types::ThroughputSample;
+#[cfg(feature = "desktop")]
 use crate::views::modals::{FaceCreateModal, RouteAddModal};
 use crate::views::traffic::{render_pps_bars, render_throughput_bars, sum_face_histories};
 use dioxus::prelude::*;
@@ -65,13 +69,8 @@ pub fn Overview() -> Element {
         .unwrap_or_else(|| ("0 B".to_string(), "0 B".to_string()));
 
     rsx! {
-        // ── Modals ────────────────────────────────────────────────────────────
-        if *show_face_modal.read() {
-            FaceCreateModal { on_close: move |_| show_face_modal.set(false) }
-        }
-        if *show_route_modal.read() {
-            RouteAddModal { on_close: move |_| show_route_modal.set(false) }
-        }
+        // ── Modals (desktop only — need ndn_config types) ─────────────────────
+        { overview_modals(show_face_modal, show_route_modal) }
 
         // ── Education card ────────────────────────────────────────────────────
         if !*edu_dismissed.read() {
@@ -633,4 +632,22 @@ fn render_cs_sparkline(hist: &VecDeque<f64>) -> Element {
             div { dangerous_inner_html: "{svg}" }
         }
     }
+}
+
+#[cfg(feature = "desktop")]
+fn overview_modals(mut show_face_modal: Signal<bool>, mut show_route_modal: Signal<bool>) -> Element {
+    use crate::views::modals::{FaceCreateModal, RouteAddModal};
+    rsx! {
+        if *show_face_modal.read() {
+            FaceCreateModal { on_close: move |_| show_face_modal.set(false) }
+        }
+        if *show_route_modal.read() {
+            RouteAddModal { on_close: move |_| show_route_modal.set(false) }
+        }
+    }
+}
+
+#[cfg(not(feature = "desktop"))]
+fn overview_modals(_show_face_modal: Signal<bool>, _show_route_modal: Signal<bool>) -> Element {
+    rsx! {}
 }

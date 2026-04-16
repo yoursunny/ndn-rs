@@ -17,9 +17,12 @@ desktop = [
   "dep:which",
   "dep:ndn-ipc",
   "dep:ndn-tools-core",
+  "dep:ndn-config",
   "dioxus/desktop",
   "tokio/process",
   "tokio/rt-multi-thread",
+  "ndn-packet/std",
+  "ndn-tlv/std",
 ]
 web = [
   "dioxus/web",
@@ -27,12 +30,16 @@ web = [
   "dep:web-sys",
   "dep:gloo-storage",
   "dep:gloo-timers",
+  "ndn-packet/std-wasm",
+  "ndn-tlv/std",
+  "getrandom/js",
 ]
 
 [dependencies]
-ndn-config = { workspace = true }
-ndn-packet = { workspace = true, features = ["std"] }
-ndn-tlv    = { workspace = true, features = ["std"] }
+ndn-config = { workspace = true, optional = true }
+# Desktop gets full std (with ring/blake3); web gets std-wasm (no native crypto)
+ndn-packet = { workspace = true }
+ndn-tlv    = { workspace = true }
 bytes      = { workspace = true, features = ["std"] }
 tokio      = { workspace = true, features = ["rt", "macros", "time", "io-util"] }
 futures    = { workspace = true }

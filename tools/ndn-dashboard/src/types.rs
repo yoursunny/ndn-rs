@@ -1060,12 +1060,15 @@ impl SchemaRuleInfo {
     }
 }
 
-// ── Wire-type conversions (Phase 2) ──────────────────────────────────────────
+// ── Wire-type conversions (desktop only) ─────────────────────────────────────
 //
 // These `From` impls convert NFD TLV wire types (from `ndn_config`) into the
-// dashboard's display-oriented structs.  The text parsers above are retained
-// for use with custom ndn-rs endpoints that still return ControlResponse text.
+// dashboard's display-oriented structs.  Desktop only — the web build uses
+// WsMgmtClient and parses responses differently.
+#[cfg(feature = "desktop")]
+use ndn_config;
 
+#[cfg(feature = "desktop")]
 impl From<ndn_config::FaceStatus> for FaceInfo {
     fn from(fs: ndn_config::FaceStatus) -> Self {
         let persistency = fs.persistency_str().to_owned();
@@ -1098,6 +1101,7 @@ impl From<ndn_config::FaceStatus> for FaceInfo {
     }
 }
 
+#[cfg(feature = "desktop")]
 impl From<ndn_config::FibEntry> for FibEntry {
     fn from(fe: ndn_config::FibEntry) -> Self {
         FibEntry {
@@ -1114,6 +1118,7 @@ impl From<ndn_config::FibEntry> for FibEntry {
     }
 }
 
+#[cfg(feature = "desktop")]
 impl From<ndn_config::StrategyChoice> for StrategyEntry {
     fn from(sc: ndn_config::StrategyChoice) -> Self {
         StrategyEntry {
@@ -1178,6 +1183,7 @@ pub struct RibEntryInfo {
     pub routes: Vec<RibRoute>,
 }
 
+#[cfg(feature = "desktop")]
 impl From<ndn_config::RibEntry> for RibEntryInfo {
     fn from(re: ndn_config::RibEntry) -> Self {
         RibEntryInfo {
@@ -1196,3 +1202,4 @@ impl From<ndn_config::RibEntry> for RibEntryInfo {
         }
     }
 }
+

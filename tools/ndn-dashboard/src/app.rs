@@ -5,11 +5,11 @@ use dioxus::prelude::*;
 use futures::StreamExt as _;
 use ndn_ipc::MgmtClient;
 
-#[cfg(feature = "desktop")]
+// Re-export shared types so views that `use crate::app::*` keep working.
+pub use crate::app_shared::*;
+
 use crate::forwarder_proc;
-#[cfg(feature = "desktop")]
 use crate::tray;
-#[cfg(feature = "desktop")]
 use crate::tool_runner::{
     TOOL_INSTANCES, TOOL_RESULTS, ToolCmd, ToolInstanceState, ToolParams, ToolResultEntry,
     build_result_entry, chrono_now, next_result_id,

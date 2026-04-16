@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+#[cfg(feature = "desktop")]
 use dioxus::desktop::Config;
 use dioxus::prelude::*;
 
@@ -772,10 +773,16 @@ pub fn Logs() -> Element {
                         onmousemove: move |e| {
                             let c = e.client_coordinates();
                             let ratio = if SplitMode::from_u8(*LOG_SPLIT_MODE.read()) == SplitMode::Horizontal {
+                                #[cfg(feature = "desktop")]
                                 let avail = (dioxus::desktop::window().inner_size().width as f64 - 200.0).max(1.0);
+                                #[cfg(not(feature = "desktop"))]
+                                let avail = 800.0_f64;
                                 (((c.x - 200.0).max(0.0) / avail * 100.0).round() as u32).clamp(20, 80)
                             } else {
+                                #[cfg(feature = "desktop")]
                                 let avail = (dioxus::desktop::window().inner_size().height as f64 - 44.0).max(1.0);
+                                #[cfg(not(feature = "desktop"))]
+                                let avail = 600.0_f64;
                                 ((c.y - 44.0).max(0.0) / avail * 100.0).round() as u32
                             };
                             *LOG_SPLIT_RATIO.write() = ratio.clamp(20, 80);
@@ -824,17 +831,7 @@ pub fn Logs() -> Element {
             }
 
             div { style: "margin-left:auto;",
-                button {
-                    class: "btn btn-secondary btn-sm",
-                    title: "Open log stream in a separate OS window",
-                    onclick: move |_| {
-                        let pid = *next_pane_id.read();
-                        next_pane_id.set(pid + 1);
-                        let dom = VirtualDom::new_with_props(LogWindowApp, LogWindowAppProps { pane_id: pid });
-                        dioxus::desktop::window().new_window(dom, Config::default());
-                    },
-                    "↗ New Window"
-                }
+                { new_window_button(next_pane_id) }
             }
         }
 
@@ -913,4 +910,27 @@ fn save_log_to_tmp(content: &str, ext: &str) -> Option<String> {
             None
         }
     }
+}
+
+/// "New Window" button — desktop only (requires OS window API).
+#[cfg(feature = "desktop")]
+fn new_window_button(mut next_pane_id: Signal<usize>) -> Element {
+    rsx! {
+        button {
+            class: "btn btn-secondary btn-sm",
+            title: "Open log stream in a separate OS window",
+            onclick: move |_| {
+                let pid = *next_pane_id.read();
+                next_pane_id.set(pid + 1);
+                let dom = VirtualDom::new_with_props(LogWindowApp, LogWindowAppProps { pane_id: pid });
+                dioxus::desktop::window().new_window(dom, Config::default());
+            },
+            "↗ New Window"
+        }
+    }
+}
+
+#[cfg(not(feature = "desktop"))]
+fn new_window_button(_next_pane_id: Signal<usize>) -> Element {
+    rsx! {}
 }

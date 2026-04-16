@@ -7,10 +7,11 @@
 #![cfg(feature = "web")]
 
 use std::collections::{HashMap, VecDeque};
-use std::time::Duration;
 
 use dioxus::prelude::*;
 use futures::StreamExt as _;
+
+pub use crate::app_shared::*;
 
 use crate::{
     settings::DASH_SETTINGS,
@@ -18,36 +19,17 @@ use crate::{
     types::*,
     views::{
         View,
-        config::Config,
-        dashboard_config::DashboardConfig,
         fleet::Fleet,
         logs::Logs,
-        modals::StartRouterModal,
         onboarding::{Onboarding, is_onboarded},
         overview::Overview,
         radio::Radio,
         routing::Routing,
         security::Security,
-        session::Session,
         strategy::Strategy,
     },
     ws_mgmt::WsMgmtClient,
 };
-
-// Re-export shared types from the desktop app module so views can reference them.
-pub use crate::app::{
-    AppCtx, ConnState, DashCmd, ACTIVE_VIEW, CONFIG_PRESETS, DARK_MODE,
-    LAST_LOG_SEQ, LOG_FILTER, LOG_SPLIT_MODE, LOG_SPLIT_RATIO,
-    PENDING_LOG_FILTER, ROUTER_LOG, ROUTER_RUNNING, TOASTS, Toast, ToastLevel,
-    push_toast,
-};
-
-// Stub types for desktop-only features that views may reference.
-pub struct ToolCmd;
-pub static TOOL_INSTANCES: once_cell::sync::Lazy<std::sync::RwLock<HashMap<u32, ()>>> =
-    once_cell::sync::Lazy::new(|| std::sync::RwLock::new(HashMap::new()));
-pub static TOOL_RESULTS: once_cell::sync::Lazy<std::sync::RwLock<Vec<()>>> =
-    once_cell::sync::Lazy::new(|| std::sync::RwLock::new(Vec::new()));
 
 fn default_ws_url() -> String {
     "ws://localhost:9696".to_string()
@@ -118,17 +100,8 @@ pub fn AppWeb() -> Element {
                 Ok(()) => {}
                 Err(e) => {
                     conn_state.set(ConnState::Error(e.to_string()));
-                    // Wait before retry; Reconnect skips the wait
-                    let sleep = gloo_timers::future::TimeoutFuture::new(3_000);
-                    futures::pin_mut!(sleep);
-                    loop {
-                        futures::select! {
-                            _ = sleep => break,
-                            cmd = rx.next() => {
-                                if cmd.map_or(false, |c| matches!(c, DashCmd::Reconnect)) { break }
-                            }
-                        }
-                    }
+                    // Wait before retry
+                    gloo_timers::future::TimeoutFuture::new(3_000).await;
                     continue;
                 }
             };
@@ -350,15 +323,17 @@ pub fn AppWeb() -> Element {
 fn render_view_web(view: View) -> Element {
     match view {
         View::Overview => rsx! { Overview {} },
-        View::Routes => rsx! { crate::views::routes::Routes {} },
+        // Routes and Faces are rendered under their parent views
         View::Strategy => rsx! { Strategy {} },
-        View::Faces => rsx! { crate::views::faces::Faces {} },
         View::Fleet => rsx! { Fleet {} },
         View::Routing => rsx! { Routing {} },
         View::Security => rsx! { Security {} },
         View::Logs => rsx! { Logs {} },
-        View::RouterConfig => rsx! { Config {} },
-        View::DashboardConfig => rsx! { DashboardConfig {} },
+        View::RouterConfig | View::DashboardConfig => rsx! {
+            div { class: "placeholder", style: "padding:2rem;color:var(--text2);",
+                "Configuration editing requires the desktop version."
+            }
+        },
         View::Radio => rsx! { Radio {} },
         // Desktop-only views render a placeholder on web
         View::Tools | View::Session => rsx! {

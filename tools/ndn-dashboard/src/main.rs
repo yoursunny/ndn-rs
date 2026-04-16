@@ -13,7 +13,15 @@
 
 #![allow(non_snake_case)]
 
+pub mod app_shared;
+#[cfg(feature = "desktop")]
 mod app;
+// On web, `mod app` is a thin re-export of app_shared so that view modules
+// that `use crate::app::*` continue to compile without changes.
+#[cfg(all(feature = "web", not(feature = "desktop")))]
+pub mod app {
+    pub use crate::app_shared::*;
+}
 #[cfg(feature = "web")]
 mod app_web;
 #[cfg(feature = "desktop")]

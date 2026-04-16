@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+#[cfg(feature = "desktop")]
 use ndn_config::{
     CsConfig, DiscoveryTomlConfig, EngineConfig, FaceConfig, ForwarderConfig, LoggingConfig,
     ManagementConfig, RouteConfig, SecurityConfig,

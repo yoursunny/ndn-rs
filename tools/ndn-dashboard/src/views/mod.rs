@@ -1,9 +1,12 @@
+#[cfg(feature = "desktop")]
 pub mod config;
 pub mod cs;
+#[cfg(feature = "desktop")]
 pub mod dashboard_config;
 pub mod faces;
 pub mod fleet;
 pub mod logs;
+#[cfg(feature = "desktop")]
 pub mod modals;
 pub mod onboarding;
 pub mod overview;
@@ -11,8 +14,10 @@ pub mod radio;
 pub mod routes;
 pub mod routing;
 pub mod security;
+#[cfg(feature = "desktop")]
 pub mod session;
 pub mod strategy;
+#[cfg(feature = "desktop")]
 pub mod tools;
 pub mod traffic;
 
