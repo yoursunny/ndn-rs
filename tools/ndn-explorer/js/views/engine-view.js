@@ -711,29 +711,40 @@ export class EngineView {
     svg.classList.add('ev-pipeline-svg');
     this.svg = svg;
 
-    // Defs: inject via a temp container div for reliable SVG namespace handling.
-    // Direct svg.innerHTML or DOMParser can fail silently in some browsers.
-    const _tmp = document.createElement('div');
-    _tmp.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg"><defs>
-      <marker id="ev-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-        <path d="M0,0 L8,3 L0,6" fill="#58a6ff"></path>
-      </marker>
-      <marker id="ev-arrow-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-        <path d="M0,0 L8,3 L0,6" fill="#ff7b72"></path>
-      </marker>
-      <marker id="ev-arrow-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-        <path d="M0,0 L8,3 L0,6" fill="#3fb950"></path>
-      </marker>
-      <filter id="ev-glow">
-        <feGaussianBlur stdDeviation="3" result="blur"></feGaussianBlur>
-        <feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
-      </filter>
-    </defs></svg>`;
-    const _tmpSvg = _tmp.querySelector('svg');
-    if (_tmpSvg) {
-      const _defs = _tmpSvg.querySelector('defs');
-      if (_defs) svg.appendChild(_defs);
+    // Defs: create all elements with createElementNS for maximum reliability.
+    const NS = 'http://www.w3.org/2000/svg';
+    const defs = document.createElementNS(NS, 'defs');
+
+    // Arrow markers
+    for (const [id, color] of [['ev-arrow','#58a6ff'],['ev-arrow-red','#ff7b72'],['ev-arrow-green','#3fb950']]) {
+      const m = document.createElementNS(NS, 'marker');
+      m.id = id;
+      for (const [k,v] of [['markerWidth','8'],['markerHeight','6'],['refX','7'],['refY','3'],['orient','auto']]) m.setAttribute(k,v);
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', 'M0,0 L8,3 L0,6');
+      p.setAttribute('fill', color);
+      m.appendChild(p);
+      defs.appendChild(m);
     }
+
+    // Glow filter
+    const flt = document.createElementNS(NS, 'filter');
+    flt.id = 'ev-glow';
+    const blur = document.createElementNS(NS, 'feGaussianBlur');
+    blur.setAttribute('stdDeviation', '3');
+    blur.setAttribute('result', 'blur');
+    flt.appendChild(blur);
+    const merge = document.createElementNS(NS, 'feMerge');
+    const mn1 = document.createElementNS(NS, 'feMergeNode');
+    mn1.setAttribute('in', 'blur');
+    merge.appendChild(mn1);
+    const mn2 = document.createElementNS(NS, 'feMergeNode');
+    mn2.setAttribute('in', 'SourceGraphic');
+    merge.appendChild(mn2);
+    flt.appendChild(merge);
+    defs.appendChild(flt);
+
+    svg.appendChild(defs);
 
     // ── Stage layout ────────────────────────────────────────────────────
     // Interest path: top lane
