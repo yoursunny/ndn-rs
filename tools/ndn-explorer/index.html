@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ndn-rs Explorer</title>
   <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/engine-view.css">
   <script type="importmap">
   {
     "imports": {
@@ -19,7 +20,8 @@
     <span class="logo">ndn-rs</span>
     <div class="nav-links">
       <button class="nav-btn active" data-view="layer-map">Layers</button>
-      <button class="nav-btn" data-view="arch-map">Architecture</button>
+      <button class="nav-btn" data-view="engine-view">Engine</button>
+      <button class="nav-btn" data-view="arch-map">3D Map</button>
       <button class="nav-btn" data-view="dep-graph">2D Graph</button>
       <button class="nav-btn" data-view="pipeline-trace">Pipeline</button>
       <button class="nav-btn" data-view="packet-explorer">Packets</button>
@@ -34,6 +36,7 @@
   </nav>
   <main>
     <div id="layer-map" class="view active"></div>
+    <div id="engine-view" class="view"></div>
     <div id="arch-map" class="view"></div>
     <div id="crate-detail" class="view"></div>
     <div id="type-detail" class="view"></div>

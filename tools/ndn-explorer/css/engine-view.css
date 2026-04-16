@@ -1,0 +1,673 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Engine View — ndn-fwd pipeline visualization
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+.ev-root {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  overflow-y: auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ── Control Bar ─────────────────────────────────────────────────────────── */
+
+.ev-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.ev-btn {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.12s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.ev-btn:hover { border-color: var(--accent); color: var(--accent); }
+.ev-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ev-btn:disabled { opacity: 0.4; cursor: default; }
+
+.ev-speed { display: flex; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: var(--text2); }
+.ev-speed input[type="range"] { width: 80px; accent-color: var(--accent); }
+.ev-speed-label { min-width: 2.5rem; text-align: right; font-family: monospace; }
+
+.ev-scenario-select {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.ev-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+
+.ev-step-info {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-left: auto;
+  font-family: monospace;
+}
+
+/* ── Pipeline SVG container ──────────────────────────────────────────────── */
+
+.ev-pipeline-wrap {
+  position: relative;
+  min-height: 400px;
+  overflow: auto;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.ev-pipeline-svg {
+  width: 100%;
+  min-height: 400px;
+  display: block;
+}
+
+/* SVG inline styles are set via attributes, but we define hover states here */
+.ev-pipeline-svg .ev-stage-box { cursor: pointer; transition: opacity 0.15s; }
+.ev-pipeline-svg .ev-stage-box:hover { opacity: 0.85; }
+.ev-pipeline-svg .ev-stage-active .ev-stage-rect { stroke-width: 2.5; }
+.ev-pipeline-svg .ev-trace { transition: stroke-opacity 0.3s, stroke 0.3s; }
+.ev-pipeline-svg .ev-trace-lit { stroke-opacity: 1 !important; }
+
+/* Packet dot animation */
+.ev-packet-dot {
+  transition: cx 0.3s ease-in-out, cy 0.3s ease-in-out;
+}
+
+/* ── Detail tooltip ──────────────────────────────────────────────────────── */
+
+.ev-tooltip {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.76rem;
+  color: var(--text);
+  max-width: 360px;
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  line-height: 1.45;
+  display: none;
+}
+.ev-tooltip code { font-size: 0.7rem; background: var(--surface2); padding: 0.05rem 0.25rem; border-radius: 2px; }
+.ev-tooltip strong { color: var(--accent); }
+.ev-tooltip .ev-tt-src { font-size: 0.66rem; color: var(--text2); margin-top: 0.3rem; }
+.ev-tooltip .ev-tt-time { color: #d29922; font-family: monospace; }
+
+/* ── PacketContext strip ─────────────────────────────────────────────────── */
+
+.ev-ctx-strip {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.ev-ctx-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.ev-ctx-title {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #d2a8ff;
+}
+.ev-ctx-ownership {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(210,168,255,0.1);
+  color: #d2a8ff;
+  transition: all 0.3s;
+}
+.ev-ctx-owner-name { font-weight: 600; }
+.ev-ctx-note {
+  font-size: 0.72rem;
+  color: var(--text2);
+  margin-top: 0.3rem;
+  min-height: 1rem;
+}
+
+.ev-ctx-fields {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.ev-ctx-field {
+  display: flex;
+  flex-direction: column;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-width: 90px;
+  opacity: 0.35;
+  transition: all 0.4s;
+  position: relative;
+  overflow: hidden;
+}
+.ev-ctx-field.set {
+  opacity: 1;
+  border-color: #3fb950;
+  background: rgba(63,185,80,0.06);
+}
+.ev-ctx-field.set .ev-ctx-fname { color: #3fb950; }
+.ev-ctx-field.just-set {
+  animation: ev-field-pulse 0.6s ease-out;
+}
+@keyframes ev-field-pulse {
+  0% { transform: scale(1.08); box-shadow: 0 0 12px rgba(63,185,80,0.4); }
+  100% { transform: scale(1); box-shadow: none; }
+}
+.ev-ctx-field.dropped {
+  opacity: 0.15;
+  border-color: #ff4444;
+  animation: ev-field-drop 0.5s ease-in;
+}
+@keyframes ev-field-drop {
+  from { transform: translateY(0); opacity: 0.6; }
+  to { transform: translateY(8px); opacity: 0.15; }
+}
+.ev-ctx-fname {
+  font-family: monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text2);
+}
+.ev-ctx-ftype {
+  font-family: monospace;
+  font-size: 0.6rem;
+  color: var(--text2);
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+.ev-ctx-fval {
+  font-family: monospace;
+  font-size: 0.64rem;
+  color: var(--text);
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+/* ── Data Structure Panels ───────────────────────────────────────────────── */
+
+.ev-tables {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  min-height: 200px;
+}
+
+.ev-table-panel {
+  padding: 0.5rem 0.6rem;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  max-height: 280px;
+}
+.ev-table-panel:last-child { border-right: none; }
+
+.ev-table-title {
+  font-weight: 700;
+  font-size: 0.78rem;
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.ev-table-title code { font-size: 0.68rem; color: var(--text2); font-weight: 400; }
+
+/* PIT table */
+.ev-pit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+}
+.ev-pit-table th {
+  text-align: left;
+  padding: 0.2rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.64rem;
+  color: var(--text2);
+  font-weight: 600;
+}
+.ev-pit-table td {
+  padding: 0.2rem 0.35rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-family: monospace;
+  font-size: 0.66rem;
+}
+.ev-pit-row-enter {
+  animation: ev-row-in 0.4s ease-out;
+}
+@keyframes ev-row-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ev-pit-row-satisfied {
+  animation: ev-row-satisfied 0.6s ease-out forwards;
+}
+@keyframes ev-row-satisfied {
+  0% { background: rgba(63,185,80,0.15); }
+  70% { background: rgba(63,185,80,0.15); opacity: 1; }
+  100% { opacity: 0; height: 0; padding: 0; overflow: hidden; }
+}
+.ev-pit-row-dropped {
+  animation: ev-row-drop 0.4s ease-in forwards;
+}
+@keyframes ev-row-drop {
+  to { opacity: 0; background: rgba(255,68,68,0.1); }
+}
+
+/* SmallVec visualization */
+.ev-smallvec {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+.ev-sv-slot {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  transition: background 0.3s;
+}
+.ev-sv-slot.filled { background: #58a6ff; border-color: #58a6ff; }
+.ev-sv-slot.empty { background: transparent; border-style: dashed; }
+.ev-sv-label {
+  font-size: 0.56rem;
+  color: var(--text2);
+  margin-left: 4px;
+}
+.ev-sv-spill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border: 1px dashed #ff7b72;
+  border-radius: 3px;
+  font-size: 0.56rem;
+  color: #ff7b72;
+  animation: ev-spill-in 0.3s ease-out;
+}
+@keyframes ev-spill-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* FIB trie */
+.ev-fib-trie { font-family: monospace; font-size: 0.7rem; }
+.ev-fib-node {
+  padding: 0.1rem 0.3rem;
+  margin: 0.05rem 0;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: background 0.2s;
+}
+.ev-fib-node.matched { background: rgba(88,166,255,0.12); color: var(--accent); }
+.ev-fib-children { padding-left: 1rem; border-left: 1px solid var(--border); margin-left: 0.5rem; }
+.ev-fib-nexthop {
+  font-size: 0.62rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  background: rgba(63,185,80,0.1);
+  color: #3fb950;
+}
+.ev-fib-lock {
+  font-size: 0.62rem;
+  color: #d29922;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ev-fib-lock.visible { opacity: 1; }
+
+/* CS grid */
+.ev-cs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 4px;
+}
+.ev-cs-cell {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.2rem 0.3rem;
+  font-family: monospace;
+  font-size: 0.62rem;
+  overflow: hidden;
+  position: relative;
+  transition: all 0.3s;
+  min-height: 36px;
+}
+.ev-cs-cell.empty { opacity: 0.2; border-style: dashed; }
+.ev-cs-cell.hit { animation: ev-cs-hit 0.5s ease-out; }
+@keyframes ev-cs-hit {
+  0% { box-shadow: inset 0 0 0 2px #3fb950; }
+  100% { box-shadow: none; }
+}
+.ev-cs-cell.inserting { animation: ev-cs-insert 0.4s ease-out; }
+@keyframes ev-cs-insert {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+.ev-cs-freshness {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: #3fb950;
+  transition: width 1s linear;
+}
+.ev-cs-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-cs-stats {
+  font-size: 0.68rem;
+  color: var(--text2);
+  margin-top: 0.3rem;
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* ── Bytes Lifecycle ─────────────────────────────────────────────────────── */
+
+.ev-bytes {
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.ev-bytes-title {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: #79c0ff;
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ev-bytes-chain {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding-bottom: 0.3rem;
+}
+
+.ev-bytes-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.66rem;
+  opacity: 0.3;
+  transition: all 0.4s;
+  position: relative;
+}
+.ev-bytes-node.active { opacity: 1; border-color: #79c0ff; }
+.ev-bytes-node.active .ev-bytes-rc { background: rgba(121,192,255,0.15); }
+
+.ev-bytes-label { font-family: monospace; font-size: 0.62rem; color: var(--text2); }
+.ev-bytes-rc {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  margin-top: 0.15rem;
+  transition: all 0.3s;
+}
+.ev-bytes-rc.bumped { animation: ev-rc-bump 0.4s ease-out; }
+@keyframes ev-rc-bump {
+  0% { transform: scale(1.4); color: #3fb950; }
+  100% { transform: scale(1); }
+}
+
+.ev-bytes-arrow {
+  width: 24px;
+  height: 2px;
+  background: var(--border);
+  position: relative;
+  flex-shrink: 0;
+}
+.ev-bytes-arrow::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -3px;
+  border: 4px solid transparent;
+  border-left-color: var(--border);
+}
+.ev-bytes-op-note {
+  font-size: 0.58rem;
+  color: var(--text2);
+  position: absolute;
+  bottom: -14px;
+  white-space: nowrap;
+}
+
+/* Buffer visualization (inline hex-style) */
+.ev-bytes-buffer {
+  display: flex;
+  height: 18px;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid rgba(121,192,255,0.3);
+  margin-top: 0.2rem;
+  width: 100%;
+}
+.ev-bytes-seg {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.5rem;
+  font-family: monospace;
+  color: rgba(255,255,255,0.6);
+  transition: all 0.3s;
+  border-right: 1px solid rgba(255,255,255,0.06);
+}
+.ev-bytes-seg.highlighted {
+  box-shadow: inset 0 0 0 1.5px #d2a8ff;
+  color: #d2a8ff;
+  font-weight: 700;
+}
+
+/* ── Rust Feature Annotations ────────────────────────────────────────────── */
+
+.ev-rust-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-family: monospace;
+  background: rgba(255,166,87,0.1);
+  color: #ffa657;
+  border: 1px solid rgba(255,166,87,0.2);
+  cursor: help;
+  animation: ev-rust-appear 0.3s ease-out;
+}
+@keyframes ev-rust-appear {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Security Inline (Validation expansion) ──────────────────────────────── */
+
+.ev-security-expand {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.5s ease-out;
+  background: rgba(210,153,34,0.04);
+  border-radius: 4px;
+  margin-top: 0.3rem;
+}
+.ev-security-expand.open { max-height: 400px; }
+
+.ev-sec-step {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.68rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  opacity: 0.3;
+  transition: opacity 0.3s;
+  border-left: 2px solid transparent;
+}
+.ev-sec-step.active { opacity: 1; border-left-color: #d29922; }
+.ev-sec-step.passed { opacity: 0.7; border-left-color: #3fb950; }
+.ev-sec-step .ev-sec-icon { font-size: 0.8rem; }
+.ev-sec-step code { font-size: 0.64rem; }
+
+.ev-safedata-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(45,122,58,0.15);
+  color: #3fb950;
+  font-family: monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid rgba(63,185,80,0.3);
+}
+
+/* ── Scenario Config Panel ───────────────────────────────────────────────── */
+
+.ev-config-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 340px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  z-index: 50;
+  overflow-y: auto;
+  padding: 1rem;
+  transform: translateX(100%);
+  transition: transform 0.25s ease-out;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.3);
+}
+.ev-config-panel.open { transform: translateX(0); }
+
+.ev-config-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ev-config-section {
+  margin-bottom: 0.75rem;
+}
+.ev-config-section h4 {
+  font-size: 0.74rem;
+  color: var(--text2);
+  margin-bottom: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ev-config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+.ev-config-row label {
+  font-size: 0.74rem;
+  min-width: 80px;
+  color: var(--text2);
+}
+.ev-config-row input, .ev-config-row select {
+  flex: 1;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.74rem;
+  font-family: monospace;
+}
+
+.ev-config-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+  margin-top: 0.2rem;
+}
+.ev-config-mini-table th, .ev-config-mini-table td {
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.ev-config-mini-table th { background: var(--surface2); font-weight: 600; }
+.ev-config-add-row {
+  font-size: 0.68rem;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0.15rem 0;
+  display: inline-block;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .ev-tables {
+    grid-template-columns: 1fr;
+  }
+  .ev-table-panel {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .ev-ctx-fields {
+    gap: 0.2rem;
+  }
+  .ev-ctx-field {
+    min-width: 70px;
+  }
+}

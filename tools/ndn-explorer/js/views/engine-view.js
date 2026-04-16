@@ -1,0 +1,1241 @@
+/**
+ * Engine View — ndn-fwd pipeline visualization.
+ *
+ * Renders the forwarding pipeline as an interactive SVG with:
+ * - Left-to-right stage flow for Interest/Data/Nack paths
+ * - Living data structure panels (PIT table, FIB trie, CS grid)
+ * - PacketContext strip showing ownership transfer between stages
+ * - Bytes lifecycle with ref-count tracking
+ * - Rust feature animations (SmallVec, DashMap, hand-over-hand locking)
+ * - Step-by-step animation with configurable speed and scenarios
+ * - Inline security chain walk in the Validation stage
+ *
+ * Everything is HTML/SVG — no Three.js.  Text scales with zoom.
+ * Every element is interactive (hover for design notes, click for details).
+ */
+
+import { LAYER_COLORS } from '../app.js';
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ANIMATION ENGINE — step-based controller that all components subscribe to
+// ═════════════════════════════════════════════════════════════════════════════
+
+class AnimationEngine {
+  constructor() {
+    this.steps = [];
+    this.currentStep = -1;
+    this.speed = 1.0;           // multiplier
+    this.state = 'stopped';     // 'stopped' | 'playing' | 'paused'
+    this.subscribers = [];
+    this._timer = null;
+  }
+
+  loadScenario(steps) {
+    this.reset();
+    this.steps = steps;
+  }
+
+  subscribe(fn) { this.subscribers.push(fn); }
+
+  _notify(direction) {
+    const step = this.steps[this.currentStep];
+    for (const fn of this.subscribers) fn(this.currentStep, step, direction);
+  }
+
+  play() {
+    if (this.steps.length === 0) return;
+    this.state = 'playing';
+    this._scheduleNext();
+  }
+
+  pause() {
+    this.state = 'paused';
+    clearTimeout(this._timer);
+  }
+
+  step() {
+    if (this.currentStep < this.steps.length - 1) {
+      this.currentStep++;
+      this._notify('forward');
+    }
+  }
+
+  stepBack() {
+    if (this.currentStep > 0) {
+      this.currentStep--;
+      this._notify('backward');
+    }
+  }
+
+  reset() {
+    this.state = 'stopped';
+    this.currentStep = -1;
+    clearTimeout(this._timer);
+    this._notify('reset');
+  }
+
+  setSpeed(s) { this.speed = s; }
+
+  _scheduleNext() {
+    if (this.state !== 'playing') return;
+    if (this.currentStep >= this.steps.length - 1) {
+      this.state = 'stopped';
+      return;
+    }
+    const nextStep = this.steps[this.currentStep + 1];
+    // Duration proportional to real latency: 1µs ≈ 800ms at 1x speed
+    const baseMs = (nextStep.durationNs || 1000) / 1000 * 800;
+    const ms = Math.max(200, baseMs / this.speed);
+    this._timer = setTimeout(() => {
+      this.currentStep++;
+      this._notify('forward');
+      this._scheduleNext();
+    }, ms);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  SCENARIO BUILDER — generates animation steps from engine.json + config
+// ═════════════════════════════════════════════════════════════════════════════
+
+const PRESETS = {
+  'interest-cs-miss': {
+    label: 'Interest → CS miss → forward',
+    type: 'interest',
+    name: '/ndn/edu/ucla/cs/class',
+    csHit: false,
+    pitExists: false,
+    fibMatch: '/ndn/edu/ucla',
+    fibFaceId: 3,
+    fibCost: 10,
+  },
+  'interest-cs-hit': {
+    label: 'Interest → CS hit (fastest path)',
+    type: 'interest',
+    name: '/ndn/edu/ucla/cs/class',
+    csHit: true,
+    pitExists: false,
+  },
+  'interest-aggregation': {
+    label: 'Interest aggregation (PIT exists)',
+    type: 'interest',
+    name: '/ndn/edu/ucla/cs/class',
+    csHit: false,
+    pitExists: true,
+  },
+  'interest-loop': {
+    label: 'Loop detection (duplicate nonce)',
+    type: 'interest',
+    name: '/ndn/edu/ucla/cs/class',
+    csHit: false,
+    pitExists: true,
+    duplicateNonce: true,
+  },
+  'data-full': {
+    label: 'Data → validate → PIT match → CS insert',
+    type: 'data',
+    name: '/ndn/edu/ucla/cs/class',
+    securityProfile: 'default',
+    pitExists: true,
+  },
+  'data-unsolicited': {
+    label: 'Data → unsolicited (no PIT entry)',
+    type: 'data',
+    name: '/ndn/edu/ucla/cs/class',
+    securityProfile: 'disabled',
+    pitExists: false,
+  },
+  'data-security-chain': {
+    label: 'Data → full Ed25519 chain walk',
+    type: 'data',
+    name: '/sensor/node1/temp/1712400000',
+    securityProfile: 'default',
+    pitExists: true,
+    certCached: true,
+    schemaRule: '/sensor/<node>/<type> => /sensor/<node>/KEY/<id>',
+  },
+};
+
+function buildSteps(scenario, engineData) {
+  const steps = [];
+  const stages = engineData.pipeline?.stages || {};
+  const timescales = {};
+  for (const [id, s] of Object.entries(stages)) {
+    timescales[id] = parseNs(s.timescale ? Object.values(s.timescale)[0] : '500 ns');
+  }
+
+  // Helper to add a step
+  const add = (opts) => steps.push({
+    stage: opts.stage,
+    durationNs: timescales[opts.stage] || 500,
+    fieldsSet: opts.fieldsSet || [],
+    fieldValues: opts.fieldValues || {},
+    tableOp: opts.tableOp || null,
+    bytesOp: opts.bytesOp || null,
+    rustFeature: opts.rustFeature || null,
+    securityStep: opts.securityStep || null,
+    action: opts.action || 'Continue',
+    detail: opts.detail || '',
+    terminal: opts.terminal || false,
+  });
+
+  if (scenario.type === 'interest') {
+    // Inbound
+    add({
+      stage: 'inbound',
+      fieldsSet: ['raw_bytes', 'face_id', 'arrival'],
+      fieldValues: { raw_bytes: `Bytes(${scenario.name})`, face_id: 'face:1', arrival: 'now()' },
+      bytesOp: { label: 'BytesMut::freeze()', rc: 1, note: 'Kernel recv → Bytes' },
+      detail: `Interest for ${scenario.name} arrives on face 1`,
+    });
+
+    // Decode
+    add({
+      stage: 'decode',
+      durationNs: 681,
+      fieldsSet: ['name', 'packet', 'name_hashes'],
+      fieldValues: { name: `Arc<Name>(${scenario.name})`, packet: 'Interest', name_hashes: 'NameHashes(...)' },
+      bytesOp: { label: 'raw_bytes.clone()', rc: 2, note: 'Interest::decode() — ref-count +1, same allocation' },
+      rustFeature: 'zero_copy',
+      detail: 'TLV parse: Name decoded eagerly, Nonce/Lifetime behind OnceLock<T>',
+    });
+
+    // CS Lookup
+    if (scenario.csHit) {
+      add({
+        stage: 'cs_lookup',
+        durationNs: 856,
+        fieldsSet: ['cs_hit'],
+        fieldValues: { cs_hit: 'true' },
+        tableOp: { table: 'cs', op: 'hit', name: scenario.name },
+        bytesOp: { label: 'CsEntry.data.clone()', rc: 3, note: 'Cache hit returns wire-format Bytes — zero re-encoding' },
+        rustFeature: 'zero_copy',
+        action: 'Satisfy',
+        detail: `CS hit! Cached Data sent directly to consumer. Fastest path: ~1.24µs total.`,
+        terminal: true,
+      });
+    } else {
+      add({
+        stage: 'cs_lookup',
+        durationNs: 622,
+        fieldsSet: ['cs_hit'],
+        fieldValues: { cs_hit: 'false' },
+        tableOp: { table: 'cs', op: 'miss', name: scenario.name },
+        detail: 'CS miss — no cached entry. Continue to PIT.',
+      });
+
+      // PIT Check
+      if (scenario.duplicateNonce) {
+        add({
+          stage: 'pit_check',
+          durationNs: 2580,
+          tableOp: { table: 'pit', op: 'loop_detected', name: scenario.name },
+          rustFeature: 'dashmap',
+          action: 'Drop(LoopDetected)',
+          detail: 'Same nonce seen from different face — forwarding loop detected.',
+          terminal: true,
+        });
+      } else if (scenario.pitExists) {
+        add({
+          stage: 'pit_check',
+          durationNs: 2580,
+          tableOp: { table: 'pit', op: 'aggregate', name: scenario.name, face: 1 },
+          rustFeature: 'smallvec',
+          action: 'Drop(Aggregated)',
+          detail: 'PIT entry exists — Interest aggregated (in-record added), not forwarded again.',
+          terminal: true,
+        });
+      } else {
+        add({
+          stage: 'pit_check',
+          durationNs: 1400,
+          fieldsSet: ['pit_token'],
+          fieldValues: { pit_token: `PitToken(0x${Math.random().toString(16).slice(2,10)})` },
+          tableOp: { table: 'pit', op: 'insert', name: scenario.name, face: 1, nonce: Math.floor(Math.random() * 0xFFFFFFFF) },
+          rustFeature: 'dashmap',
+          detail: 'New PIT entry created. DashMap insert — sharded, lock-free on unrelated names.',
+        });
+
+        // Strategy
+        add({
+          stage: 'strategy',
+          durationNs: 94,
+          fieldsSet: ['out_faces'],
+          fieldValues: { out_faces: `SmallVec[face:${scenario.fibFaceId || 3}]` },
+          tableOp: { table: 'fib', op: 'lpm', name: scenario.name, match: scenario.fibMatch || '/ndn' },
+          rustFeature: 'decide_sync',
+          action: 'Send',
+          detail: `FIB LPM → ${scenario.fibMatch || '/ndn'} (face ${scenario.fibFaceId || 3}, cost ${scenario.fibCost || 10}). BestRoute::decide_sync() — no Box::pin.`,
+          terminal: true,
+        });
+      }
+    }
+  } else if (scenario.type === 'data') {
+    // Inbound
+    add({
+      stage: 'inbound',
+      fieldsSet: ['raw_bytes', 'face_id', 'arrival'],
+      fieldValues: { raw_bytes: `Bytes(${scenario.name})`, face_id: 'face:3', arrival: 'now()' },
+      bytesOp: { label: 'BytesMut::freeze()', rc: 1, note: 'Kernel recv → Bytes' },
+      detail: `Data for ${scenario.name} arrives on face 3`,
+    });
+
+    // Decode
+    add({
+      stage: 'decode',
+      durationNs: 595,
+      fieldsSet: ['name', 'packet', 'name_hashes'],
+      fieldValues: { name: `Arc<Name>(${scenario.name})`, packet: 'Data', name_hashes: 'NameHashes(...)' },
+      bytesOp: { label: 'raw_bytes.clone()', rc: 2, note: 'Data::decode() — ref-count +1' },
+      rustFeature: 'zero_copy',
+      detail: 'TLV parse identifies packet as Data (type 0x06).',
+    });
+
+    // Validation
+    if (scenario.securityProfile === 'disabled') {
+      add({
+        stage: 'validation',
+        durationNs: 724,
+        detail: 'Security profile: Disabled — passthrough (724ns overhead).',
+      });
+    } else {
+      add({
+        stage: 'validation',
+        durationNs: 46300,
+        fieldsSet: ['verified'],
+        fieldValues: { verified: 'true → SafeData' },
+        securityStep: 'full_chain',
+        rustFeature: 'sign_sync',
+        detail: 'Full Ed25519 verification: 46.3µs — 20× the rest of the pipeline.',
+      });
+    }
+
+    // PIT Match
+    if (scenario.pitExists) {
+      add({
+        stage: 'pit_match',
+        durationNs: 1910,
+        fieldsSet: ['out_faces'],
+        fieldValues: { out_faces: 'SmallVec[face:1]' },
+        tableOp: { table: 'pit', op: 'satisfy', name: scenario.name },
+        rustFeature: 'dashmap',
+        action: 'Satisfy',
+        detail: 'PIT match — collected in-record faces, entry removed atomically (DashMap entry API).',
+      });
+    } else {
+      add({
+        stage: 'pit_match',
+        durationNs: 1310,
+        tableOp: { table: 'pit', op: 'miss', name: scenario.name },
+        action: 'Drop(Unsolicited)',
+        detail: 'No PIT entry — unsolicited Data dropped. Security feature: prevents cache pollution.',
+        terminal: true,
+      });
+    }
+
+    // CS Insert (only if PIT matched)
+    if (scenario.pitExists) {
+      add({
+        stage: 'cs_insert',
+        durationNs: 7620,
+        tableOp: { table: 'cs', op: 'insert', name: scenario.name },
+        bytesOp: { label: 'cs.insert(raw_bytes.clone())', rc: 3, note: 'CS stores same Bytes allocation — wire-format preserved' },
+        rustFeature: 'zero_copy',
+        action: 'Satisfy',
+        detail: 'Data cached for future CS hits, then fanned out to all in-record faces.',
+        terminal: true,
+      });
+    }
+  }
+
+  return steps;
+}
+
+function parseNs(str) {
+  if (!str || typeof str !== 'string') return 500;
+  const m = str.match(/([\d.]+)\s*(ns|µs|us|ms)/);
+  if (!m) return 500;
+  const v = parseFloat(m[1]);
+  switch (m[2]) {
+    case 'ns': return v;
+    case 'µs': case 'us': return v * 1000;
+    case 'ms': return v * 1e6;
+    default: return 500;
+  }
+}
+
+function formatNs(ns) {
+  if (ns < 1000) return `${Math.round(ns)} ns`;
+  if (ns < 1e6) return `${(ns/1000).toFixed(1)} µs`;
+  return `${(ns/1e6).toFixed(2)} ms`;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ENGINE VIEW — main class
+// ═════════════════════════════════════════════════════════════════════════════
+
+export class EngineView {
+  constructor(container, app) {
+    this.container = container;
+    this.app = app;
+    this.engine = new AnimationEngine();
+    this.ed = null;          // engine data
+    this._built = false;
+
+    // State for data structures
+    this.pitEntries = [];
+    this.csEntries = [];
+    this.fibRoutes = [
+      { prefix: '/ndn/edu/ucla', nexthops: [{ face: 3, cost: 10 }] },
+      { prefix: '/ndn/edu/mit', nexthops: [{ face: 5, cost: 20 }] },
+      { prefix: '/ndn/com/google', nexthops: [{ face: 2, cost: 5 }] },
+    ];
+
+    // Scenario
+    this.currentPreset = 'interest-cs-miss';
+    this.scenario = { ...PRESETS['interest-cs-miss'] };
+
+    // Config panel
+    this.configOpen = false;
+
+    // Tooltip
+    this.tooltipEl = null;
+  }
+
+  onShow() {
+    if (!this._built) { this._build(); this._built = true; }
+  }
+
+  _build() {
+    this.ed = this.app.engineData;
+    this.container.innerHTML = '';
+    this.container.classList.add('ev-root');
+
+    // Tooltip
+    this.tooltipEl = document.createElement('div');
+    this.tooltipEl.className = 'ev-tooltip';
+    document.body.appendChild(this.tooltipEl);
+
+    // Control bar
+    this._buildControls();
+
+    // Pipeline SVG
+    this._buildPipelineSvg();
+
+    // PacketContext strip
+    this._buildContextStrip();
+
+    // Data structure panels
+    this._buildDataStructures();
+
+    // Bytes lifecycle
+    this._buildBytesLifecycle();
+
+    // Scenario config panel
+    this._buildConfigPanel();
+
+    // Subscribe animation engine
+    this.engine.subscribe((idx, step, dir) => this._onStep(idx, step, dir));
+
+    // Load default scenario
+    this._loadScenario();
+  }
+
+  // ── Control Bar ─────────────────────────────────────────────────────────
+
+  _buildControls() {
+    const bar = document.createElement('div');
+    bar.className = 'ev-controls';
+    bar.innerHTML = `
+      <button class="ev-btn" data-act="play" title="Play animation">&#9654; Play</button>
+      <button class="ev-btn" data-act="pause" title="Pause">&#9646;&#9646;</button>
+      <button class="ev-btn" data-act="step" title="Step forward">&#9654;|</button>
+      <button class="ev-btn" data-act="back" title="Step backward">|&#9664;</button>
+      <button class="ev-btn" data-act="reset" title="Reset">&#8634;</button>
+      <div class="ev-sep"></div>
+      <div class="ev-speed">
+        <span>Speed:</span>
+        <input type="range" min="1" max="8" step="1" value="2" title="Animation speed">
+        <span class="ev-speed-label">1x</span>
+      </div>
+      <div class="ev-sep"></div>
+      <select class="ev-scenario-select" title="Choose scenario">
+        ${Object.entries(PRESETS).map(([k, v]) =>
+          `<option value="${k}" ${k === this.currentPreset ? 'selected' : ''}>${v.label}</option>`
+        ).join('')}
+      </select>
+      <button class="ev-btn" data-act="config" title="Edit scenario">Edit...</button>
+      <span class="ev-step-info" id="ev-step-info">Ready</span>
+    `;
+    this.container.appendChild(bar);
+
+    // Wire buttons
+    bar.querySelectorAll('.ev-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.act;
+        if (act === 'play') this.engine.play();
+        else if (act === 'pause') this.engine.pause();
+        else if (act === 'step') this.engine.step();
+        else if (act === 'back') this.engine.stepBack();
+        else if (act === 'reset') { this.engine.reset(); this._resetVisualization(); }
+        else if (act === 'config') this._toggleConfig();
+      });
+    });
+
+    // Speed slider
+    const speedRange = bar.querySelector('input[type="range"]');
+    const speedLabel = bar.querySelector('.ev-speed-label');
+    const speeds = [0.25, 0.5, 1, 2, 4, 8, 12, 16];
+    speedRange.addEventListener('input', () => {
+      const s = speeds[parseInt(speedRange.value) - 1] || 1;
+      this.engine.setSpeed(s);
+      speedLabel.textContent = `${s}x`;
+    });
+
+    // Scenario select
+    bar.querySelector('.ev-scenario-select').addEventListener('change', (e) => {
+      this.currentPreset = e.target.value;
+      this.scenario = { ...PRESETS[this.currentPreset] };
+      this._loadScenario();
+    });
+  }
+
+  // ── Pipeline SVG ────────────────────────────────────────────────────────
+
+  _buildPipelineSvg() {
+    const wrap = document.createElement('div');
+    wrap.className = 'ev-pipeline-wrap';
+
+    // SVG viewBox designed for a clear left-to-right flow
+    const W = 1100, H = 420;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.classList.add('ev-pipeline-svg');
+    this.svg = svg;
+
+    // Defs: arrowhead marker
+    svg.innerHTML = `<defs>
+      <marker id="ev-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="#58a6ff"/>
+      </marker>
+      <marker id="ev-arrow-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="#ff7b72"/>
+      </marker>
+      <marker id="ev-arrow-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="#3fb950"/>
+      </marker>
+    </defs>`;
+
+    // ── Stage layout ────────────────────────────────────────────────────
+    // Interest path: top lane
+    // Data path: bottom lane
+    // Shared: inbound faces (left), outbound faces (right)
+
+    const stageW = 130, stageH = 60;
+    const laneY_interest = 60;
+    const laneY_data = 230;
+    const laneGap = 170;
+
+    // Interest path stages
+    const interestStages = [
+      { id: 'decode', x: 200, y: laneY_interest, label: 'TLV Decode', time: '681 ns', share: 0.30 },
+      { id: 'cs_lookup', x: 370, y: laneY_interest, label: 'CS Lookup', time: '622-856 ns', share: 0.10 },
+      { id: 'pit_check', x: 540, y: laneY_interest, label: 'PIT Check', time: '1.40 µs', share: 0.15 },
+      { id: 'strategy', x: 710, y: laneY_interest, label: 'Strategy', time: '94 ns', share: 0.20 },
+    ];
+
+    // Data path stages
+    const dataStages = [
+      { id: 'decode', x: 200, y: laneY_data, label: 'TLV Decode', time: '595 ns', share: 0.30 },
+      { id: 'validation', x: 370, y: laneY_data, label: 'Validation', time: '724ns - 46µs', share: 0.0, w: 160 },
+      { id: 'pit_match', x: 580, y: laneY_data, label: 'PIT Match', time: '1.91 µs', share: 0.15 },
+      { id: 'cs_insert', x: 750, y: laneY_data, label: 'CS Insert', time: '1.10 µs', share: 0.10 },
+    ];
+
+    // ── Lane labels ─────────────────────────────────────────────────────
+    this._svgText(svg, 20, laneY_interest + stageH/2, 'INTEREST PATH', 13, '#58a6ff', 'bold');
+    this._svgText(svg, 20, laneY_data + stageH/2, 'DATA PATH', 13, '#3fb950', 'bold');
+
+    // ── Inbound section ─────────────────────────────────────────────────
+    // Faces → mpsc channel → batch drain → decode
+    this._svgRect(svg, 30, 135, 80, 50, 4, '#1a2d50', '#30363d');
+    this._svgText(svg, 70, 155, 'Faces In', 11, '#58a6ff');
+    this._svgText(svg, 70, 168, '(recv loop)', 9, '#8b949e');
+
+    // mpsc channel
+    this._svgRect(svg, 130, 140, 50, 40, 4, '#332211', '#c87533');
+    this._svgText(svg, 155, 157, 'mpsc', 9, '#c87533');
+    this._svgText(svg, 155, 168, '4096', 8, '#8b949e');
+
+    // Arrow: faces → mpsc
+    this._svgArrow(svg, 110, 160, 130, 160, '#58a6ff');
+    // Arrow: mpsc → decode (interest)
+    this._svgArrow(svg, 180, 155, 200, laneY_interest + stageH/2, '#58a6ff');
+    // Arrow: mpsc → decode (data)
+    this._svgArrow(svg, 180, 165, 200, laneY_data + stageH/2, '#3fb950');
+
+    // ── Outbound section ────────────────────────────────────────────────
+    this._svgRect(svg, 910, 135, 80, 50, 4, '#1a3322', '#30363d');
+    this._svgText(svg, 950, 155, 'Faces Out', 11, '#3fb950');
+    this._svgText(svg, 950, 168, '(send queue)', 9, '#8b949e');
+
+    // ── Render Interest stages ──────────────────────────────────────────
+    this.stageEls = {};
+    for (const s of interestStages) {
+      this._renderStage(svg, s, stageW, stageH, '#1a2d50', '#58a6ff');
+    }
+
+    // Interest path arrows
+    for (let i = 0; i < interestStages.length - 1; i++) {
+      const from = interestStages[i], to = interestStages[i + 1];
+      const fW = from.w || stageW;
+      this._svgArrow(svg, from.x + fW, from.y + stageH/2, to.x, to.y + stageH/2, '#58a6ff');
+    }
+    // Strategy → faces out
+    const lastI = interestStages[interestStages.length - 1];
+    this._svgArrow(svg, lastI.x + stageW, lastI.y + stageH/2, 910, 155, '#58a6ff');
+
+    // CS hit short-circuit: cs_lookup → Satisfy (down and left to faces out)
+    const csStage = interestStages[1];
+    this._svgPath(svg, `M${csStage.x + stageW/2},${csStage.y + stageH} L${csStage.x + stageW/2},${csStage.y + stageH + 25} L${910},${csStage.y + stageH + 25}`,
+      '#3fb950', true, 'CS hit → Satisfy');
+
+    // PIT aggregation/loop short-circuit: pit_check → Drop (down)
+    const pitStage = interestStages[2];
+    this._svgPath(svg, `M${pitStage.x + stageW/2},${pitStage.y + stageH} L${pitStage.x + stageW/2},${pitStage.y + stageH + 30}`,
+      '#ff7b72', true, 'Aggregate / Loop → Drop');
+
+    // ── Render Data stages ──────────────────────────────────────────────
+    for (const s of dataStages) {
+      this._renderStage(svg, s, s.w || stageW, stageH, '#1a3322', '#3fb950');
+    }
+
+    // Data path arrows
+    for (let i = 0; i < dataStages.length - 1; i++) {
+      const from = dataStages[i], to = dataStages[i + 1];
+      const fW = from.w || stageW;
+      this._svgArrow(svg, from.x + fW, from.y + stageH/2, to.x, to.y + stageH/2, '#3fb950');
+    }
+    // CS insert → faces out (Satisfy fan-out)
+    const lastD = dataStages[dataStages.length - 1];
+    this._svgArrow(svg, lastD.x + stageW, lastD.y + stageH/2, 910, 165, '#3fb950');
+
+    // Unsolicited drop: pit_match → Drop
+    const pmStage = dataStages[2];
+    this._svgPath(svg, `M${pmStage.x + stageW/2},${pmStage.y + stageH} L${pmStage.x + stageW/2},${pmStage.y + stageH + 30}`,
+      '#ff7b72', true, 'Unsolicited → Drop');
+
+    // ── Packet dot (animated) ───────────────────────────────────────────
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('r', '8');
+    dot.setAttribute('fill', '#58a6ff');
+    dot.setAttribute('cx', '-20');
+    dot.setAttribute('cy', '-20');
+    dot.classList.add('ev-packet-dot');
+    // Glow filter
+    const glow = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+    glow.id = 'ev-glow';
+    glow.innerHTML = '<feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>';
+    svg.querySelector('defs').appendChild(glow);
+    dot.setAttribute('filter', 'url(#ev-glow)');
+    svg.appendChild(dot);
+    this.packetDot = dot;
+
+    // Store stage positions for animation
+    this.stagePositions = {};
+    for (const s of [...interestStages, ...dataStages]) {
+      this.stagePositions[s.id + '_' + (s.y < 200 ? 'interest' : 'data')] = {
+        cx: s.x + (s.w || stageW) / 2,
+        cy: s.y + stageH / 2,
+      };
+    }
+    // Also store inbound/outbound
+    this.stagePositions['inbound_interest'] = { cx: 155, cy: 155 };
+    this.stagePositions['inbound_data'] = { cx: 155, cy: 165 };
+
+    wrap.appendChild(svg);
+    this.container.appendChild(wrap);
+  }
+
+  _renderStage(svg, s, w, h, fill, stroke) {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.classList.add('ev-stage-box');
+    g.dataset.stage = s.id;
+
+    // Background rect
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', s.x); rect.setAttribute('y', s.y);
+    rect.setAttribute('width', w); rect.setAttribute('height', h);
+    rect.setAttribute('rx', '6');
+    rect.setAttribute('fill', fill); rect.setAttribute('stroke', stroke);
+    rect.setAttribute('stroke-width', '1.5');
+    rect.classList.add('ev-stage-rect');
+    g.appendChild(rect);
+
+    // Label
+    this._svgText(g, s.x + w/2, s.y + 20, s.label, 12, '#e6edf3', 'bold');
+
+    // Timing
+    if (s.time) {
+      this._svgText(g, s.x + w/2, s.y + 36, s.time, 10, '#d29922');
+    }
+
+    // Timing bar (proportional width)
+    if (s.share > 0) {
+      const barW = Math.max(8, w * Math.min(s.share * 3, 1));
+      const barColor = s.share < 0.12 ? '#3fb950' : s.share < 0.2 ? '#d29922' : '#ff7b72';
+      const bar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bar.setAttribute('x', s.x + 4); bar.setAttribute('y', s.y + h - 8);
+      bar.setAttribute('width', barW); bar.setAttribute('height', 4);
+      bar.setAttribute('rx', '2'); bar.setAttribute('fill', barColor);
+      bar.setAttribute('opacity', '0.7');
+      g.appendChild(bar);
+    }
+
+    // Hover: show tooltip
+    g.addEventListener('mouseenter', (e) => {
+      const stageData = this.ed?.pipeline?.stages?.[s.id];
+      if (!stageData) return;
+      const reads = (stageData.reads || []).join(', ');
+      const writes = (stageData.writes || []).join(', ');
+      const shorts = (stageData.short_circuits || []).map(sc => `${sc.action}: ${sc.description}`).join('<br>');
+      this.tooltipEl.innerHTML = `
+        <strong>${stageData.chip_label}</strong>
+        <div style="margin:0.2rem 0"><code>${stageData.signature || ''}</code></div>
+        <div><strong>Reads:</strong> ${reads || 'none'} &nbsp; <strong>Writes:</strong> ${writes || 'none'}</div>
+        ${shorts ? `<div style="margin-top:0.2rem"><strong>Short-circuits:</strong><br>${shorts}</div>` : ''}
+        <div style="margin-top:0.3rem">${stageData.design_note || ''}</div>
+        <div class="ev-tt-src">${stageData.source || ''}</div>
+        <div class="ev-tt-time">Timing: ${JSON.stringify(stageData.timescale || {})}</div>
+      `;
+      this._showTooltip(e);
+    });
+    g.addEventListener('mouseleave', () => this._hideTooltip());
+    g.addEventListener('mousemove', (e) => this._moveTooltip(e));
+
+    svg.appendChild(g);
+    this.stageEls[s.id + '_' + (s.y < 200 ? 'interest' : 'data')] = g;
+  }
+
+  // ── PacketContext Strip ──────────────────────────────────────────────────
+
+  _buildContextStrip() {
+    const strip = document.createElement('div');
+    strip.className = 'ev-ctx-strip';
+    strip.innerHTML = `
+      <div class="ev-ctx-header">
+        <span class="ev-ctx-title">PacketContext</span>
+        <span class="ev-ctx-ownership">owned by: <span class="ev-ctx-owner-name" id="ev-ctx-owner">—</span> <span class="ev-rust-badge">move semantics</span></span>
+      </div>
+      <div class="ev-ctx-fields" id="ev-ctx-fields"></div>
+      <div class="ev-ctx-note" id="ev-ctx-note"></div>
+    `;
+    this.container.appendChild(strip);
+
+    const fieldsDiv = strip.querySelector('#ev-ctx-fields');
+    const fields = this.ed?.context_fields || [];
+    for (const f of fields) {
+      const card = document.createElement('div');
+      card.className = 'ev-ctx-field';
+      card.id = `ev-cf-${f.name}`;
+      card.innerHTML = `
+        <span class="ev-ctx-fname">${f.name}</span>
+        <span class="ev-ctx-ftype">${f.type}</span>
+        <span class="ev-ctx-fval" id="ev-cfv-${f.name}"></span>
+      `;
+      card.title = `${f.description}\nSet by: ${f.set_by}`;
+      fieldsDiv.appendChild(card);
+    }
+  }
+
+  // ── Data Structure Panels ───────────────────────────────────────────────
+
+  _buildDataStructures() {
+    const tables = document.createElement('div');
+    tables.className = 'ev-tables';
+
+    // PIT
+    const pitPanel = document.createElement('div');
+    pitPanel.className = 'ev-table-panel';
+    pitPanel.innerHTML = `
+      <div class="ev-table-title">Pending Interest Table <code>DashMap&lt;PitToken, PitEntry&gt;</code></div>
+      <table class="ev-pit-table">
+        <thead><tr><th>Name</th><th>In-Records</th><th>Nonces <span class="ev-rust-badge">SmallVec[4]</span></th><th>Expires</th></tr></thead>
+        <tbody id="ev-pit-body"></tbody>
+      </table>
+    `;
+    tables.appendChild(pitPanel);
+
+    // FIB
+    const fibPanel = document.createElement('div');
+    fibPanel.className = 'ev-table-panel';
+    fibPanel.innerHTML = `
+      <div class="ev-table-title">Forwarding Information Base <code>NameTrie&lt;Arc&lt;FibEntry&gt;&gt;</code></div>
+      <div class="ev-fib-trie" id="ev-fib-trie"></div>
+    `;
+    tables.appendChild(fibPanel);
+    this._renderFibTrie(fibPanel.querySelector('#ev-fib-trie'));
+
+    // CS
+    const csPanel = document.createElement('div');
+    csPanel.className = 'ev-table-panel';
+    csPanel.innerHTML = `
+      <div class="ev-table-title">Content Store <code>dyn ContentStore (LruCs)</code></div>
+      <div class="ev-cs-grid" id="ev-cs-grid"></div>
+      <div class="ev-cs-stats" id="ev-cs-stats">hits: 0 &nbsp; misses: 0 &nbsp; entries: 0</div>
+    `;
+    tables.appendChild(csPanel);
+    this._renderCsGrid(csPanel.querySelector('#ev-cs-grid'));
+
+    this.container.appendChild(tables);
+  }
+
+  _renderFibTrie(container) {
+    // Build a visual trie from fibRoutes
+    const trie = {};
+    for (const route of this.fibRoutes) {
+      const parts = route.prefix.split('/').filter(Boolean);
+      let node = trie;
+      for (const p of parts) {
+        if (!node[p]) node[p] = { _children: {}, _nexthops: null };
+        node = node[p]._children;
+      }
+      // Attach nexthops to the last node... hacky but works for display
+    }
+
+    container.innerHTML = '';
+    const renderNode = (name, depth, prefix) => {
+      const div = document.createElement('div');
+      div.className = 'ev-fib-node';
+      div.dataset.prefix = prefix;
+      div.style.paddingLeft = (depth * 16) + 'px';
+
+      const route = this.fibRoutes.find(r => r.prefix === prefix);
+      let nhHtml = '';
+      if (route) {
+        nhHtml = route.nexthops.map(nh =>
+          `<span class="ev-fib-nexthop">face:${nh.face} cost:${nh.cost}</span>`
+        ).join(' ');
+      }
+
+      div.innerHTML = `
+        <span class="ev-fib-lock" id="ev-fib-lock-${prefix.replace(/\//g, '_')}">&#128274;</span>
+        <span>/${name}</span>
+        ${nhHtml}
+      `;
+      container.appendChild(div);
+    };
+
+    // Hardcoded trie for display
+    renderNode('(root)', 0, '/');
+    renderNode('ndn', 1, '/ndn');
+    renderNode('edu', 2, '/ndn/edu');
+    renderNode('ucla', 3, '/ndn/edu/ucla');
+    renderNode('mit', 3, '/ndn/edu/mit');
+    renderNode('com', 2, '/ndn/com');
+    renderNode('google', 3, '/ndn/com/google');
+  }
+
+  _renderCsGrid(container) {
+    container.innerHTML = '';
+    // Render 8 cells (some empty)
+    for (let i = 0; i < 8; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'ev-cs-cell empty';
+      cell.id = `ev-cs-cell-${i}`;
+      cell.innerHTML = '<span class="ev-cs-name">—</span><div class="ev-cs-freshness" style="width:0"></div>';
+      container.appendChild(cell);
+    }
+    // Pre-populate some entries
+    this._csInsert(0, '/app/video/frame3', 90);
+    this._csInsert(1, '/app/data/item7', 60);
+  }
+
+  _csInsert(cellIdx, name, freshness) {
+    const cell = document.getElementById(`ev-cs-cell-${cellIdx}`);
+    if (!cell) return;
+    cell.classList.remove('empty');
+    cell.classList.add('inserting');
+    cell.querySelector('.ev-cs-name').textContent = name.split('/').slice(-2).join('/');
+    cell.querySelector('.ev-cs-freshness').style.width = freshness + '%';
+    cell.title = `${name}\nFreshness: ${freshness}%\nStored as wire-format Bytes (zero-copy)`;
+    setTimeout(() => cell.classList.remove('inserting'), 400);
+  }
+
+  // ── Bytes Lifecycle ─────────────────────────────────────────────────────
+
+  _buildBytesLifecycle() {
+    const section = document.createElement('div');
+    section.className = 'ev-bytes';
+    const lifecycle = this.ed?.bytes_lifecycle?.stages || [];
+
+    section.innerHTML = `
+      <div class="ev-bytes-title">
+        bytes::Bytes Lifecycle
+        <span class="ev-rust-badge">zero-copy end-to-end</span>
+      </div>
+      <div class="ev-bytes-chain" id="ev-bytes-chain">
+        ${lifecycle.map((s, i) => `
+          <div class="ev-bytes-node" id="ev-bn-${i}" style="border-color:${s.color}">
+            <span class="ev-bytes-label">${s.label}</span>
+            <span class="ev-bytes-rc" id="ev-brc-${i}">rc=${s.refcount}</span>
+            <span class="ev-bytes-op-note" id="ev-bop-${i}"></span>
+          </div>
+          ${i < lifecycle.length - 1 ? '<div class="ev-bytes-arrow"></div>' : ''}
+        `).join('')}
+      </div>
+    `;
+    this.container.appendChild(section);
+  }
+
+  // ── Config Panel ────────────────────────────────────────────────────────
+
+  _buildConfigPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'ev-config-panel';
+    panel.id = 'ev-config-panel';
+    panel.innerHTML = `
+      <div class="ev-config-title">
+        Scenario Configuration
+        <button class="ev-btn" onclick="document.getElementById('ev-config-panel').classList.remove('open')">Close</button>
+      </div>
+      <div class="ev-config-section">
+        <h4>Packet</h4>
+        <div class="ev-config-row">
+          <label>Type</label>
+          <select id="ev-cfg-type">
+            <option value="interest">Interest</option>
+            <option value="data">Data</option>
+          </select>
+        </div>
+        <div class="ev-config-row">
+          <label>Name</label>
+          <input id="ev-cfg-name" value="${this.scenario.name}" placeholder="/ndn/...">
+        </div>
+      </div>
+      <div class="ev-config-section">
+        <h4>Initial State</h4>
+        <div class="ev-config-row">
+          <label>CS has entry</label>
+          <select id="ev-cfg-cs"><option value="0">No (miss)</option><option value="1">Yes (hit)</option></select>
+        </div>
+        <div class="ev-config-row">
+          <label>PIT has entry</label>
+          <select id="ev-cfg-pit"><option value="0">No (new)</option><option value="1">Yes (aggregate)</option></select>
+        </div>
+        <div class="ev-config-row">
+          <label>Security</label>
+          <select id="ev-cfg-sec">
+            <option value="disabled">Disabled</option>
+            <option value="accept-signed">AcceptSigned</option>
+            <option value="default">Default (full chain)</option>
+          </select>
+        </div>
+      </div>
+      <button class="ev-btn" style="width:100%;margin-top:0.5rem;" onclick="document.getElementById('ev-config-panel').classList.remove('open')">
+        Apply & Close
+      </button>
+    `;
+    document.body.appendChild(panel);
+  }
+
+  _toggleConfig() {
+    document.getElementById('ev-config-panel')?.classList.toggle('open');
+  }
+
+  // ── Animation Handler ───────────────────────────────────────────────────
+
+  _loadScenario() {
+    this._resetVisualization();
+    const steps = buildSteps(this.scenario, this.ed || {});
+    this.engine.loadScenario(steps);
+    document.getElementById('ev-step-info').textContent =
+      `${steps.length} steps | ${this.scenario.type} for ${this.scenario.name}`;
+  }
+
+  _resetVisualization() {
+    // Reset context fields
+    this.container.querySelectorAll('.ev-ctx-field').forEach(el => {
+      el.classList.remove('set', 'just-set', 'dropped');
+      const val = el.querySelector('.ev-ctx-fval');
+      if (val) val.textContent = '';
+    });
+    document.getElementById('ev-ctx-owner').textContent = '—';
+    document.getElementById('ev-ctx-note').textContent = '';
+
+    // Reset PIT
+    document.getElementById('ev-pit-body').innerHTML = '';
+    this.pitEntries = [];
+
+    // Reset packet dot
+    this.packetDot.setAttribute('cx', '-20');
+    this.packetDot.setAttribute('cy', '-20');
+
+    // Reset stage highlights
+    Object.values(this.stageEls).forEach(g => g.classList.remove('ev-stage-active'));
+
+    // Reset bytes lifecycle
+    this.container.querySelectorAll('.ev-bytes-node').forEach(el => el.classList.remove('active'));
+
+    // Reset FIB highlights
+    this.container.querySelectorAll('.ev-fib-node').forEach(el => el.classList.remove('matched'));
+    this.container.querySelectorAll('.ev-fib-lock').forEach(el => el.classList.remove('visible'));
+  }
+
+  _onStep(idx, step, direction) {
+    if (!step) return;
+    if (direction === 'reset') { this._resetVisualization(); return; }
+
+    const info = document.getElementById('ev-step-info');
+    if (info) info.textContent = `Step ${idx + 1}/${this.engine.steps.length} | ${step.stage} | ${step.action} | ${formatNs(step.durationNs)}`;
+
+    // ── Move packet dot ──────────────────────────────────────────────
+    const path = this.scenario.type === 'interest' ? 'interest' : 'data';
+    const posKey = step.stage + '_' + path;
+    const pos = this.stagePositions[posKey] || this.stagePositions[step.stage + '_interest'];
+    if (pos) {
+      this.packetDot.setAttribute('cx', pos.cx);
+      this.packetDot.setAttribute('cy', pos.cy);
+      this.packetDot.setAttribute('fill', path === 'interest' ? '#58a6ff' : '#3fb950');
+    }
+
+    // ── Highlight active stage ───────────────────────────────────────
+    Object.values(this.stageEls).forEach(g => g.classList.remove('ev-stage-active'));
+    const activeEl = this.stageEls[posKey] || this.stageEls[step.stage + '_interest'];
+    if (activeEl) activeEl.classList.add('ev-stage-active');
+
+    // ── Update context fields ────────────────────────────────────────
+    for (const field of (step.fieldsSet || [])) {
+      const el = document.getElementById(`ev-cf-${field}`);
+      if (el) {
+        el.classList.add('set', 'just-set');
+        setTimeout(() => el.classList.remove('just-set'), 600);
+      }
+      const valEl = document.getElementById(`ev-cfv-${field}`);
+      if (valEl && step.fieldValues?.[field]) {
+        valEl.textContent = step.fieldValues[field];
+      }
+    }
+
+    // Update ownership label
+    const ownerEl = document.getElementById('ev-ctx-owner');
+    if (ownerEl && step.stage !== 'inbound') ownerEl.textContent = step.stage;
+
+    // Update note
+    const noteEl = document.getElementById('ev-ctx-note');
+    if (noteEl) noteEl.innerHTML = step.detail +
+      (step.rustFeature ? ` <span class="ev-rust-badge">${step.rustFeature}</span>` : '');
+
+    // ── Terminal action: Drop animation ──────────────────────────────
+    if (step.terminal && step.action.startsWith('Drop')) {
+      this.container.querySelectorAll('.ev-ctx-field.set').forEach(el => {
+        el.classList.add('dropped');
+      });
+    }
+
+    // ── Table operations ─────────────────────────────────────────────
+    if (step.tableOp) this._handleTableOp(step.tableOp);
+
+    // ── Bytes lifecycle ──────────────────────────────────────────────
+    if (step.bytesOp) this._handleBytesOp(step.bytesOp, idx);
+
+    // ── FIB LPM animation ────────────────────────────────────────────
+    if (step.tableOp?.table === 'fib' && step.tableOp.op === 'lpm') {
+      this._animateFibLpm(step.tableOp.match);
+    }
+  }
+
+  _handleTableOp(op) {
+    if (op.table === 'pit') {
+      const tbody = document.getElementById('ev-pit-body');
+      if (!tbody) return;
+
+      if (op.op === 'insert') {
+        const tr = document.createElement('tr');
+        tr.className = 'ev-pit-row-enter';
+        tr.id = `ev-pit-${op.name.replace(/\//g, '_')}`;
+        const nonce = op.nonce || Math.floor(Math.random() * 0xFFFFFFFF);
+        tr.innerHTML = `
+          <td>${op.name}</td>
+          <td>face:${op.face || 1}</td>
+          <td>${this._renderSmallVec([nonce], 4)}</td>
+          <td>4s</td>
+        `;
+        tbody.appendChild(tr);
+        this.pitEntries.push(op.name);
+      } else if (op.op === 'aggregate') {
+        const existing = document.getElementById(`ev-pit-${op.name.replace(/\//g, '_')}`);
+        if (existing) {
+          // Add in-record
+          const inCell = existing.cells[1];
+          if (inCell) inCell.textContent += `, face:${op.face || 2}`;
+        }
+      } else if (op.op === 'satisfy') {
+        const row = document.getElementById(`ev-pit-${op.name.replace(/\//g, '_')}`);
+        if (row) row.classList.add('ev-pit-row-satisfied');
+      } else if (op.op === 'loop_detected' || op.op === 'miss') {
+        // Drop visual on existing row if any
+        const row = document.getElementById(`ev-pit-${op.name.replace(/\//g, '_')}`);
+        if (row && op.op !== 'miss') row.classList.add('ev-pit-row-dropped');
+      }
+    } else if (op.table === 'cs') {
+      if (op.op === 'hit') {
+        // Flash the matching cell
+        const cells = document.querySelectorAll('.ev-cs-cell:not(.empty)');
+        cells.forEach(c => {
+          if (c.querySelector('.ev-cs-name')?.textContent?.includes(op.name.split('/').pop())) {
+            c.classList.add('hit');
+            setTimeout(() => c.classList.remove('hit'), 500);
+          }
+        });
+        // Update stats
+        this._updateCsStats(1, 0);
+      } else if (op.op === 'miss') {
+        this._updateCsStats(0, 1);
+      } else if (op.op === 'insert') {
+        // Find first empty cell
+        for (let i = 0; i < 8; i++) {
+          const cell = document.getElementById(`ev-cs-cell-${i}`);
+          if (cell?.classList.contains('empty')) {
+            this._csInsert(i, op.name, 100);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  _updateCsStats(hits, misses) {
+    const el = document.getElementById('ev-cs-stats');
+    if (!el) return;
+    const cur = el.textContent.match(/hits:\s*(\d+)\s+misses:\s*(\d+)/);
+    const h = parseInt(cur?.[1] || 0) + hits;
+    const m = parseInt(cur?.[2] || 0) + misses;
+    const entries = document.querySelectorAll('.ev-cs-cell:not(.empty)').length;
+    el.textContent = `hits: ${h}   misses: ${m}   entries: ${entries}`;
+  }
+
+  _handleBytesOp(op, stepIdx) {
+    // Light up the corresponding bytes lifecycle node
+    const nodeEl = document.getElementById(`ev-bn-${Math.min(stepIdx, 6)}`);
+    if (nodeEl) {
+      nodeEl.classList.add('active');
+      const rcEl = nodeEl.querySelector('.ev-bytes-rc');
+      if (rcEl) {
+        rcEl.textContent = `rc=${op.rc}`;
+        rcEl.classList.add('bumped');
+        setTimeout(() => rcEl.classList.remove('bumped'), 400);
+      }
+      const noteEl = nodeEl.querySelector('.ev-bytes-op-note');
+      if (noteEl) noteEl.textContent = op.note || '';
+    }
+  }
+
+  _animateFibLpm(matchPrefix) {
+    // Highlight matching nodes in the FIB trie with hand-over-hand locking
+    const parts = matchPrefix.split('/').filter(Boolean);
+    let prefix = '';
+    let delay = 0;
+    for (const part of parts) {
+      prefix += '/' + part;
+      const nodeEl = this.container.querySelector(`.ev-fib-node[data-prefix="${prefix}"]`);
+      if (nodeEl) {
+        setTimeout(() => {
+          nodeEl.classList.add('matched');
+          // Show lock briefly
+          const lockEl = nodeEl.querySelector('.ev-fib-lock');
+          if (lockEl) {
+            lockEl.classList.add('visible');
+            // Hand-over-hand: release after 300ms (before next node locks)
+            setTimeout(() => lockEl.classList.remove('visible'), 300);
+          }
+        }, delay);
+        delay += 250;
+      }
+    }
+  }
+
+  _renderSmallVec(values, capacity) {
+    let html = '<span class="ev-smallvec">';
+    for (let i = 0; i < capacity; i++) {
+      html += `<span class="ev-sv-slot ${i < values.length ? 'filled' : 'empty'}"></span>`;
+    }
+    html += `<span class="ev-sv-label">stack[${capacity}]</span>`;
+    if (values.length > capacity) {
+      html += `<span class="ev-sv-spill">+${values.length - capacity} heap</span>`;
+    }
+    html += '</span>';
+    return html;
+  }
+
+  // ── SVG Helpers ─────────────────────────────────────────────────────────
+
+  _svgText(parent, x, y, text, size, fill, weight) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    el.setAttribute('x', x); el.setAttribute('y', y);
+    el.setAttribute('font-size', size); el.setAttribute('fill', fill);
+    el.setAttribute('text-anchor', 'middle'); el.setAttribute('dominant-baseline', 'central');
+    if (weight) el.setAttribute('font-weight', weight);
+    el.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+    el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
+  _svgRect(parent, x, y, w, h, r, fill, stroke) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    el.setAttribute('x', x); el.setAttribute('y', y);
+    el.setAttribute('width', w); el.setAttribute('height', h);
+    el.setAttribute('rx', r || 0);
+    el.setAttribute('fill', fill); el.setAttribute('stroke', stroke || 'none');
+    el.setAttribute('stroke-width', '1');
+    parent.appendChild(el);
+    return el;
+  }
+
+  _svgArrow(parent, x1, y1, x2, y2, color) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    el.setAttribute('x1', x1); el.setAttribute('y1', y1);
+    el.setAttribute('x2', x2); el.setAttribute('y2', y2);
+    el.setAttribute('stroke', color); el.setAttribute('stroke-width', '1.5');
+    el.setAttribute('marker-end', `url(#ev-arrow)`);
+    el.classList.add('ev-trace');
+    parent.appendChild(el);
+    return el;
+  }
+
+  _svgPath(parent, d, color, dashed, label) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    el.setAttribute('d', d);
+    el.setAttribute('stroke', color); el.setAttribute('stroke-width', '1.5');
+    el.setAttribute('fill', 'none');
+    if (dashed) el.setAttribute('stroke-dasharray', '5,3');
+    el.classList.add('ev-trace');
+    parent.appendChild(el);
+
+    if (label) {
+      // Parse midpoint from path
+      const pts = d.match(/([\d.]+)/g);
+      if (pts && pts.length >= 4) {
+        const mx = (parseFloat(pts[0]) + parseFloat(pts[pts.length - 2])) / 2;
+        const my = (parseFloat(pts[1]) + parseFloat(pts[pts.length - 1])) / 2;
+        this._svgText(parent, mx + 30, my, label, 9, color);
+      }
+    }
+    return el;
+  }
+
+  // ── Tooltip ─────────────────────────────────────────────────────────────
+
+  _showTooltip(e) {
+    this.tooltipEl.style.display = 'block';
+    this._moveTooltip(e);
+  }
+  _moveTooltip(e) {
+    this.tooltipEl.style.left = (e.clientX + 15) + 'px';
+    this.tooltipEl.style.top = (e.clientY - 10) + 'px';
+  }
+  _hideTooltip() {
+    this.tooltipEl.style.display = 'none';
+  }
+}
